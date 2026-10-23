@@ -115,14 +115,6 @@ QA opt-in chụp 41 trạng thái UI và tự đóng ứng dụng:
 
 TLS mã hóa đường truyền, PBKDF2/salt bảo vệ mật khẩu lưu; SQLite/backup không tự được mã hóa. Hạn chế quyền file Server, không mở ra Internet. Cần nghiệm thu checklist nhiều máy vật lý trong hướng dẫn; kiểm thử loopback không chứng minh cấu hình firewall/Wi-Fi của lớp.
 
-## Phân công và bước tiếp theo
-
-| Thành viên | Chủ trì | Module chính |
-| --- | --- | --- |
-| Phạm Phúc Thiện, nhóm trưởng | F01 F02 F04 F05 F12 | Server, TCP/TLS, login/PBKDF2, role/owner, phòng, lỗi, tích hợp |
-| Trịnh Viết Mỹ | F03 F09 F11 | JavaFX quản lý/login/tài khoản, SQLite users/owner, câu hỏi, điểm/lịch sử |
-| Nguyễn Trường Thi | F06 F07 F08 F10 | JavaFX chọn vai trò/học sinh, client-core/TLS, vòng câu và bảng hạng |
-
 Các phần backend và tích hợp UI đã triển khai; chưa đánh dấu toàn bộ gate P1–P8 hoàn thành vì còn nghiệm thu nhiều máy, DPI/máy chiếu và SFX trên loa thực tế. Test 10 Client TLS cùng máy không phải benchmark hay bằng chứng tải mọi LAN.
 
 Test tự động: framing/TLS/answer state, Server với SQLite thật, auth/owner/khóa/reset, trùng câu, tranh avatar, 10 Client, chấm/hạng/lưu sau restart và hash/định dạng 17 WAV. Kiểm thử `LiveLanUiCheck` đi qua form JavaFX thật → TLS → Server, có ảnh trong `output/lan-ui-qa/`. Hồi quy UI 41 trạng thái trong `output/ui-lan-regression/` được chạy từ bundle. Số test và kết quả cập nhật ở `docs/Nghiem_thu_Server_LAN.md`.
