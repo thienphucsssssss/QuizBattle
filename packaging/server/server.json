@@ -1,0 +1,23 @@
+{
+  "server": {
+    "bind": "127.0.0.1",
+    "port": 5050,
+    "maxPlayers": 10,
+    "maxConnections": 32
+  },
+  "registration": { "enabled": true },
+  "discovery": { "port": 5051 },
+  "database": {
+    "path": "data/quiz.db"
+  },
+  "tls": {
+    "keyStore": "certs/server.p12",
+    "password": "",
+    "passwordProtected": ""
+  },
+  "bootstrap": {
+    "adminUsername": "admin",
+    "adminPassword": "",
+    "adminPasswordProtected": ""
+  }
+}

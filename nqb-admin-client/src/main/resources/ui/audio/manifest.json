@@ -1,0 +1,189 @@
+[
+  {
+    "file": "ui_press.wav",
+    "description": "Button press — muted wood + warm tactile pluck",
+    "duration_seconds": 0.19,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -6.380000114440918,
+    "rms_dbfs": -20.030000686645508,
+    "sha256": "d947c191eac5f38a7bb28bac7544bc72319a759fc37f33ee2ec1f3663b26b9cb"
+  },
+  {
+    "file": "ui_select.wav",
+    "description": "Selection — bouncy upward rounded pop",
+    "duration_seconds": 0.29,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.849999904632568,
+    "rms_dbfs": -18.149999618530273,
+    "sha256": "e144b3c7160156e643babb993571feda7182c57daa37e6cfce7347ef377fd839"
+  },
+  {
+    "file": "ui_transition.wav",
+    "description": "Panel movement — airy sweep + soft closing latch",
+    "duration_seconds": 0.48,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.849999904632568,
+    "rms_dbfs": -19.450000762939453,
+    "sha256": "5800d348c24f430543c2ccee87a68c4228312d86c4623936312174e1e9f7418e"
+  },
+  {
+    "file": "ui_success.wav",
+    "description": "Success — two warm chimes, gentle resolution",
+    "duration_seconds": 0.73,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -4.730000019073486,
+    "rms_dbfs": -16.559999465942383,
+    "sha256": "baf032dc637d059fafec846c1053b75e55db8c6f640bf61b4bcfe5b88e63497d"
+  },
+  {
+    "file": "ui_warning.wav",
+    "description": "Warning — two hollow mid-register wood knocks",
+    "duration_seconds": 0.62,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.849999904632568,
+    "rms_dbfs": -18.850000381469727,
+    "sha256": "dd4e6c5e35aeecbe836395ab687f2285b9a9c6b0f53509866f9c02191f45830a"
+  },
+  {
+    "file": "ui_error.wav",
+    "description": "Error — low restrained bonk + down-bend",
+    "duration_seconds": 0.55,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.039999961853027,
+    "rms_dbfs": -18.170000076293945,
+    "sha256": "cd26d58876d2a8a71c0884af284593eebbd4f86936f2377275558197c123f945"
+  },
+  {
+    "file": "connection_up.wav",
+    "description": "Connected — packet pulses resolving into chord",
+    "duration_seconds": 0.92,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.039999961853027,
+    "rms_dbfs": -18.719999313354492,
+    "sha256": "8dc809b9ca7be3bc76f9793b71c59abc509ad3b8399b8c83e1abf4b7fa757e39"
+  },
+  {
+    "file": "connection_down.wav",
+    "description": "Disconnected — stuttering descending digital tones",
+    "duration_seconds": 0.88,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.349999904632568,
+    "rms_dbfs": -16.399999618530273,
+    "sha256": "b5e309aa1b7180629121513d515d64f8fa9e8dc4d807b0ff5a7ff60485957a83"
+  },
+  {
+    "file": "player_join.wav",
+    "description": "New player — buoyant ascending bubble",
+    "duration_seconds": 0.44,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.849999904632568,
+    "rms_dbfs": -16.530000686645508,
+    "sha256": "74522a4451e4917b6b52a61e0ea42267cdcc907910d23ccd1284af3daf96173a"
+  },
+  {
+    "file": "player_ready.wav",
+    "description": "Ready — double mechanical latch + decisive chord",
+    "duration_seconds": 0.49,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.349999904632568,
+    "rms_dbfs": -17.690000534057617,
+    "sha256": "4202d65ce58ac93495c22791d957fe389a81ee54925b60aebc222f3d8cba559b"
+  },
+  {
+    "file": "countdown_tick.wav",
+    "description": "Countdown — compact woody timekeeping pulse",
+    "duration_seconds": 0.2,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.849999904632568,
+    "rms_dbfs": -21.979999542236328,
+    "sha256": "3a8c3a0fd59cafafc68a2caef35e0d1401382f10d8e5100e46c9fe97fecfddb8"
+  },
+  {
+    "file": "round_open.wav",
+    "description": "Question opens — uplifting stepped motif + soft sweep",
+    "duration_seconds": 0.9,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -4.289999961853027,
+    "rms_dbfs": -17.850000381469727,
+    "sha256": "5a652b3f5673be7abd3faa4a47acea83cf0466e20a4e282f84fa5a75961f3774"
+  },
+  {
+    "file": "round_close.wav",
+    "description": "Question closes — falling tones + wooden seal",
+    "duration_seconds": 0.7,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -4.730000019073486,
+    "rms_dbfs": -18.1299991607666,
+    "sha256": "be9a72b02b46d899a4c0723012bc13c698475963f7e712173c49a9137353449e"
+  },
+  {
+    "file": "answer_ack.wav",
+    "description": "Answer accepted — precise neutral digital double-lock",
+    "duration_seconds": 0.39,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.510000228881836,
+    "rms_dbfs": -19.489999771118164,
+    "sha256": "a8ff8bad5be88c1baad0246fb56e53070d770e734a970af7c0d2343e57f0a5d6"
+  },
+  {
+    "file": "answer_correct.wav",
+    "description": "Correct answer — satisfying 4-tone rising success flourish",
+    "duration_seconds": 1.21,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -3.4800000190734863,
+    "rms_dbfs": -15.6899995803833,
+    "sha256": "e9b0ef2c30fa42872409751470b5304e704f6375deaf07a0062cb40070925eec"
+  },
+  {
+    "file": "answer_wrong.wav",
+    "description": "Wrong answer — gentle rubbery descent + soft plunk",
+    "duration_seconds": 0.83,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -5.039999961853027,
+    "rms_dbfs": -16.770000457763672,
+    "sha256": "7322b31015b383799652ab47537ec1ed77a6d06a240a1d71f36e319c65acd9b0"
+  },
+  {
+    "file": "match_finish.wav",
+    "description": "Match complete — warm original arcade fanfare",
+    "duration_seconds": 1.93,
+    "sample_rate_hz": 44100,
+    "channels": 1,
+    "bit_depth": 16,
+    "peak_dbfs": -3.0999999046325684,
+    "rms_dbfs": -16.649999618530273,
+    "sha256": "0fd6668efea1fd536487c7c77c27e3fd55de77f8645b607c1b89e90ccb2c8df0"
+  }
+]

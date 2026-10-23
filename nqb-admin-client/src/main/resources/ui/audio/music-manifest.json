@@ -1,0 +1,22 @@
+[
+  {
+    "track": "GAME",
+    "file": "music_game.wav",
+    "original_file": "Network_Quiz_Battle_BGM_Seamless_Loop (1).wav",
+    "sha256": "4188583eeb8fc701ac30e421d3e67f04189442948bf6570efdcc8236d5585b17",
+    "sample_rate": 44100,
+    "channels": 2,
+    "bits": 16,
+    "loop": true
+  },
+  {
+    "track": "VICTORY",
+    "file": "music_victory.wav",
+    "original_file": "High_Score_Glory.wav",
+    "sha256": "9508b70c909dd51ed447c6c090242f4da0286fabe51b96cc226dec10488fccbe",
+    "sample_rate": 44100,
+    "channels": 2,
+    "bits": 16,
+    "loop": false
+  }
+]

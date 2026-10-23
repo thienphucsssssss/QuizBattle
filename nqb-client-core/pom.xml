@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>vn.edu.hutech.nqb</groupId><artifactId>network-quiz-battle</artifactId><version>0.2.0-SNAPSHOT</version></parent>
+    <artifactId>nqb-client-core</artifactId>
+    <dependencies>
+        <dependency><groupId>vn.edu.hutech.nqb</groupId><artifactId>nqb-shared</artifactId><version>${project.version}</version></dependency>
+    </dependencies>
+</project>

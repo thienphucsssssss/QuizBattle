@@ -1,0 +1,164 @@
+.root {
+    -ink: #202146; -cream: #f4f6fc; -mint: #c5f45b; -muted: #56617a;
+    -line: #d7ddeb; -surface: #ffffff; -orange: #ff936b;
+    -fx-font-family: "Be Vietnam Pro"; -fx-font-size: 15px;
+    -fx-background-color: -cream; -fx-text-fill: -ink;
+}
+.label { -fx-text-fill: -ink; }
+.muted { -fx-text-fill: -muted; -fx-font-size: 13px; }
+.caption { -fx-font-size: 12px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-text-fill: -muted; }
+.label.title { -fx-font-size: 30px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.subtitle { -fx-font-size: 20px; -fx-font-family: "Be Vietnam Pro SemiBold"; }
+.brand { -fx-font-size: 18px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.hero-title { -fx-font-size: 64px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.game-title { -fx-font-size: 32px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.room-code { -fx-font-size: 66px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.counter { -fx-font-size: 40px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.sidebar { -fx-background-color: #202857; -fx-padding: 28 16 20 16; }
+.sidebar .label { -fx-text-fill: -cream; }
+.sidebar .muted { -fx-text-fill: #b4c0d0; }
+.sidebar .brand { -fx-font-size: 15px; }
+.sidebar .nav { -fx-background-color: transparent; -fx-text-fill: #d4dce8; -fx-alignment: CENTER_LEFT; -fx-padding: 13 16; -fx-background-radius: 10; }
+.sidebar .nav:hover { -fx-background-color: #26364b; }
+.sidebar .nav.selected { -fx-background-color: -mint; -fx-text-fill: -ink; -fx-font-weight: bold; }
+.button { -fx-cursor: hand; -fx-background-radius: 14; -fx-border-radius: 14; -fx-border-color: transparent; -fx-border-width: 2; -fx-padding: 10 18; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-background-color: #e8ecf7; -fx-text-fill: -ink; -fx-min-height: 44; }
+.button:hover { -fx-background-color: #d9dfd3; }
+.button:pressed { -fx-opacity: 0.85; }
+.button:focused, .text-input:focused, .combo-box:focused, .check-box:focused { -fx-border-color: #256c90; -fx-border-width: 2; -fx-border-radius: 10; }
+.button:disabled { -fx-opacity: 0.6; }
+.primary { -fx-background-color: -mint; -fx-text-fill: -ink; }
+.primary:hover { -fx-background-color: #a5df59; }
+.ink-button { -fx-background-color: #334dde; -fx-text-fill: white; }
+.ink-button:hover { -fx-background-color: #223ac6; }
+.danger { -fx-background-color: #fbe2de; -fx-text-fill: #9c3026; }
+.quiet { -fx-background-color: transparent; -fx-border-color: -line; }
+.link-button { -fx-background-color: transparent; -fx-text-fill: #245d7a; }
+.text-input { -fx-background-color: -surface; -fx-text-fill: -ink; -fx-prompt-text-fill: #6a7480; -fx-border-color: #b2bdb9; -fx-border-radius: 10; -fx-background-radius: 10; -fx-padding: 10 12; -fx-border-width: 1; }
+.text-area .content { -fx-background-color: white; }
+.combo-box { -fx-background-color: white; -fx-border-color: #b2bdb9; -fx-border-radius: 10; -fx-background-radius: 10; -fx-padding: 5; }
+.combo-box .list-cell { -fx-text-fill: -ink; }
+.panel { -fx-background-color: white; -fx-background-radius: 16; -fx-padding: 24; }
+.outlined { -fx-border-color: -line; -fx-border-radius: 14; -fx-padding: 20; }
+.status { -fx-background-color: #e0ecd2; -fx-text-fill: #304b21; -fx-padding: 6 12; -fx-background-radius: 8; -fx-font-size: 12px; -fx-font-weight: bold; }
+.preview { -fx-background-color: #ffe7b0; -fx-text-fill: #674211; -fx-padding: 8 16; -fx-font-size: 12px; }
+.feedback { -fx-background-color: #e0ecd2; -fx-text-fill: #304b21; -fx-padding: 10 16; -fx-background-radius: 8; }
+.feedback.error { -fx-background-color: #fbe2de; -fx-text-fill: #9c3026; }
+.table-view { -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0; }
+.table-view .column-header-background { -fx-background-color: #e9ebe2; -fx-background-radius: 8 8 0 0; }
+.table-view .column-header { -fx-background-color: transparent; -fx-size: 40; -fx-border-color: transparent; }
+.table-view .column-header .label { -fx-text-fill: -muted; -fx-font-size: 12px; -fx-font-weight: bold; -fx-alignment: CENTER_LEFT; }
+.table-row-cell { -fx-background-color: white; -fx-cell-size: 54; -fx-border-color: transparent transparent #e8eae3 transparent; }
+.table-row-cell:odd { -fx-background-color: #fbfcf8; }
+.table-row-cell:selected { -fx-background-color: #e2f5cf; }
+.table-row-cell:selected .text { -fx-fill: -ink; }
+.table-cell { -fx-border-color: transparent; -fx-alignment: CENTER_LEFT; -fx-padding: 8; }
+.table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
+.scroll-pane, .scroll-pane > .viewport { -fx-background-color: transparent; }
+.scroll-bar:horizontal, .scroll-bar:vertical { -fx-background-color: transparent; }
+.scroll-bar .thumb { -fx-background-color: #bec8bd; -fx-background-radius: 8; }
+.separator .line { -fx-border-color: -line; }
+.game { -fx-background-color: #2438aa; }
+.game .label { -fx-text-fill: -cream; }
+.game .muted, .game .caption { -fx-text-fill: #d4ddff; }
+.game .status { -fx-background-color: #304431; -fx-text-fill: -mint; }
+.game .panel { -fx-background-color: #3048bd; }
+.game .button { -fx-border-color: transparent; }
+.game .quiet, .game .link-button { -fx-text-fill: -cream; -fx-border-color: #77879d; }
+.game .quiet:hover, .game .link-button:hover { -fx-background-color: #4055c8; }
+.game .preview { -fx-text-fill: #674211; }
+.game .button:focused { -fx-border-color: white; -fx-border-width: 3; }
+.answer { -fx-background-radius: 22; -fx-border-radius: 22; -fx-padding: 24; -fx-alignment: CENTER_LEFT; -fx-min-height: 122; -fx-font-size: 19px; -fx-font-weight: bold; -fx-effect: dropshadow(gaussian, #17267c, 0, 0, 0, 6); }
+.answer.a { -fx-background-color: -orange; }
+.answer.b { -fx-background-color: #6fdfed; }
+.answer.c { -fx-background-color: -mint; }
+.answer.d { -fx-background-color: #c6b3ff; }
+.answer .label { -fx-text-fill: -ink; }
+.answer:hover { -fx-opacity: 0.9; }
+.answer.chosen { -fx-border-color: white; -fx-border-width: 4; }
+.answer:disabled { -fx-opacity: 0.72; }
+.answer.chosen:disabled { -fx-opacity: 1; }
+.answer:disabled .label { -fx-opacity: 1; }
+.answer-letter { -fx-font-size: 25px; -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-background-color: rgba(255,255,255,.4); -fx-background-radius: 12; -fx-min-width: 44; -fx-min-height: 44; -fx-alignment: CENTER; }
+.game .timer { -fx-text-fill: -mint; -fx-font-size: 44px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.game .feedback { -fx-background-color: #2b453b; -fx-text-fill: #d6f3c2; }
+.game .feedback.error { -fx-background-color: #533731; -fx-text-fill: #ffd5ce; }
+.game .score { -fx-text-fill: -mint; -fx-font-size: 68px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
+.game .ranking-row { -fx-background-color: #f6f8ff; -fx-background-radius: 18; -fx-padding: 8 20; }
+.game .ranking-row .label { -fx-text-fill: -ink; }
+.game .ranking-row.own-rank { -fx-background-color: -mint; }
+.game .podium { -fx-background-color: #c5f45b; -fx-background-radius: 22; -fx-padding: 14; }
+.game .podium .label { -fx-text-fill: -ink; }
+.titled-pane > .title { -fx-background-color: #e8e9e0; -fx-background-radius: 10; -fx-font-size: 14px; -fx-padding: 12; }
+.avatar { -fx-background-color: #e0ecd2; -fx-background-radius: 24; -fx-padding: 10; -fx-min-width: 42; -fx-alignment: CENTER; -fx-font-weight: bold; }
+.game .avatar { -fx-background-color: -mint; -fx-text-fill: -ink; }
+.dialog-pane { -fx-background-color: -cream; -fx-padding: 24; }
+.dialog-pane .header-panel { -fx-background-color: -cream; }
+.dialog-pane .header-panel .label { -fx-font-size: 22px; -fx-font-weight: bold; }
+.dialog-pane .button-bar { -fx-padding: 18 0 0 0; }
+.progress-bar .track { -fx-background-color: #d7dccc; -fx-background-radius: 4; }
+.progress-bar .bar { -fx-background-color: -ink; -fx-background-radius: 4; -fx-background-insets: 0; }
+.game .progress-bar .track { -fx-background-color: #34465b; }
+.game .progress-bar .bar { -fx-background-color: -mint; }
+.toggle-button { -fx-background-color: transparent; -fx-text-fill: -ink; -fx-padding: 8 14; -fx-border-color: -line; -fx-border-radius: 8; -fx-background-radius: 8; }
+.toggle-button:selected { -fx-background-color: -ink; -fx-text-fill: -cream; }
+
+/* Biệt đội Quiz — product identity, original characters and short utility copy. */
+.welcome { -fx-background-color: #3049d5; }
+.hero-title { -fx-line-spacing: -10; -fx-text-fill: white; }
+.eyebrow { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 13px; }
+.game .eyebrow { -fx-text-fill: -mint; }
+.room-banner { -fx-background-color: #334dde; -fx-background-radius: 24; -fx-padding: 22 28; }
+.room-banner .label { -fx-text-fill: white; }
+.room-banner .room-code { -fx-text-fill: -mint; -fx-font-size: 60px; }
+.room-banner .quiet { -fx-text-fill: white; -fx-border-color: #99aaff; }
+.room-banner .quiet:hover { -fx-background-color: #4058d8; }
+.player-seat { -fx-padding: 8 10 16 10; }
+.game .player-seat .subtitle { -fx-font-size: 18px; }
+.rank-number { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 30px; }
+.rank-score { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 26px; -fx-alignment: CENTER_RIGHT; }
+.rank-movement { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; }
+.avatar-choice { -fx-padding: 6; -fx-background-color: #ecf0fc; -fx-background-radius: 18; -fx-border-radius: 18; }
+.avatar-choice:hover { -fx-background-color: #dce4ff; }
+.avatar-choice:disabled { -fx-opacity: 1; -fx-background-color: #e7ebf5; }
+.avatar-choice:disabled .label { -fx-opacity: 1; -fx-text-fill: #54607b; }
+.rank-avatar { -fx-background-color: rgba(255,255,255,.8); -fx-background-radius: 30; }
+.avatar-choice .caption { -fx-text-fill: #343e60; }
+.avatar-choice.avatar-selected { -fx-background-color: #e4fac0; -fx-border-color: #476f12; -fx-border-width: 2; }
+.table-view .column-header-background { -fx-background-color: #e9edf8; }
+.table-row-cell:odd { -fx-background-color: #fafbff; }
+.table-row-cell:selected { -fx-background-color: #e1e8ff; }
+.game .progress-bar .track { -fx-background-color: #172980; }
+.game .status { -fx-background-color: #182879; -fx-text-fill: white; -fx-background-radius: 12; }
+.game .feedback { -fx-background-color: #172980; -fx-text-fill: white; }
+.game .timer { -fx-background-color: #172980; -fx-background-radius: 22; -fx-padding: 4 18; }
+.lan-mode { -fx-background-color: white; -fx-text-fill: #202146; -fx-background-radius: 14; -fx-padding: 12 16; -fx-cursor: hand; }
+.lan-mode:selected { -fx-background-color: #3049d5; -fx-text-fill: white; }
+.lan-mode:focused { -fx-border-color: #256c90; -fx-border-width: 2; -fx-border-radius: 14; }
+#lan-rooms .list-cell { -fx-padding: 12; }
+#lan-rooms .list-cell:filled:selected { -fx-background-color: #e1e8ff; }
+#lan-rooms { -fx-background-color: white; -fx-border-color: -line; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 4; }
+#lan-rooms .list-cell:empty { -fx-background-color: white; }
+.import-correct { -fx-background-color: #e4fac0; -fx-text-fill: #264400; -fx-padding: 8 12; -fx-background-radius: 10; }
+.import-option { -fx-padding: 3 12; }
+.import-warning { -fx-text-fill: #7c4a05; }
+#import-detail { -fx-padding: 10; -fx-background-color: white; -fx-background-radius: 12; }
+#import-status { -fx-min-height: 42; }
+.root { -medal-gold: #ffd66e; -medal-silver: #dbe5f6; -medal-bronze: #ffb18d; }
+.victory-podium { -fx-padding: 4 0 0 0; }
+.winner-frame { -fx-background-color: #f4f6fc; -fx-background-radius: 200; -fx-border-radius: 200; -fx-border-width: 5; }
+.medal-gold .winner-frame { -fx-border-color: -medal-gold; }
+.medal-silver .winner-frame { -fx-border-color: -medal-silver; }
+.medal-bronze .winner-frame { -fx-border-color: -medal-bronze; }
+.game .winner-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 19px; -fx-text-fill: white; -fx-text-alignment: center; }
+.game .winner-score { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 24px; -fx-text-fill: white; }
+.victory-bar { -fx-background-radius: 18 18 4 4; -fx-padding: 2 12; }
+.medal-gold .victory-bar, .medal-gold .medal-face { -fx-background-color: -medal-gold; -fx-fill: -medal-gold; }
+.medal-silver .victory-bar, .medal-silver .medal-face { -fx-background-color: -medal-silver; -fx-fill: -medal-silver; }
+.medal-bronze .victory-bar, .medal-bronze .medal-face { -fx-background-color: -medal-bronze; -fx-fill: -medal-bronze; }
+.game .podium-place { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 50px; -fx-text-fill: -ink; }
+.game .compact-podium .podium-place { -fx-font-size: 36px; }
+.game .podium-caption { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; -fx-text-fill: -ink; }
+.medal-face { -fx-stroke: #202146; -fx-stroke-width: 1.5; }
+.medal-ring { -fx-stroke: #202146; -fx-stroke-width: 1; -fx-opacity: .4; }
+.medal-ribbon { -fx-fill: #ee6c83; }
+.game .medal-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
