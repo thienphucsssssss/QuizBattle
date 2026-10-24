@@ -1,0 +1,13 @@
+---
+description: Giữ UI/UX hiện tại của QuizBattle làm nền tảng khi nâng cấp giao diện hoặc sử dụng ảnh tham khảo.
+alwaysApply: true
+---
+
+# Giữ định hướng UI/UX hiện tại
+
+- UI/UX hiện tại của dự án là nền tảng chính cho mọi nâng cấp giao diện.
+- Trước khi chỉnh sửa, xem giao diện, thành phần và quy ước thiết kế hiện có; ưu tiên tái sử dụng để giữ tính nhất quán.
+- Giữ bản sắc thiết kế, bố cục tổng thể, điều hướng và luồng tương tác hiện tại khi thực hiện các cải tiến thông thường.
+- Ảnh UI do người dùng gửi chỉ là tài liệu tham khảo để nâng cấp UI chính. Việc gửi ảnh không mặc nhiên là yêu cầu sao chép ảnh, thay thế giao diện hoặc thiết kế lại toàn bộ.
+- Chọn lọc chi tiết phù hợp từ ảnh tham khảo và điều chỉnh chúng theo phong cách, màu sắc, typography và thành phần hiện tại của dự án.
+- Chỉ thay đổi định hướng thiết kế chính, bố cục lớn hoặc luồng UX khi người dùng yêu cầu rõ ràng.

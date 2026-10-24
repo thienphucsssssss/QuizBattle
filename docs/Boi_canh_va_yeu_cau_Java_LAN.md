@@ -68,7 +68,7 @@ Máy hiện có Temurin JDK 21.0.10 và Maven 3.9.12. Dependency trong POM: Java
 
 R01 được hiểu là mã ứng dụng/nghiệp vụ/test do nhóm viết hoàn toàn Java. CSS, cấu hình XML/properties, SQL và script gọi Java là tài nguyên/công cụ hỗ trợ, không thay logic Java. Thư viện GUI/DB có thể dùng thành phần native; không tuyên bố mọi dependency đều được viết bằng Java. Nếu giảng viên yêu cầu cả engine DB phải thuần Java, cần xác nhận riêng trước khi thay SQLite bằng lựa chọn JDBC khác.
 
-Không đưa vào MVP: tài khoản học sinh, đăng ký quản trị công khai, reset email, nhiều phòng đồng thời, cloud sync, web/mobile, chat/voice, khôi phục trận sau restart, chống gian lận nâng cao, chấm theo tốc độ, phát hiện trùng ngữ nghĩa bằng AI.
+Không đưa vào MVP: tài khoản học sinh, đăng ký quản trị công khai, reset email, nhiều phòng đồng thời, cloud sync, web/mobile, chat/voice, khôi phục trận sau restart, chống gian lận nâng cao, phát hiện trùng ngữ nghĩa bằng AI. Chấm theo tốc độ được bổ sung theo yêu cầu người dùng ngày 24/10/2026; xem `Cham_diem_theo_toc_do.md`.
 
 ## 5 Vai trò và quản lý người dùng
 
@@ -170,7 +170,7 @@ Không có DB và schema Java thật được xác minh ở baseline hiện tạ
 
 - Bổ sung UI v2: guest chọn một trong 24 linh vật vector (không tài khoản học sinh). JOIN gán một avatar trống, AVATAR_SET cho đổi trong WAITING trước ready; mỗi avatar chỉ thuộc một người trong phòng. Server kiểm tra và giữ chỗ nguyên tử, không tin player_id Client tự khai. UI khóa avatar đã có chủ, cập nhật bằng ROOM_STATE; lỗi giữ avatar cũ. Giới hạn tải mục tiêu vẫn 10 Player. Hiện đã có UI/Preview và unit test, chưa có handler LAN.
 - Deadline bằng System.nanoTime tại Server; không tin timestamp/điểm Client. Chỉ ANSWER hợp lệ đầu tiên được nhận; Server ACK, khóa/chấm đúng một lần khi hết hạn.
-- Đúng +100, còn lại +0; không thưởng tốc độ. Đồng điểm đồng hạng kiểu 1, 1, 3. Chưa gửi correct_answer cho học sinh trước khi đóng câu.
+- Đúng trong hạn: 50–100 điểm, gồm 50 điểm đúng và thưởng tốc độ `round(50 × thời_gian_còn_lại / thời_lượng_câu)` theo thời gian Server ghi nhận. Sai/bỏ trống/trễ +0. Đồng điểm đồng hạng kiểu 1, 1, 3. Chưa gửi correct_answer cho học sinh trước khi đóng câu.
 - Player mất mạng giữ điểm đã nhận, không khôi phục phiên. Chủ phòng mất mạng ván vẫn tự chạy; cùng tài khoản login lại mới nhận quyền. Hết Player thì hủy ván rõ ràng.
 - GAME_OVER báo result_saved; lỗi lưu không báo thành công giả. ROOM_RESET giữ owner và xóa điểm/ready; ROOM_CLOSE giải phóng owner.
 

@@ -19,7 +19,15 @@ if($SecretEnvironment) {
     $nqbSecure=[Security.SecureString]::new()
     foreach($nqbCharacter in $nqbValue.ToCharArray()){$nqbSecure.AppendChar($nqbCharacter)}
     $nqbValue=$null
-} else {$nqbSecure=Read-Host 'Mat khau keystore TLS (it nhat 6 ky tu, khong phai mat khau Admin)' -AsSecureString}
+} else {
+    Write-Host 'Nhap duoc ca chu va so. Ky tu hien thanh dau *; nhap xong bam Enter.'
+    while($true) {
+        $nqbSecure=Read-Host 'Mat khau keystore TLS (it nhat 6 ky tu, khong phai mat khau Admin)' -AsSecureString
+        if($nqbSecure.Length -ge 6){break}
+        $nqbSecure.Dispose()
+        Write-Host 'Mat khau TLS can it nhat 6 ky tu. Vui long nhap lai.' -ForegroundColor Yellow
+    }
+}
 $nqbPtr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($nqbSecure)
 $nqbOld=[Environment]::GetEnvironmentVariable('NQB_SETUP_SECRET','Process')
 try {

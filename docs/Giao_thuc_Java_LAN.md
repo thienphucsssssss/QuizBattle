@@ -1,5 +1,13 @@
 # Giao thức Network Quiz Battle Java LAN
 
+## Bộ câu hỏi riêng cho phòng — cập nhật 25/10/2026
+
+Thêm `QUESTION_SET_LIST/CREATE/DELETE` cho quản lý theo chủ sở hữu; tạo/xóa chỉ khi phòng chờ, có cache mutation như các thao tác câu hỏi khác. `QUESTION_LIST` nhận bộ lọc `question_set_id`; `QUESTION_IMPORT_COMMIT` nhận `question_set_name` để tạo hoặc thêm các câu đã nhập vào bộ cùng transaction. `ROOM_CONFIGURE` nhận `question_set_id` (0: toàn bộ ngân hàng; bỏ trường: giữ nguồn của phòng hiện tại). `ROOM_STATE` trả ID/tên bộ. Chỉ lấy câu đang bật trong bộ đã chọn và không bù bằng câu ngoài bộ; kiểm tra lại khi bắt đầu. Mẫu Office và protocol_version giữ nguyên. Database nâng v1→v2 bằng transaction để thêm bộ/liên kết mà giữ dữ liệu cũ. Xem `Bo_cau_hoi_va_phong_thi.md`.
+
+## Chấm điểm tốc độ — cập nhật 24/10/2026
+
+Không đổi protocol_version hoặc các trường hiện có. `QUESTION_RESULT.points` trả điểm câu vừa chấm: đúng trong hạn nhận `50 + round(50 × thời_gian_còn_lại / thời_lượng_câu)` (50–100), sai/bỏ trống/trễ nhận 0; `score`, ranking và lịch sử dùng tổng điểm đã cộng. Server ghi thời gian của đáp án hợp lệ đầu tiên, bỏ qua mọi điểm/timestamp/thời lượng tự khai trong payload Client. Đáp án lặp hoặc bị từ chối không thay đổi thời gian ban đầu; ACK không công bố điểm/đúng sai. Xem `Cham_diem_theo_toc_do.md`.
+
 ## Nhập câu hỏi Excel và Word 0.3.4
 
 Client đọc tệp cục bộ; Server chỉ nhận JSON chuẩn hóa qua TLS, không nhận ZIP/Office và không chạy POI. Không đổi protocol_version. API chỉ cho Admin/Teacher đã đổi mật khẩu tạm; gắn owner theo connection, chỉ cho `WAITING`.

@@ -6,6 +6,12 @@ Cập nhật 22/10/2026 theo yêu cầu người dùng: màn khởi động là 
 
 ## Định hướng
 
+Cập nhật 25/10/2026 — bộ câu hỏi: dùng ComboBox native để lọc bộ ở Ngân hàng và chọn nguồn trong cấu hình phòng; kèm số câu đang bật/tổng câu. Dialog Bộ câu hỏi tạo từ các dòng chọn hoặc toàn bộ kết quả lọc, xóa bộ giữ câu gốc. Nhập Excel/Word có trường tên bộ mặc định theo tên tệp trong cùng toolbar. Giữ palette/font/khung hiện có; form cấu hình phòng cuộn riêng để nút Lưu/Hủy luôn nằm ngoài vùng cuộn và thông báo lỗi không ép mất nút.
+
+Cập nhật 25/10/2026: bỏ thanh trắng phía trên của workspace Admin/giảng viên theo yêu cầu người dùng. Sidebar chạy từ đỉnh cửa sổ, thông tin LAN/tài khoản và Cài đặt dùng các vị trí hiện có trong sidebar. Thông báo chỉ chiếm chỗ trong vùng nội dung khi có nội dung cần hiển thị. Thanh thao tác của học sinh giữ nguyên vì không có sidebar quản lý.
+
+Cập nhật 24/10/2026 — thanh điều hướng quản lý: giữ navy/cobalt/lime và logo hiện có, bổ sung icon vector nét đồng nhất, trạng thái LAN/ping đo thật, Tổng quan, Giám sát thi đấu, Đấu trường thí sinh và Cài đặt. Tổng quan chỉ hiển thị số liệu có ích lấy từ tài khoản/phòng thật. Giữ nguyên trang quản lý đang xem khi trận đấu chuyển pha; các bảng cập nhật cả khi pha đổi nhưng bản ghi người chơi không đổi. Tên/vai trò và thao tác tài khoản cố định ở chân; menu cuộn riêng trên cửa sổ thấp. Không sao chép màu tím hoặc nhận diện trong ảnh tham khảo.
+
 Cập nhật 0.3.6 — âm thanh: một nguồn nhạc cho mỗi Client, projector không phát thêm. Tùy chọn dùng checkbox/slider native có nhãn riêng cho SFX và nhạc nền, điều khiển bằng bàn phím; nội dung cuộn trên cửa sổ nhỏ, nút Đóng ngoài vùng cuộn. Nhạc nền chỉ phát trong ván, chung cuộc phát riêng một lần; hủy/rời phòng/mất kết nối dừng. Mặc định giảng viên/Admin bật nhạc ở 20%, học sinh tắt; lưu lựa chọn theo vai trò. Nạp WAV và mở thiết bị ngoài JavaFX thread, lỗi thiết bị không ảnh hưởng gameplay. Hướng dẫn UI/UX Pro Max áp dụng nhãn rõ, focus native và tránh chặn luồng giao diện.
 
 Cập nhật 0.3.5 — chung cuộc: visual thesis là bục vinh danh 2–1–3 trên sân cobalt, giữ linh vật nguyên bản làm tâm điểm; vàng/bạc/đồng chỉ mang ý nghĩa huy chương. Content plan: tiêu đề kết thúc → avatar có khung/huy chương → tên và điểm chính xác → bục cao theo hạng → hành động ván mới/rời phòng → bảng toàn bộ người chơi. Interaction thesis: xuất hiện 300–400 ms bằng opacity/translate, hạng nhất tới sau hạng nhì/ba; mỗi session/màn chỉ diễn một lần, rời màn/giảm chuyển động chốt ngay trạng thái cuối. Không scale chiều cao giả theo điểm, không confetti lặp hoặc animation cản thao tác. Dùng rank Server và giữ mọi người có rank ≤3, gồm đồng hạng; rank1/1/3 không tạo người hạng2. Nhiều người đồng hạng tự xuống dòng trong vùng cuộn, không tràn ngang. Không sửa luồng trận bị hủy thành màn vinh danh.
@@ -57,7 +63,7 @@ Không đưa “JavaFX”, “RAM”, “DB”, “deadline”, mô tả kiến 
 ## Bố cục và trạng thái
 
 - Cửa sổ mặc định 1366×768, tối thiểu 1024×640; kích thước là vùng Scene, chưa tính title bar của Windows.
-- Sidebar 208 px cho quản lý; Player không có sidebar nghiệp vụ. Admin thêm trang Người dùng; chọn vai trò không cấp quyền.
+- Sidebar 248 px cho quản lý để đủ chỗ cho icon và tên chức năng; Player không có sidebar nghiệp vụ. Admin thêm trang Người dùng; chọn vai trò không cấp quyền.
 - Ngân hàng: bảng + inspector bên phải; ẩn inspector nếu vùng bảng quá hẹp, vẫn có nút xem chi tiết. Lọc AND, debounce 300 ms, phân trang, loại phản hồi cũ.
 - Question form có nhãn thật, kiểm tra giới hạn, lỗi ngay form, chờ phản hồi trước đóng. Ctrl+S; hỏi lại khi bỏ nháp.
 - Duplicate dialog mặc định Quay lại chỉnh sửa; Lưu dù trùng phải bấm chủ động. Xem câu cũ chỉ đọc, không ghi tự động.

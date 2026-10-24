@@ -41,7 +41,7 @@ public final class ArcadeApplication extends Application {
     private JsonNode user = object(), room = object(), question = object(), result = object();
     private String role = "", route = "", session = "", nickname = "";
     private volatile int connectionGeneration;
-    private int bankPage = 1, userPage = 1, historyPage = 1;
+    private int bankPage = 1, userPage = 1, historyPage = 1,bankQuestionSet;
     private String bankKeyword = "", bankCategory = "Tất cả chủ đề", bankStatus = "Tất cả trạng thái", bankSort = "Mới cập nhật";
     private String userKeyword = "", userStatus = "Tất cả trạng thái";
     private AnswerState answer;
@@ -54,7 +54,11 @@ public final class ArcadeApplication extends Application {
     private ProgressBar timerBar;
     private final List<Button> answerButtons = new ArrayList<>();
     private Button readyButton;
-    private final Map<String, Button> navButtons = new LinkedHashMap<>();
+    private ManagementSidebar sidebar;
+    private final CommanderViews commander = new CommanderViews(this);
+    private Timeline connectionPulse;
+    private boolean pingPending;
+    private long nextPingAt;
     private boolean qa;
     private boolean passwordRequired;
     private static volatile Throwable qaFailure;
@@ -100,17 +104,17 @@ public final class ArcadeApplication extends Application {
         if (qaDriver != null) qaDriver.accept(this);
     }
     @Override public void stop() { if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); }
-    private void closeGateway() { music.stop(); connectionGeneration++; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
+    private void closeGateway() { music.stop(); connectionGeneration++; if(connectionPulse!=null)connectionPulse.stop(); pingPending=false; sidebar=null; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
     private void welcome() {
         if (pulse != null) pulse.stop();
         if (projection != null) projection.close();
         closeGateway(); user = object(); room = object(); question = object(); result = object();
         answer = null; session = ""; nickname = ""; role = ""; route = ""; passwordRequired = false;
         disconnected = false; chooseAvatarAfterJoin = false;
-        bankPage = userPage = historyPage = 1; bankKeyword = userKeyword = "";
+        bankPage = userPage = historyPage = 1; bankQuestionSet=0; bankKeyword = userKeyword = "";
         bankCategory = "Tất cả chủ đề"; bankStatus = userStatus = "Tất cả trạng thái"; bankSort = "Mới cập nhật";
         previousRanking = object().putArray("ranking"); currentRanking = object().putArray("ranking"); rankedQuestion = -1;
-        connectionLabel.setText("Chưa kết nối"); connectionLabel.setTooltip(null); navButtons.clear();
+        connectionLabel.setText("Chưa kết nối"); connectionLabel.setTooltip(null);
         auth("");
     }
     private void auth(String selectedRole) { auth(selectedRole, false); }
@@ -203,7 +207,7 @@ public final class ArcadeApplication extends Application {
                     chooseAvatarAfterJoin = selectedRole.equals("STUDENT");
                     passwordRequired = response.path("must_change_password").asBoolean();
                     connectionLabel.setText("Đã kết nối an toàn"); shell();
-                    if (response.path("must_change_password").asBoolean()) passwordChange(true); else roomView();
+                    if (response.path("must_change_password").asBoolean()) passwordChange(true); else if(role.equals("STUDENT"))roomView();else commander.open("Tổng quan");
                 }));
             }));
         });
@@ -227,23 +231,38 @@ public final class ArcadeApplication extends Application {
         if(lanEntry!=null){lanEntry.close();lanEntry=null;}
         root.setCenter(workspace); root.setBottom(null); root.setLeft(null); root.getStyleClass().removeAll("game", "welcome");
         feedback.setVisible(false); feedback.setManaged(false);
-        var top = column(0);
-        var toolbar = row(16, text(role.equals("STUDENT") ? nickname : role.equals("ADMIN") ? "Quản trị" : "Giảng viên", "brand"), space(), connectionLabel, button("Tùy chọn", "quiet", this::settings));
-        toolbar.setPadding(new Insets(14, 24, 14, 24)); top.getChildren().addAll(toolbar, feedback); root.setTop(top);
+        workspace.setTop(null);
+        if(role.equals("STUDENT")) {
+            var top = column(0);
+            var toolbar = row(16, text(nickname, "brand"), space(), connectionLabel, button("Tùy chọn", "quiet", this::settings));
+            toolbar.setPadding(new Insets(14, 24, 14, 24)); top.getChildren().addAll(toolbar, feedback); root.setTop(top);
+        } else {
+            root.setTop(null);
+            workspace.setTop(feedback);
+        }
         workspace.setPadding(new Insets(20, 28, 20, 28));
         if (!role.equals("STUDENT") && !passwordRequired) {
-            var sidebar = column(10, brand(), text("QUẢN LÝ LỚP HỌC", "caption")); sidebar.getStyleClass().add("sidebar"); sidebar.setPrefWidth(208); navButtons.clear();
-            for (String label : role.equals("ADMIN") ? List.of("Phòng thi", "Ngân hàng", "Lịch sử", "Người dùng") : List.of("Phòng thi", "Ngân hàng", "Lịch sử")) {
-                var b = button(label, "nav", () -> { if (label.equals("Phòng thi")) roomView(); else if (label.equals("Ngân hàng")) bankView(); else if (label.equals("Lịch sử")) historyView(); else usersView(); });
-                b.setMaxWidth(Double.MAX_VALUE); navButtons.put(label, b); sidebar.getChildren().add(b);
-            }
-            sidebar.getChildren().addAll(space(), text(user.path("display_name").asText("Giảng viên"), "subtitle"), button("Đổi mật khẩu", "nav", () -> passwordChange(false)), button("Đăng xuất", "nav", this::logout)); root.setLeft(sidebar);
+            sidebar = new ManagementSidebar(role, displayName(), this::openManagement); root.setLeft(sidebar);
+            if(connectionPulse!=null)connectionPulse.stop();nextPingAt=0;
+            connectionPulse=new Timeline(new KeyFrame(Duration.seconds(1),e->{commander.tick();if(System.nanoTime()>=nextPingAt)measurePing();}));
+            connectionPulse.setCycleCount(Animation.INDEFINITE);connectionPulse.play();measurePing();
         }
+    }
+    private void openManagement(String page) {
+        switch(page) {
+            case "Phòng thi" -> roomView();case "Ngân hàng" -> bankView();case "Lịch sử" -> historyView();case "Người dùng" -> usersView();
+            case "Mật khẩu" -> passwordChange(false);case "Đăng xuất" -> logout();default -> commander.open(page);
+        }
+    }
+    private void measurePing() {
+        if(pingPending||sidebar==null||!managementConnected())return;
+        pingPending=true;nextPingAt=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);long started=System.nanoTime();
+        call("PING",object(),value->{pingPending=false;if(sidebar!=null)sidebar.connection(true,Math.max(0,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)));},error->{pingPending=false;if(sidebar!=null)sidebar.connection(!disconnected,null);});
     }
     private void navigate(String page, Node content) {
         if (!route.equals(page)) sfx.play(SfxSlots.Cue.UI_TRANSITION);
         route = page;
-        navButtons.forEach((name, button) -> { button.getStyleClass().remove("selected"); if (name.equals(page) || (page.equals("GAME") && name.equals("Phòng thi"))) button.getStyleClass().add("selected"); });
+        if(sidebar!=null)sidebar.select(page);
         workspace.setCenter(content);
         if (transition != null) transition.stop();
         content.setOpacity(1);
@@ -276,16 +295,40 @@ public final class ArcadeApplication extends Application {
     private boolean canEdit() { return gateway != null && !user.isEmpty() && !passwordRequired && room.path("phase").asText("WAITING").equals("WAITING") && !disconnected; }
 
     void bankView() { new ManagementViews(this).bank(bankKeyword, bankCategory, bankStatus, bankSort, bankPage); }
-    void usersView() { new ManagementViews(this).users(userKeyword, userStatus, userPage); }
+    void usersView() { if(role.equals("ADMIN"))new ManagementViews(this).users(userKeyword, userStatus, userPage); }
     void historyView() { new ManagementViews(this).history(historyPage); }
     void setHistoryPage(int page) { historyPage = page; }
     void setBankFilter(String keyword, String category, String status, String sort, int page) { bankKeyword = keyword; bankCategory = category; bankStatus = status; bankSort = sort; bankPage = page; }
+    int bankQuestionSet(){return bankQuestionSet;}
+    void setBankQuestionSet(int id){bankQuestionSet=id;bankPage=1;}
     void setUserFilter(String keyword, String status, int page) { userKeyword = keyword; userStatus = status; userPage = page; }
     boolean editsAllowed() { return canEdit(); }
     Stage ownerStage() { return stage; }
     void showManagement(String route, Node content) { root.getStyleClass().remove("game"); navigate(route, content); }
     void passwordChange(boolean required) { new ManagementViews(this).password(required); }
     void passwordChanged() { if (projection != null) projection.close(); welcome(); }
+    JsonNode roomSnapshot() { return room; }
+    String displayName() { return user.path("display_name").asText("Giảng viên"); }
+    String accountRole() { return role; }
+    boolean managementConnected() { return gateway!=null&&!disconnected&&!user.isEmpty(); }
+    void refreshManagedRoom(Runnable refreshed) {
+        call("ROOM_STATE",object(),value->{
+            room=value;session=room.path("session_id").asText();
+            if(room.has("question"))question=room.path("question");
+            if(room.has("result"))result=room.path("result");
+            if(room.path("phase").asText().equals("WAITING")){question=object();result=object();}
+            phaseDeadline=System.nanoTime()+room.path("remaining_ms").asLong()*1_000_000L;
+            syncMusic();refreshed.run();
+        });
+    }
+    void openSettings() { settings(); }
+    void openProjection() { showProjection(); }
+    void startManagedGame() { call("START_GAME",object(),ignored->{}); }
+    void abortManagedGame() { if(confirm("Hủy ván thi?","Ván bị hủy không tạo kết quả hoàn thành."))call("ABORT_GAME",object(),ignored->{}); }
+    private void presentMatch() {
+        if(role.equals("STUDENT")||route.equals("GAME")||route.equals("Phòng thi"))gameView();
+        else{syncMusic();updateProjection();}
+    }
 
     void roomView() {
         route = "Phòng thi";
@@ -313,7 +356,7 @@ public final class ArcadeApplication extends Application {
         else header.getChildren().add(button("Rời phòng", "quiet", this::logout));
         var roomCode = text(room.path("room_code").asText().isBlank() ? "— — —" : room.path("room_code").asText(), "room-code");
         var codeArea = column(4, text("MÃ PHÒNG", "caption"), roomCode, text(room.path("room_name").asText("Chưa có phòng"), "subtitle"));
-        var configSummary = column(16, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"));
+        var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"), text("Bộ câu hỏi: "+(room.path("question_set_id").asInt()==0?"Toàn bộ ngân hàng":room.path("question_set_name").asText()),"caption"), text("Đúng: 50–100 điểm · Trả lời càng nhanh, điểm càng cao.", "caption"));
         if (!student) {
             var configure = button(room.path("room_code").asText().isBlank() ? "Tạo phòng" : "Cấu hình phòng", "quiet", this::roomConfig); configure.setDisable(disconnected || (!room.path("room_code").asText().isBlank() && !room.path("is_owner").asBoolean()));
             configSummary.getChildren().add(row(12, configure, button("Sao chép mã", "quiet", () -> { ClipboardContent clipboard = new ClipboardContent(); clipboard.putString(room.path("room_code").asText()); Clipboard.getSystemClipboard().setContent(clipboard); notice("Đã sao chép mã phòng.", false); })));
@@ -392,14 +435,33 @@ public final class ArcadeApplication extends Application {
     }
     private void roomConfig() {
         TextField name = new TextField(room.path("room_name").asText("Mạng máy tính"));
+        name.setId("room-name");name.setPromptText("Nhập tên phòng thi");
         Spinner<Integer> count = new Spinner<>(1, 20, room.path("question_count").asInt(3)); Spinner<Integer> seconds = new Spinner<>(5, 120, room.path("duration_seconds").asInt(15));
+        count.setId("room-question-count");seconds.setId("room-question-seconds");
+        var source=new ComboBox<QuestionSets.Choice>();source.setId("room-question-set");source.setMaxWidth(Double.MAX_VALUE);source.setDisable(true);
+        var pool=text("Đang tải các bộ câu hỏi của bạn…","muted");pool.setId("room-question-pool");
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); dialog.setHeaderText("Cấu hình phòng thi"); styleDialog(dialog);
         var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);
-        dialog.getDialogPane().setContent(column(16, field("Tên phòng", name), field("Số câu", count), field("Giây mỗi câu", seconds), text("Server chỉ chọn câu đang bật từ ngân hàng của bạn.", "muted"), error));
+        var form=column(12,field("Tên phòng",name),field("Bộ câu hỏi",source),pool,field("Số câu",count),field("Giây mỗi câu",seconds),error);
+        var formScroll=scroll(form);formScroll.setPrefViewportHeight(Math.min(390,Math.max(230,stage.getHeight()-250)));
+        dialog.getDialogPane().setContent(formScroll);dialog.getDialogPane().setPrefWidth(540);dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
+        ((Button)dialog.getDialogPane().lookupButton(ButtonType.CANCEL)).setText("Hủy");
         Button save = (Button)dialog.getDialogPane().lookupButton(ButtonType.OK); save.setText("Lưu cấu hình"); save.getStyleClass().add("primary");
-        save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> { e.consume(); save.setDisable(true); call("ROOM_CONFIGURE", object().put("room_name", name.getText().strip()).put("question_count", count.getValue()).put("duration_seconds", seconds.getValue()), value -> { dialog.close(); room = value; lobby(); }, failure -> { save.setDisable(false); showError(error, message(failure)); }); });
+        save.setId("room-config-save");save.setDisable(true);
+        source.setOnAction(e->{var selected=source.getValue();pool.setText(selected==null?"Chọn bộ câu hỏi.":selected.id()==0?"Lấy ngẫu nhiên các câu đang bật trong ngân hàng của bạn.":selected.active()+" câu đang bật / "+selected.total()+" câu trong bộ. Chỉ lấy câu từ bộ này.");});
+        save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> {
+            e.consume();String roomName=name.getText().strip();if(roomName.isEmpty()||roomName.length()>80){showError(error,"Nhập tên phòng từ 1–80 ký tự.");name.requestFocus();return;}
+            var selected=source.getValue();if(selected==null){showError(error,"Chọn bộ câu hỏi trước khi lưu.");return;}
+            if(selected.id()>0&&selected.active()<count.getValue()){showError(error,"Bộ chỉ có "+selected.active()+" câu đang bật. Hãy giảm số câu hoặc bật thêm câu.");return;}
+            save.setDisable(true);call("ROOM_CONFIGURE",object().put("room_name",name.getText().strip()).put("question_count",count.getValue()).put("duration_seconds",seconds.getValue()).put("question_set_id",selected.id()),value->{dialog.close();room=value;lobby();},failure->{save.setDisable(false);showError(error,message(failure));});
+        });
         dialog.show();
+        QuestionSets.load(this,dialog::isShowing,sets->{
+            var values=new ArrayList<QuestionSets.Choice>();values.add(QuestionSets.Choice.all());values.addAll(sets);source.setItems(FXCollections.observableArrayList(values));
+            int chosen=room.path("question_set_id").asInt();source.setValue(values.stream().filter(v->v.id()==chosen).findFirst().orElse(values.getFirst()));source.setDisable(false);save.setDisable(false);
+            if(sets.isEmpty())pool.setText("Chưa có bộ riêng. Nhập file hoặc tạo bộ trong Ngân hàng câu hỏi.");
+        },failure->showError(error,"Không tải được bộ câu hỏi: "+message(failure)+". Đóng và mở lại cấu hình để thử lại."));
     }
     private void event(JsonNode event) {
         JsonNode p = event.path("payload");
@@ -409,6 +471,7 @@ public final class ArcadeApplication extends Application {
                 disconnected = true; if (pulse != null) pulse.stop(); answerButtons.forEach(b -> b.setDisable(true));
                 if (avatarDialog != null) avatarDialog.close();
                 connectionLabel.setText("Mất kết nối"); feedback.setText(role.equals("STUDENT") ? "Mất kết nối. Bạn có thể tham gia lại ở ván sau." : "Mất kết nối. Đăng nhập lại để tiếp tục quản lý phòng."); feedback.setManaged(true); feedback.setVisible(true); sfx.play(SfxSlots.Cue.CONNECTION_DOWN);
+                if(connectionPulse!=null)connectionPulse.stop();if(sidebar!=null)sidebar.connection(false,null);
                 root.setBottom(button("Kết nối lại", "quiet", () -> auth(role)));
                 if (projection != null) projection.close(); break;
             case "ROOM_CLOSED":
@@ -419,6 +482,7 @@ public final class ArcadeApplication extends Application {
                     else if (p.path("ready_count").asInt() > room.path("ready_count").asInt()) sfx.play(SfxSlots.Cue.PLAYER_READY);
                 }
                 room = p;
+                if(room.path("phase").asText().equals("WAITING")){answer=null;question=object();result=object();session="";}
                 if (avatarDialog != null && avatarDialog.isShowing()) { if (!room.path("phase").asText().equals("WAITING")) avatarDialog.close(); else refreshAvatars(); }
                 if ((route.equals("Phòng thi") || route.equals("GAME")) && room.path("phase").asText().equals("WAITING")) { if (pulse != null) pulse.stop(); answer = null; question = object(); result = object(); session = ""; lobby(); }
                 else if (progressLabel != null) progressLabel.setText(p.path("answered_count").asInt() + "/" + p.path("connected_player_count").asInt() + " đã nộp");
@@ -427,31 +491,32 @@ public final class ArcadeApplication extends Application {
             case "GAME_START":
                 currentRanking = object().putArray("ranking"); previousRanking = currentRanking; rankedQuestion = -1;
                 if (avatarDialog != null) avatarDialog.close();
-                session = p.path("session_id").asText(); room = ((ObjectNode)room).put("phase", "COUNTDOWN"); phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(3000) * 1_000_000L; question = object(); result = object(); answer = null; gameView(); startPulse(); break;
+                session = p.path("session_id").asText(); room = ((ObjectNode)room).put("phase", "COUNTDOWN"); phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(3000) * 1_000_000L; question = object(); result = object(); answer = null; presentMatch(); startPulse(); break;
             case "QUESTION":
                 if (!session.isEmpty() && !session.equals(p.path("session_id").asText(session))) return;
                 if (question.path("question_id").asLong(-1) == p.path("question_id").asLong() && question.path("session_id").asText().equals(session)) return;
                 session = p.path("session_id").asText(session); question = p; result = object(); room = ((ObjectNode)room).put("phase", "QUESTION_ACTIVE");
-                answer = new AnswerState(p.path("question_id").asLong(), p.path("remaining_ms").asLong(), System.nanoTime()); gameView(); startPulse(); sfx.event(SfxSlots.Cue.ROUND_OPEN, session, answer.questionId()); break;
+                answer = new AnswerState(p.path("question_id").asLong(), p.path("remaining_ms").asLong(), System.nanoTime()); presentMatch(); startPulse(); sfx.event(SfxSlots.Cue.ROUND_OPEN, session, answer.questionId()); break;
             case "QUESTION_RESULT":
                 if (!p.path("session_id").asText(session).equals(session) || p.path("question_id").asLong() != question.path("question_id").asLong()) return;
                 if (!room.path("phase").asText().equals("QUESTION_ACTIVE")) return;
                 result = p; room = ((ObjectNode)room).put("phase", "SHOW_RESULT"); phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(3000) * 1_000_000L;
-                gameView(); startPulse(); sfx.event(role.equals("STUDENT") ? (p.path("correct").asBoolean() ? SfxSlots.Cue.ANSWER_CORRECT : SfxSlots.Cue.ANSWER_WRONG) : SfxSlots.Cue.ROUND_CLOSE, session, p.path("question_id").asLong()); break;
+                presentMatch(); startPulse(); sfx.event(role.equals("STUDENT") ? (p.path("correct").asBoolean() ? SfxSlots.Cue.ANSWER_CORRECT : SfxSlots.Cue.ANSWER_WRONG) : SfxSlots.Cue.ROUND_CLOSE, session, p.path("question_id").asLong()); break;
             case "ROUND_RANKING":
                 if (!p.path("session_id").asText().equals(session) || p.path("question_id").asLong() != question.path("question_id").asLong() || rankedQuestion == p.path("question_id").asLong()) return;
                 previousRanking = currentRanking; currentRanking = p.path("ranking").deepCopy(); rankedQuestion = p.path("question_id").asLong();
                 ((ObjectNode)result).set("ranking", currentRanking); room = ((ObjectNode)room).put("phase", "SHOW_RANKING");
                 phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(4500) * 1_000_000L;
-                gameView(); startPulse(); break;
+                presentMatch(); startPulse(); break;
             case "GAME_OVER":
                 if (!p.path("session_id").asText(session).equals(session)) return;
-                result = p; room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); gameView(); if (!music.enabled()) sfx.event(SfxSlots.Cue.MATCH_FINISH, session, 0); break;
+                result = p; room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); presentMatch(); if (!music.enabled()) sfx.event(SfxSlots.Cue.MATCH_FINISH, session, 0); break;
             case "GAME_ABORTED":
                 if (!p.path("session_id").asText(session).equals(session)) return;
-                result = object().put("aborted", true); room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); gameView(); break;
+                result = object().put("aborted", true); room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); presentMatch(); break;
             default: break;
         }
+        if(!role.equals("STUDENT"))commander.update(room);
     }
     private void startPulse() {
         if (pulse != null) pulse.stop(); pulse = new Timeline(new KeyFrame(Duration.millis(100), e -> tick())); pulse.setCycleCount(Animation.INDEFINITE); pulse.play(); tick();

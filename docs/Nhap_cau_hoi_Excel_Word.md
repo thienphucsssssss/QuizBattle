@@ -4,6 +4,8 @@ Từ bản 0.3.4, Admin và giảng viên nhập câu hỏi vào **ngân hàng c
 
 ## Tải mẫu và xem trước
 
+Cập nhật 25/10/2026: trường **Lưu vào bộ câu hỏi** mặc định theo tên tệp. Có thể đổi tên hoặc để trống; nếu bộ cùng tên đã có thì thêm các câu nhập vào bộ đó. Bộ được tạo/cập nhật cùng transaction lưu câu hỏi, hủy xem trước không tạo bộ. Có thể chọn bộ này trong cấu hình phòng. Xem `Bo_cau_hoi_va_phong_thi.md`.
+
 1. Vào **Ngân hàng → Xem mẫu / Tải mẫu**. Chọn **Tải mẫu Excel** hoặc **Tải mẫu Word**, chọn nơi lưu trên máy.
 2. Điền câu hỏi vào mẫu. Excel dùng trang `CauHoi`, hàng 1 là tiêu đề; trang `HuongDan` chỉ chứa hướng dẫn. Word dùng bảng 7 cột có sẵn, không gộp ô. Có thể thêm dòng vào bảng.
 3. Giữ nguyên thứ tự cột: **Câu hỏi | A | B | C | D | Đáp án đúng | Chủ đề**. Điền đủ cả 7 cột; đáp án đúng chỉ ghi A/B/C/D (chấp nhận chữ thường). Mẫu không chứa câu mẫu và không tự thêm dữ liệu vào ngân hàng.

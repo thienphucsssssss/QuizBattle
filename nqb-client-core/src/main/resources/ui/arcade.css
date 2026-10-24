@@ -14,13 +14,26 @@
 .game-title { -fx-font-size: 32px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
 .room-code { -fx-font-size: 66px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
 .counter { -fx-font-size: 40px; -fx-font-family: "Be Vietnam Pro ExtraBold"; }
-.sidebar { -fx-background-color: #202857; -fx-padding: 28 16 20 16; }
+.sidebar { -fx-background-color: #202857; -fx-padding: 20 12 16 12; }
 .sidebar .label { -fx-text-fill: -cream; }
 .sidebar .muted { -fx-text-fill: #b4c0d0; }
 .sidebar .brand { -fx-font-size: 15px; }
-.sidebar .nav { -fx-background-color: transparent; -fx-text-fill: #d4dce8; -fx-alignment: CENTER_LEFT; -fx-padding: 13 16; -fx-background-radius: 10; }
+.sidebar .nav { -fx-background-color: transparent; -fx-text-fill: #d4dce8; -fx-alignment: CENTER_LEFT; -fx-padding: 10 10; -fx-background-radius: 10; -fx-font-size: 12px; }
 .sidebar .nav:hover { -fx-background-color: #26364b; }
 .sidebar .nav.selected { -fx-background-color: -mint; -fx-text-fill: -ink; -fx-font-weight: bold; }
+.sidebar .nav:focused { -fx-border-color: #9ce3f0; }
+.sidebar .nav-icon { -fx-fill: transparent; -fx-stroke: #d4dce8; -fx-stroke-width: 1.6; -fx-stroke-line-cap: round; -fx-stroke-line-join: round; }
+.sidebar .nav.selected .nav-icon { -fx-stroke: -ink; }
+.sidebar-connection { -fx-background-color: rgba(255,255,255,.08); -fx-background-radius: 10; -fx-padding: 9 12; }
+.sidebar .sidebar-network { -fx-font-size: 11px; -fx-text-fill: #d4dce8; }
+.sidebar.offline .sidebar-network { -fx-text-fill: #ffcbb9; }
+.sidebar .sidebar-name { -fx-font-size: 14px; -fx-font-family: "Be Vietnam Pro SemiBold"; }
+.sidebar .sidebar-account { -fx-border-color: rgba(255,255,255,.16) transparent transparent transparent; -fx-padding: 14 0 0 0; }
+.sidebar .sidebar-account .caption { -fx-font-size: 11px; -fx-text-fill: #b4c0d0; }
+.sidebar .sidebar-scroll > .viewport, .sidebar .sidebar-scroll { -fx-background-color: transparent; }
+.sidebar .sidebar-scroll { -fx-padding: 0; }
+.sidebar .scroll-bar .thumb { -fx-background-color: #63709c; }
+.commander-table .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
 .button { -fx-cursor: hand; -fx-background-radius: 14; -fx-border-radius: 14; -fx-border-color: transparent; -fx-border-width: 2; -fx-padding: 10 18; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-background-color: #e8ecf7; -fx-text-fill: -ink; -fx-min-height: 44; }
 .button:hover { -fx-background-color: #d9dfd3; }
 .button:pressed { -fx-opacity: 0.85; }

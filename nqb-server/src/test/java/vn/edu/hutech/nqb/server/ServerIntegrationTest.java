@@ -43,8 +43,65 @@ class ServerIntegrationTest {
     Client guest(String code,String name)throws Exception{var c=new Client();c.request("JOIN",obj().put("room_code",code).put("nickname",name));return c;}
     void error(Client c,String code,String type,ObjectNode p){var ex=assertThrows(ExecutionException.class,()->c.request(type,p));assertEquals(code,assertInstanceOf(GatewayException.class,ex.getCause()).code());}
     private ObjectNode importRow(String content){return obj().put("content",content).put("option_a","TCP").put("option_b","UDP").put("option_c","IP").put("option_d","ARP").put("correct_answer","A").put("category","Mạng LAN");}
+    @Test void managerCanMonitorSubmissionsWithoutExposingAnswersToStudents()throws Exception {
+        var host=admin();String code=room(host,1);var a=guest(code,"Minh");var b=guest(code,"Lan");
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+        var question=a.event("QUESTION");
+        a.request("ANSWER",obj().put("session_id",question.path("session_id").asText()).put("question_id",question.path("question_id").asInt()).put("answer","A"));
+        var managed=host.request("ROOM_STATE",obj());
+        assertEquals(1,managed.path("question_number").asInt());
+        assertEquals(1,managed.path("answered_count").asInt());
+        var minh=java.util.stream.StreamSupport.stream(managed.path("players").spliterator(),false).filter(p->p.path("nickname").asText().equals("Minh")).findFirst().orElseThrow();
+        assertTrue(minh.path("answered").asBoolean());assertTrue(minh.has("score"));assertFalse(minh.has("answer"));
+        var student=b.request("ROOM_STATE",obj());
+        for(var player:student.path("players")){assertFalse(player.has("answered"));assertFalse(player.has("score"));assertFalse(player.has("answer"));}
+        assertFalse(student.has("ranking"));assertFalse(student.path("question").has("correct_answer"));
+        host.request("ABORT_GAME",obj());host.request("ROOM_RESET",obj());
+        var reset=host.request("ROOM_STATE",obj());assertEquals(0,reset.path("question_number").asInt());assertEquals(0,reset.path("ranking").size());
+        for(var player:reset.path("players")){assertFalse(player.path("answered").asBoolean());assertEquals(0,player.path("score").asInt());}
+    }
     private ObjectNode preview(String token,int offset,boolean complete,ObjectNode... rows){var p=obj().put("offset",offset).put("complete",complete);if(token!=null)p.put("import_id",token);var data=p.putArray("rows");for(var row:rows)data.add(row);return p;}
     private ObjectNode commit(String token,boolean allow,int... indexes){var p=obj().put("import_id",token).put("allow_duplicates",allow);var selected=p.putArray("selected_indexes");for(int index:indexes)selected.add(index);return p;}
+    private ObjectNode setPayload(String name,int... ids){var p=obj().put("name",name);var items=p.putArray("question_ids");for(int id:ids)items.add(id);return p;}
+    @Test void questionSetsArePrivateAndRoomsUseOnlyTheirSelectedActiveQuestions()throws Exception {
+        var host=admin();var created=host.request("QUESTION_SET_CREATE",setPayload("Bộ mạng",1,2));int setId=created.path("question_set_id").asInt();
+        assertTrue(setId>0);assertEquals(2,created.path("question_count").asInt());
+        assertEquals(2,host.request("QUESTION_LIST",obj().put("question_set_id",setId)).path("total").asInt());
+        var teacher=new Client();teacher.request("REGISTER",obj().put("username","set.teacher").put("display_name","Teacher").put("password","Set-test-only-1"));teacher.request("LOGIN",obj().put("username","set.teacher").put("password","Set-test-only-1"));
+        assertEquals(0,teacher.request("QUESTION_SET_LIST",obj()).path("total").asInt());
+        error(teacher,"NOT_FOUND","QUESTION_SET_DELETE",obj().put("question_set_id",setId));
+        error(teacher,"NOT_FOUND","QUESTION_SET_CREATE",setPayload("Không được lấy câu người khác",1));
+        error(teacher,"NOT_FOUND","ROOM_CONFIGURE",obj().put("room_name","Foreign").put("question_count",1).put("question_set_id",setId));
+        host.request("QUESTION_SET_ACTIVE",obj().put("question_id",2).put("is_active",false));
+        error(host,"NOT_ENOUGH_QUESTIONS","ROOM_CONFIGURE",obj().put("room_name","Chưa đủ").put("question_count",2).put("question_set_id",setId));
+        assertTrue(host.request("ROOM_STATE",obj()).path("room_code").asText().isEmpty());
+        var configured=host.request("ROOM_CONFIGURE",obj().put("room_name","Chọn bộ mạng").put("question_count",1).put("duration_seconds",5).put("question_set_id",setId));
+        assertEquals(setId,configured.path("question_set_id").asInt());assertEquals("Bộ mạng",configured.path("question_set_name").asText());
+        assertEquals(setId,host.request("ROOM_CONFIGURE",obj().put("room_name","Giữ bộ đang chọn").put("question_count",1).put("duration_seconds",5)).path("question_set_id").asInt());
+        var a=guest(configured.path("room_code").asText(),"Set A");var b=guest(configured.path("room_code").asText(),"Set B");
+        for(int attempt=0;attempt<2;attempt++){
+            a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+            assertEquals(1,a.event("QUESTION").path("question_id").asInt());host.request("ABORT_GAME",obj());a.event("GAME_ABORTED");
+            assertEquals(setId,host.request("ROOM_RESET",obj()).path("question_set_id").asInt());
+        }
+        error(host,"QUESTION_SET_IN_USE","QUESTION_SET_DELETE",obj().put("question_set_id",setId));
+        host.request("ROOM_CLOSE",obj());host.request("QUESTION_SET_DELETE",obj().put("question_set_id",setId));
+        assertEquals(0,host.request("QUESTION_SET_LIST",obj()).path("total").asInt());assertEquals(20,host.request("QUESTION_LIST",obj()).path("total").asInt());
+    }
+    @Test void importCreatesOrAppendsAnOwnedQuestionSetAtomically()throws Exception {
+        var host=admin();var preview=host.request("QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Bộ nhập TCP một"),importRow("Bộ nhập TCP hai")));
+        var saved=host.request("QUESTION_IMPORT_COMMIT",commit(preview.path("import_id").asText(),false,0,1).put("question_set_name","Ôn TCP"));
+        int setId=saved.path("question_set_id").asInt();assertTrue(setId>0);
+        assertEquals(2,host.request("QUESTION_LIST",obj().put("question_set_id",setId)).path("total").asInt());
+        var next=host.request("QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Bộ nhập TCP ba")));
+        assertEquals(setId,host.request("QUESTION_IMPORT_COMMIT",commit(next.path("import_id").asText(),false,0).put("question_set_name","Ôn TCP")).path("question_set_id").asInt());
+        assertEquals(3,host.request("QUESTION_LIST",obj().put("question_set_id",setId)).path("total").asInt());
+        var duplicate=host.request("QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Không được lưu khi rollback"),importRow("Bộ nhập TCP một")));
+        error(host,"DUPLICATE_QUESTION","QUESTION_IMPORT_COMMIT",commit(duplicate.path("import_id").asText(),false,0,1).put("question_set_name","Không tạo bộ khi lỗi"));
+        assertEquals(1,host.request("QUESTION_SET_LIST",obj()).path("total").asInt());assertEquals(23,host.request("QUESTION_LIST",obj()).path("total").asInt());
+        var filtered=obj().put("name","Bộ từ bộ lọc");filtered.putObject("filters").put("keyword","Bộ nhập TCP");
+        assertEquals(3,host.request("QUESTION_SET_CREATE",filtered).path("question_count").asInt());
+    }
     @Test void importPreviewReadOnlyThenCommitSelectedValidRows()throws Exception {
         var host=admin();var first=host.request("QUESTION_IMPORT_PREVIEW",preview(null,0,false,importRow("Câu nhập mới"),importRow("CÂU  NHẬP MỚI")));
         String token=first.path("import_id").asText();assertEquals(0,first.path("items").get(1).path("duplicate_in_file").asInt(-1));assertEquals(20,host.request("QUESTION_LIST",obj()).path("total").asInt());
@@ -150,8 +207,38 @@ class ServerIntegrationTest {
         assertEquals("WRONG_QUESTION",a.request("ANSWER",payload.deepCopy().put("question_id",999)).path("reason").asText());
         assertEquals("INVALID_ANSWER",a.request("ANSWER",payload.deepCopy().put("answer","Z")).path("reason").asText());
         assertTrue(a.request("ANSWER",payload).path("accepted").asBoolean());assertEquals("DUPLICATE_ANSWER",a.request("ANSWER",payload).path("reason").asText());
-        assertEquals(100,a.event("QUESTION_RESULT").path("score").asInt());assertFalse(b.request("ANSWER",payload).path("accepted").asBoolean());
-        assertEquals(0,b.event("GAME_OVER").path("score").asInt());assertEquals(100,a.event("GAME_OVER").path("score").asInt());
+        var result=a.event("QUESTION_RESULT");int awarded=result.path("points").asInt();assertTrue(awarded>=50&&awarded<=100);assertEquals(awarded,result.path("score").asInt());assertFalse(b.request("ANSWER",payload).path("accepted").asBoolean());
+        assertEquals(0,b.event("GAME_OVER").path("score").asInt());assertEquals(awarded,a.event("GAME_OVER").path("score").asInt());
+    }
+    @Test void fasterCorrectAnswersEarnMoreAndPersistWithoutTrustingClientTiming()throws Exception {
+        var host=admin();String code=room(host,2);
+        var fast=guest(code,"Nhanh");var slow=guest(code,"Chậm");var wrong=guest(code,"Sai");var missing=guest(code,"Bỏ trống");
+        for(var c:List.of(fast,slow,wrong,missing))c.request("READY_SET",obj().put("ready",true));
+        host.request("START_GAME",obj());var q=fast.event("QUESTION");
+        String correct=host.request("QUESTION_GET",obj().put("question_id",q.path("question_id").asInt())).path("correct_answer").asText();
+        var answer=obj().put("session_id",q.path("session_id").asText()).put("question_id",q.path("question_id").asInt()).put("answer",correct);
+        assertTrue(fast.request("ANSWER",answer.deepCopy().put("elapsed_ms",4999).put("response_time_ms",4999).put("points",0)).path("accepted").asBoolean());
+        Thread.sleep(1100);
+        assertTrue(slow.request("ANSWER",answer.deepCopy().put("elapsed_ms",0).put("response_time_ms",0).put("timestamp",Long.MAX_VALUE).put("points",999999)).path("accepted").asBoolean());
+        assertEquals("DUPLICATE_ANSWER",fast.request("ANSWER",answer).path("reason").asText());
+        String incorrect=correct.equals("A")?"B":"A";
+        assertTrue(wrong.request("ANSWER",answer.deepCopy().put("answer",incorrect)).path("accepted").asBoolean());
+        assertEquals("DUPLICATE_ANSWER",wrong.request("ANSWER",answer).path("reason").asText());
+        var fastRound=fast.event("QUESTION_RESULT");var slowRound=slow.event("QUESTION_RESULT");
+        int fastPoints=fastRound.path("points").asInt(),slowPoints=slowRound.path("points").asInt();
+        assertTrue(fastPoints>slowPoints,"Faster correct answers must earn more than slower correct answers");
+        assertTrue(slowPoints>=50&&fastPoints<=100);assertEquals(fastPoints,fastRound.path("score").asInt());assertEquals(slowPoints,slowRound.path("score").asInt());
+        assertEquals(0,wrong.event("QUESTION_RESULT").path("points").asInt());assertEquals(0,missing.event("QUESTION_RESULT").path("points").asInt());
+        var q2=slow.event("QUESTION");
+        String correct2=host.request("QUESTION_GET",obj().put("question_id",q2.path("question_id").asInt())).path("correct_answer").asText();
+        assertTrue(slow.request("ANSWER",obj().put("session_id",q2.path("session_id").asText()).put("question_id",q2.path("question_id").asInt()).put("answer",correct2)).path("accepted").asBoolean());
+        var noAnswer=fast.event("QUESTION_RESULT");assertEquals(0,noAnswer.path("points").asInt());assertFalse(noAnswer.path("correct").asBoolean());assertEquals(fastPoints,noAnswer.path("score").asInt());
+        int nextPoints=slow.event("QUESTION_RESULT").path("points").asInt();assertTrue(nextPoints>=50&&nextPoints<=100);
+        var end=fast.event("GAME_OVER");var slowEnd=slow.event("GAME_OVER");
+        assertEquals(fastPoints,end.path("score").asInt());assertEquals(1,end.path("correct_count").asInt());assertEquals(slowPoints+nextPoints,slowEnd.path("score").asInt());assertEquals(2,slowEnd.path("correct_count").asInt());
+        assertEquals(0,wrong.event("GAME_OVER").path("score").asInt());assertEquals(0,missing.event("GAME_OVER").path("score").asInt());
+        assertEquals(end.path("ranking"),host.request("HISTORY_GET",obj().put("session_id",q.path("session_id").asText())).path("ranking"));
+        host.request("ROOM_RESET",obj());for(var player:host.request("ROOM_STATE",obj()).path("players")){assertEquals(0,player.path("score").asInt());assertEquals(0,player.path("correct_count").asInt());}
     }
     @Test void disconnectedPlayerRemainsInFinalRankingAndSavedHistory()throws Exception {
         var host=admin();String code=room(host,1);Client a=guest(code,"Rời mạng"),b=guest(code,"Còn mạng");a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());

@@ -36,7 +36,7 @@ Chạy từng ứng dụng ở terminal riêng. Giảng viên/Admin dùng cùng 
 3. Học sinh: cùng IP/cổng/truststore, nhập nickname và mã phòng. Không cần tài khoản học sinh. Nickname không trùng trong phòng.
 4. Chọn linh vật rồi Sẵn sàng. Linh vật đã có người dùng sẽ bị khóa; Server xử lý tranh chấp giữa hai máy.
 5. Tối thiểu 2, tối đa 10 học sinh; tất cả sẵn sàng thì chủ phòng bắt đầu. Đếm ngược → câu hỏi → đáp án 3 giây → bảng hạng 4,5 giây → câu kế/đích.
-6. Mỗi câu đúng +100, không cộng tốc độ. Đồng điểm đồng hạng (1, 1, 3). ACK chỉ xác nhận nộp; kết quả đúng/sai do Server gửi khi hết giờ. Mỗi người chỉ nộp một lần/câu.
+6. Cập nhật 24/10/2026: mỗi câu đúng trong hạn nhận 50–100 điểm, trả lời càng nhanh càng nhiều điểm; sai/bỏ trống/trễ +0. Xem `Cham_diem_theo_toc_do.md`. Đồng điểm đồng hạng (1, 1, 3). ACK chỉ xác nhận nộp; kết quả đúng/sai/điểm do Server gửi khi hết giờ. Mỗi người chỉ nộp một lần/câu.
 7. Giảng viên xem lịch sử hoặc chơi ván mới. Reset giữ người còn kết nối và avatar, xóa sẵn sàng/điểm, đổi mã phòng. Đóng phòng đưa học sinh ra ngoài. F11 mở màn hình trình chiếu; dùng máy quản lý làm nguồn âm thanh chính.
 
 Mất kết nối giữa ván: học sinh không khôi phục phiên cũ, điểm đã chốt được giữ. Giảng viên đăng nhập lại cùng tài khoản để nhận trạng thái hiện tại. Nếu toàn bộ học sinh rời đi, ván bị hủy và không lưu thành ván hoàn tất. Server khởi động lại không khôi phục ván đang chơi; tài khoản, câu hỏi, các ván đã hoàn thành vẫn nằm trong SQLite.

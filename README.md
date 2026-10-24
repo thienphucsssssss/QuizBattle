@@ -6,6 +6,8 @@ Dự án môn Lập trình mạng của nhóm VUA, lớp 23DTHA3. Toàn bộ s�
 
 Xem **[Hướng dẫn clone, build, chạy và làm việc theo nhánh](docs/PHAT_TRIEN_NHOM.md)**. Cần Windows, JDK 21 x64 và Maven 3.9.x; chạy `mvn -B -ntp install` tại thư mục gốc. Repo chứa mã nguồn/tài nguyên, không chứa tài khoản mặc định, private key, database hoặc bộ cài cá nhân. Tự tạo `config/server.properties` và `client.properties` từ các file mẫu, rồi thiết lập Server phát triển theo hướng dẫn. Không dùng lệnh Preview/Seed trong các ghi chép lịch sử bên dưới.
 
+**Chạy nhanh trên Windows:** nhấn đúp [run.bat](run.bat). Lần đầu chạy trên cùng máy, chọn **2** để build và thiết lập Server, chọn **3** khởi chạy Server, đợi `NQB_SERVER_READY`, rồi chọn **4** hoặc **5** mở Client. Xem hướng dẫn trong `docs/PHAT_TRIEN_NHOM.md` nếu chạy nhiều máy LAN.
+
 Hỗ trợ đăng nhập Admin/giảng viên, học sinh nickname/linh vật; ngân hàng theo chủ sở hữu, lọc/trùng/import Excel–Word; chơi LAN thời gian thực, bảng hạng sau từng câu và bục vinh danh, SFX và nhạc nền offline. Tự dò Server/phòng và vào bằng mã đã có; tự thích nghi khi IP DHCP thay đổi **chưa triển khai**.
 
 ## Bản dùng chính trên máy tác giả — không có trong Git

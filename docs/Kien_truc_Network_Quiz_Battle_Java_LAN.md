@@ -105,7 +105,7 @@ Start kiểm tra owner, ít nhất hai Player, tất cả ready và đủ câu �
 
 Mỗi câu: Server đặt deadline trước broadcast QUESTION. ANSWER cần request_id, session_id, question_id và A/B/C/D. Chấp nhận duy nhất đáp án hợp lệ đầu tiên của Player cho câu đó; ANSWER_ACK mới là xác nhận đã ghi nhận, gửi thành công ở Client không phải ACK. Đáp án trễ/trùng/sai câu không đổi điểm.
 
-Chờ hết deadline kể cả khi tất cả đã trả lời. Đúng +100, sai/bỏ trống/trễ +0; không thưởng tốc độ để không lấy độ trễ Wi-Fi làm tiêu chí. Server chấm đúng một lần, gửi QUESTION_RESULT và ranking. Đồng điểm đồng hạng kiểu 1,1,3; nickname/player_id chỉ ổn định thứ tự hiển thị.
+Chờ hết deadline kể cả khi tất cả đã trả lời. Theo cập nhật ngày 24/10/2026, đúng trong hạn nhận `50 + round(50 × thời_gian_còn_lại / thời_lượng_câu)` điểm (50–100); sai/bỏ trống/trễ +0. Mốc mở câu và thời gian nhận đáp án hợp lệ đầu tiên do Server ghi bằng `System.nanoTime()`; không tin thời gian Client. Server chấm đúng một lần, lưu điểm câu vừa chấm để `QUESTION_RESULT.points`, tổng điểm, ranking và lịch sử thống nhất. Xóa thời gian/điểm riêng của câu khi mở câu mới, START_GAME và ROOM_RESET. Đồng điểm đồng hạng kiểu 1,1,3; nickname/player_id chỉ ổn định thứ tự hiển thị. Chi tiết ở `Cham_diem_theo_toc_do.md`.
 
 Sau câu cuối vẫn công bố ROUND_RANKING, sau đó lưu transaction rồi gửi GAME_OVER, gồm `result_saved` để báo lỗi ghi DB. ROOM_RESET ở trạng thái hợp lệ đưa phòng về WAITING, xóa điểm/ready/đáp án và sinh mã phòng mới, giữ avatar người còn kết nối. ABORT_GAME hủy rõ ràng, không tạo kết quả hoàn thành giả.
 

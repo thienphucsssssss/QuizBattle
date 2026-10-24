@@ -56,7 +56,7 @@ final class QuestionImportSession {
             if(!index.isIntegralNumber()||!index.canConvertToInt()||index.asInt()<0||index.asInt()>=rows.size()||!used.add(index.asInt()))throw fail("INVALID_INPUT","Danh sách câu được chọn không hợp lệ.");
             var row=rows.get(index.asInt());if(!QuestionImportRules.errors(row).isEmpty())throw fail("INVALID_INPUT","Có câu được chọn chưa hợp lệ. Chưa lưu dữ liệu.");selected.add(row);
         }
-        var result=store.importQuestions(owner,selected,bool(payload,"allow_duplicates",false));
+        var result=store.importQuestions(owner,selected,bool(payload,"allow_duplicates",false),optional(payload,"question_set_name","",80));
         return result.put("skipped",rows.size()-selected.size());
     }
 }

@@ -41,7 +41,9 @@ final class ManagementViews {
     }
     void bank(String keyword, String category, String active, String sort, int page) {
         var data = table(); data.getColumns().addAll(textColumn("ID", "question_id", 64), textColumn("Nội dung câu hỏi", "content_preview", 450), textColumn("Chủ đề", "category", 140), activeColumn());
+        data.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         TextField search = new TextField(keyword); search.setPromptText("Tìm nội dung câu hỏi…"); search.setMaxWidth(Double.MAX_VALUE);
+        var sets=new ComboBox<QuestionSets.Choice>();sets.setId("bank-question-set");sets.setAccessibleText("Lọc bộ câu hỏi");sets.setPrefWidth(255);sets.setMinWidth(180);sets.setValue(QuestionSets.Choice.all());sets.setDisable(true);
         ComboBox<String> categories = new ComboBox<>(FXCollections.observableArrayList("Tất cả chủ đề")); categories.setValue(category); categories.setPrefWidth(190);
         ComboBox<String> statuses = new ComboBox<>(FXCollections.observableArrayList("Tất cả trạng thái", "Đang bật", "Đã tắt")); statuses.setValue(active);
         ComboBox<String> order = new ComboBox<>(FXCollections.observableArrayList("Mới cập nhật", "ID tăng dần")); order.setValue(sort);
@@ -49,22 +51,27 @@ final class ManagementViews {
         var add = button("+ Thêm câu hỏi", "ink-button", () -> editQuestion(object())); add.setDisable(!app.editsAllowed());
         var header = row(16, column(4, text("Ngân hàng của tôi", "title"), text("Câu hỏi rõ ràng, một đáp án đúng.", "muted")), space(), add);
         var importFile=button("Nhập từ Excel / Word","quiet",()->new QuestionImportView(app).show());importFile.setDisable(!app.editsAllowed());importFile.setId("bank-import");
-        var fileActions=new FlowPane(12,8,importFile,button("Xem mẫu / Tải mẫu","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage())));
+        var manageSets=button("Bộ câu hỏi","quiet",()->{
+            var p=filters(search.getText(),categories.getValue(),statuses.getValue(),1,order.getValue()).put("question_set_id",app.bankQuestionSet());
+            QuestionSets.manage(app,p,data.getSelectionModel().getSelectedItems().stream().map(q->q.path("question_id").asInt()).toList());
+        });manageSets.setId("bank-manage-sets");manageSets.setDisable(!app.editsAllowed());
+        var fileActions=new FlowPane(12,8,importFile,manageSets,button("Xem mẫu / Tải mẫu","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage())));
         var filterRow = new FlowPane(12, 12, field("Chủ đề", categories), field("Trạng thái", statuses), field("Sắp xếp", order));
-        var top = column(16, header, fileActions, search, filterRow, count); top.setPadding(new Insets(0, 0, 18, 0));
+        var searchRow=row(12,search,sets);HBox.setHgrow(search,Priority.ALWAYS);
+        var top = column(16, header, fileActions, searchRow, filterRow, count); top.setPadding(new Insets(0, 0, 18, 0));
         var inspector = column(14, text("CHI TIẾT CÂU HỎI", "caption"), text("Chọn một câu trong danh sách", "subtitle")); inspector.setPrefWidth(300); inspector.setMaxWidth(340); inspector.getStyleClass().add("panel");
         var content = new BorderPane(data); var detailScroll = scroll(inspector); detailScroll.setPrefWidth(320); BorderPane.setMargin(detailScroll, new Insets(0, 0, 0, 20)); content.setRight(detailScroll);
         content.widthProperty().addListener((o, before, width) -> content.setRight(width.doubleValue() < 1020 ? null : detailScroll));
         Button previous = new Button("← Trước"), next = new Button("Sau →"); previous.setDisable(page <= 1);
         var inspect = button("Xem câu đã chọn", "quiet", () -> { var row = data.getSelectionModel().getSelectedItem(); if (row != null) openDetail(row.path("question_id").asInt()); });
         inspect.setDisable(true);
-        var clear = button("Xóa bộ lọc", "link-button", () -> { app.setBankFilter("", "Tất cả chủ đề", "Tất cả trạng thái", "Mới cập nhật", 1); app.bankView(); });
+        var clear = button("Xóa bộ lọc", "link-button", () -> { app.setBankQuestionSet(0);app.setBankFilter("", "Tất cả chủ đề", "Tất cả trạng thái", "Mới cập nhật", 1); app.bankView(); });
         var bottom = row(12, paging, clear, space(), inspect, previous, next); bottom.setPadding(new Insets(16, 0, 0, 0));
         var layout = new BorderPane(content); layout.setTop(top); layout.setBottom(bottom); app.showManagement("Ngân hàng", layout);
         Runnable refresh = () -> {
             int version = ++requestVersion; count.setText("Đang tải…"); data.setPlaceholder(text("Đang tải câu hỏi…", "muted"));
             app.setBankFilter(search.getText(), categories.getValue(), statuses.getValue(), order.getValue(), page);
-            app.call("QUESTION_LIST", filters(search.getText(), categories.getValue(), statuses.getValue(), page, order.getValue()), response -> {
+            app.call("QUESTION_LIST", filters(search.getText(), categories.getValue(), statuses.getValue(), page, order.getValue()).put("question_set_id",app.bankQuestionSet()), response -> {
                 if (version != requestVersion || layout.getScene() == null) return;
                 List<JsonNode> rows = new ArrayList<>(); response.path("items").forEach(rows::add); data.setItems(FXCollections.observableArrayList(rows));
                 data.setPlaceholder(column(8, text("Không tìm thấy câu hỏi", "subtitle"), text("Thử bỏ bớt điều kiện lọc hoặc thêm câu hỏi mới.", "muted")));
@@ -94,7 +101,12 @@ final class ManagementViews {
         app.call("QUESTION_CATEGORIES", object(), response -> {
             if (layout.getScene() == null) return;
             categories.setOnAction(null); response.path("categories").forEach(v -> { if (!categories.getItems().contains(v.asText())) categories.getItems().add(v.asText()); }); categories.setValue(category); categories.setOnAction(e -> newFilter.run());
-        }); refresh.run();
+        });
+        QuestionSets.load(app,()->layout.getScene()!=null,values->{
+            var choices=new ArrayList<QuestionSets.Choice>();choices.add(QuestionSets.Choice.all());choices.addAll(values);sets.setItems(FXCollections.observableArrayList(choices));sets.setValue(choices.stream().filter(v->v.id()==app.bankQuestionSet()).findFirst().orElse(choices.getFirst()));sets.setDisable(false);
+            sets.setOnAction(e->{if(sets.getValue()!=null){app.setBankQuestionSet(sets.getValue().id());app.bankView();}});
+        },failure->app.notice("Không tải được bộ câu hỏi: "+ArcadeApplication.message(failure),true));
+        refresh.run();
     }
     private VBox detail(JsonNode question) { return detail(question, false); }
     private VBox detail(JsonNode question, boolean readOnly) {

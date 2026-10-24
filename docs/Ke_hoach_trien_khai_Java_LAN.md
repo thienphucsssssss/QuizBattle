@@ -96,7 +96,7 @@ Thiện chủ trì room/join F04 F05; Trường Thi ready/question/answer/rank F
 - [ ] JOIN nickname/mã phòng/giới hạn/trùng tên, lobby, READY_SET và điều kiện Start.
 - [ ] Snapshot câu hỏi đang bật của owner/người chơi; Game Worker/state machine và clock có thể kiểm thử.
 - [ ] QUESTION/deadline Server, ANSWER đầu tiên hợp lệ, ACK, session/question/deadline validation.
-- [ ] Đóng/chấm một lần, +100/+0, đồng điểm đồng hạng; QUESTION_RESULT/GAME_OVER không lộ đáp án sớm.
+- [ ] Đóng/chấm một lần, đúng 50–100 điểm theo tốc độ do Server ghi nhận (cập nhật 24/10/2026), sai/bỏ trống/trễ +0, đồng điểm đồng hạng; QUESTION_RESULT/GAME_OVER không lộ đáp án sớm.
 - [ ] Lưu matches/match_results theo host bằng transaction; result_saved=false khi lỗi; HISTORY_LIST owner/pagination.
 - [ ] Disconnect: giữ điểm guest rời, chủ phòng login lại, hết guest thì abort; restart không phục hồi ván.
 - [ ] Reset giữ owner, Close giải phóng owner; dữ liệu CRUD không thay snapshot đang chạy.

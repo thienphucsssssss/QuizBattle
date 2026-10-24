@@ -16,6 +16,16 @@ mvn -B -ntp install
 
 Maven phải dùng đúng JDK 21. Build này chạy cả unit/integration tests, không khởi tạo dữ liệu cá nhân. Test tự tạo tài khoản/chứng chỉ/database tạm riêng. Không có mật khẩu Admin mặc định.
 
+### Chạy nhanh bằng `run.bat` trên Windows
+
+Nhấn đúp `run.bat` tại thư mục gốc để mở menu. File tự tìm Maven trong `PATH`, `MAVEN_HOME`, `M2_HOME` hoặc thư mục cài NetBeans trong `Program Files`; vẫn cần JDK 21 x64. Lần chạy đầu tự build và tải thư viện, nên cần Internet.
+
+Để chạy trên **cùng một máy**, chọn **2** để thiết lập Server: nhập mật khẩu TLS ít nhất 6 ký tự, rồi đặt mật khẩu Admin 8–128 ký tự. Cấu hình đã có được giữ lại; Admin đã tồn tại không bị tạo lại. Chọn **3** mở Server ở cửa sổ riêng, nhập mật khẩu TLS và đợi `NQB_SERVER_READY`. Sau đó chọn **4** mở Client Admin/giảng viên hoặc **5** mở Client học sinh; có thể mở nhiều Client. Admin mới có tên đăng nhập `admin` và mật khẩu bạn vừa đặt. Giữ cửa sổ Server mở khi sử dụng.
+
+Ở menu chỉ bấm một phím số, không cần Enter. Khi nhập mật khẩu, chữ và số được che bằng dấu `*`; nhập xong nhấn Enter. Nếu vô tình Enter rỗng hoặc mật khẩu quá ngắn, script yêu cầu nhập lại ngay trước khi chạy Java.
+
+Sau khi sửa mã nguồn, chọn **1** để build lại. Có thể chạy trực tiếp `run.bat build`, `run.bat setup`, `run.bat server`, `run.bat admin` hoặc `run.bat player` từ terminal. `setup` tạo chứng chỉ cho `127.0.0.1`; để chạy nhiều máy LAN, làm theo mục 3 với IP Server thật. Client trên máy khác cần nhận truststore và cấu hình từ Server theo mục đó.
+
 ## 2. Chạy thử hoàn toàn trên một máy
 
 Chạy tại thư mục repo. Các file sau là cấu hình **cục bộ**, được Git bỏ qua:

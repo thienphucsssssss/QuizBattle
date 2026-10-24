@@ -28,6 +28,7 @@ final class QuestionImportView {
     private final VBox detail=column(8,text("Chọn một dòng để xem đủ câu hỏi và đáp án.","muted"));
     private final Label status=text("Chọn tệp .xlsx hoặc .docx, tối đa 500 câu và 5 MiB.","muted"),count=text("Chưa chọn tệp","caption");
     private final CheckBox allowDuplicates=new CheckBox("Cho phép nhập câu trùng (tạo bản mới)");
+    private final TextField setName=new TextField();
     private final ExecutorService worker=Executors.newSingleThreadExecutor(r->{var t=new Thread(r,"question-file");t.setDaemon(true);return t;});
     private final PauseTransition nextBatch=new PauseTransition(Duration.millis(45));
     private final List<PreviewRow> rows=new ArrayList<>();
@@ -60,6 +61,8 @@ final class QuestionImportView {
         var selectNone=button("Bỏ chọn","link-button",()->{rows.forEach(r->r.selected.set(false));table.refresh();update();});
         selectAll.disableProperty().bind(choose.disableProperty());selectNone.disableProperty().bind(choose.disableProperty());
         var toolbar=new FlowPane(10,8,choose,button("Xem mẫu / Tải mẫu","quiet",()->showTemplates(app,dialog.getDialogPane().getScene().getWindow())));retry.setId("import-recheck");toolbar.getChildren().add(retry);
+        setName.setId("import-set-name");setName.setPromptText("Để trống nếu chỉ nhập ngân hàng");setName.setTooltip(new Tooltip("Các câu nhập được thêm vào bộ có tên này; nếu chưa có sẽ tạo bộ mới."));
+        var setField=field("Lưu vào bộ câu hỏi",setName);setField.setPrefWidth(290);toolbar.getChildren().add(setField);toolbar.setRowValignment(VPos.BOTTOM);
         var details=scroll(detail);details.setFitToWidth(true);details.setPrefViewportHeight(190);details.setMinHeight(90);details.setId("import-detail");
         double height=Math.min(730,Math.min(app.ownerStage().getHeight()-50,javafx.stage.Screen.getPrimary().getVisualBounds().getHeight()-70));
         javafx.scene.Node preview;
@@ -80,7 +83,8 @@ final class QuestionImportView {
     private TableColumn<PreviewRow,String> col(String title,Function<PreviewRow,String> value,int width){var c=new TableColumn<PreviewRow,String>(title);c.setPrefWidth(width);c.setSortable(false);c.setCellValueFactory(r->new ReadOnlyStringWrapper(value.apply(r.getValue())));return c;}
     private void chooseFile(){var picker=new FileChooser();picker.setTitle("Chọn tệp câu hỏi");picker.getExtensionFilters().addAll(new FileChooser.ExtensionFilter("Excel / Word (*.xlsx, *.docx)","*.xlsx","*.docx"));var file=picker.showOpenDialog(dialog.getDialogPane().getScene().getWindow());if(file!=null)loadFile(file.toPath());}
     void loadFile(Path file) {
-        if(committing)return;int generation=++version;nextBatch.stop();if(reading!=null)reading.cancel(true);rows.clear();table.getItems().clear();showDetail(null);allowDuplicates.setSelected(false);validated=false;uncertain=false;busy=true;status.setText("Đang đọc "+file.getFileName()+"…");update();
+        if(committing)return;String base=file.getFileName().toString().replaceFirst("(?i)\\.(xlsx|docx)$","");setName.setText(base.length()>80?base.substring(0,80):base);
+        int generation=++version;nextBatch.stop();if(reading!=null)reading.cancel(true);rows.clear();table.getItems().clear();showDetail(null);allowDuplicates.setSelected(false);validated=false;uncertain=false;busy=true;status.setText("Đang đọc "+file.getFileName()+"…");update();
         reading=worker.submit(()->{
             try {var drafts=QuestionFiles.readSafely(file);Platform.runLater(()->{
                 if(generation!=version||!dialog.isShowing())return;busy=false;
@@ -110,10 +114,11 @@ final class QuestionImportView {
     }
     private void commit() {
         if(busy||!validated||uncertain)return;if(!app.editsAllowed()){status.setText("Chỉ nhập câu hỏi khi phòng đang chờ và tài khoản còn kết nối.");return;}
-        var payload=object().put("import_id",importId).put("allow_duplicates",allowDuplicates.isSelected());var selected=payload.putArray("selected_indexes");
+        String group=setName.getText().strip();if(group.length()>80){status.setText("Tên bộ câu hỏi tối đa 80 ký tự.");setName.requestFocus();return;}
+        var payload=object().put("import_id",importId).put("allow_duplicates",allowDuplicates.isSelected()).put("question_set_name",group);var selected=payload.putArray("selected_indexes");
         for(int i=0;i<rows.size();i++)if(rows.get(i).selected.get())selected.add(i);if(selected.isEmpty())return;
         busy=true;committing=true;status.setText("Đang lưu "+selected.size()+" câu hỏi…");update();
-        app.call("QUESTION_IMPORT_COMMIT",payload,response->{committing=false;dialog.setResult(ButtonType.OK);dialog.close();app.bankView();app.notice("Đã nhập "+response.path("imported").asInt()+" câu hỏi · Bỏ qua "+response.path("skipped").asInt()+" câu.",false);},failure->{
+        app.call("QUESTION_IMPORT_COMMIT",payload,response->{committing=false;dialog.setResult(ButtonType.OK);dialog.close();app.bankView();app.notice("Đã nhập "+response.path("imported").asInt()+" câu hỏi"+(response.has("question_set_name")?" vào bộ “"+response.path("question_set_name").asText()+"”":"")+" · Bỏ qua "+response.path("skipped").asInt()+" câu.",false);},failure->{
             busy=false;committing=false;validated=false;
             String code=failure instanceof GatewayException gateway?gateway.code():"UNKNOWN";
             uncertain=Set.of("TIMEOUT","DISCONNECTED","SEND_FAILED","UNKNOWN").contains(code);
@@ -124,6 +129,7 @@ final class QuestionImportView {
         long selected=rows.stream().filter(r->r.selected.get()).count(),errors=rows.stream().filter(r->!r.issues.isEmpty()).count(),duplicates=rows.stream().filter(PreviewRow::duplicate).count();
         count.setText(rows.isEmpty()?"Chưa có dữ liệu":"Chọn "+selected+" / "+rows.size()+" · Lỗi "+errors+" · Trùng "+duplicates);
         choose.setDisable(busy);retry.setDisable(busy||rows.isEmpty()||uncertain);allowDuplicates.setDisable(busy||!validated||uncertain);commit.setText(committing?"Đang nhập…":"Nhập "+selected+" câu hỏi");commit.setDisable(busy||!validated||uncertain||selected==0);
+        setName.setDisable(busy||uncertain);
         ((Button)dialog.getDialogPane().lookupButton(ButtonType.CANCEL)).setDisable(committing);
     }
     private void showDetail(PreviewRow row) {
