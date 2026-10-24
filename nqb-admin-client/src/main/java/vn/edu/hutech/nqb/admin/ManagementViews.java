@@ -220,14 +220,63 @@ final class ManagementViews {
             go.setDisable(true); app.call(type, p, value -> { password.clear(); p.remove("temporary_password"); dialog.close(); app.usersView(); app.notice("Đã cập nhật tài khoản.", false); }, failure -> { p.remove("temporary_password"); password.clear(); go.setDisable(false); error.setText(ArcadeApplication.message(failure)); });
         }); dialog.show();
     }
+
     void history(int page) {
         var table = table(); table.getColumns().addAll(textColumn("Phòng thi", "room_name", 280), textColumn("Kết thúc (UTC)", "ended_at_utc", 280), textColumn("Số câu", "question_count", 100), textColumn("Người chơi", "player_count", 120));
         var heading = column(6, text("Lịch sử của tôi", "title"), text("Các ván do tài khoản của bạn tổ chức.", "muted")); heading.setPadding(new Insets(0,0,20,0));
-        var show = button("Xem bảng điểm", "ink-button", () -> { JsonNode chosen = table.getSelectionModel().getSelectedItem(); if (chosen != null) app.call("HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()), details -> {
-            var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog); dialog.setHeaderText(details.path("room_name").asText("Bảng điểm"));
-            var list = column(12); details.path("ranking").forEach(v -> list.getChildren().add(row(16, text("#" + v.path("rank").asInt(), "subtitle"), text(v.path("nickname").asText()), space(), text(v.path("score").asInt() + " điểm", "subtitle"))));
-            dialog.getDialogPane().setContent(list); dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE); dialog.show();
-        }); });
+        
+        var show = button("Xem chi tiết", "ink-button", () -> { 
+            JsonNode chosen = table.getSelectionModel().getSelectedItem(); 
+            if (chosen != null) {
+                app.call("HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()), details -> {
+                    var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog); 
+                    dialog.setHeaderText(details.path("room_name").asText("Chi tiết lịch sử"));
+                    
+                    var list = column(12);
+                    list.getChildren().add(text("Bảng điểm", "subtitle"));
+                    details.path("ranking").forEach(v -> list.getChildren().add(row(16, text("#" + v.path("rank").asInt(), "caption"), text(v.path("nickname").asText()), space(), text(v.path("score").asInt() + " điểm", "caption"))));
+                    
+                    if (details.has("questions") && details.path("questions").size() > 0) {
+                        list.getChildren().add(new Separator());
+                        list.getChildren().add(text("Bộ câu hỏi của ván này", "subtitle"));
+                        details.path("questions").forEach(q -> {
+                            list.getChildren().add(column(4, 
+                                text("Q" + q.path("question_id").asInt() + " - " + q.path("category").asText(), "caption"), 
+                                text(q.path("content").asText(), "muted")
+                            ));
+                        });
+                    }
+                    
+                    var scrollPane = scroll(list);
+                    scrollPane.setPrefSize(400, 450);
+                    dialog.getDialogPane().setContent(scrollPane);
+                    
+                    ButtonType btnRecreate = new ButtonType("Tạo lại phòng thi này", ButtonBar.ButtonData.OK_DONE);
+                    dialog.getDialogPane().getButtonTypes().addAll(btnRecreate, ButtonType.CLOSE);
+                    
+                    Button recreateBtn = (Button) dialog.getDialogPane().lookupButton(btnRecreate);
+                    recreateBtn.getStyleClass().add("primary");
+                    recreateBtn.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
+                        event.consume();
+                        recreateBtn.setDisable(true);
+                        recreateBtn.setText("Đang tạo phòng...");
+                        
+                        ObjectNode p = object().put("session_id", details.path("session_id").asText()).put("duration_seconds", 15);
+                        app.call("ROOM_RECREATE", p, ok -> {
+                            dialog.close();
+                            app.notice("Đã tạo lại phòng chờ thành công!", false);
+                        }, failure -> {
+                            recreateBtn.setDisable(false);
+                            recreateBtn.setText("Tạo lại phòng thi này");
+                            app.notice(ArcadeApplication.message(failure), true);
+                        });
+                    });
+                    
+                    dialog.show();
+                }); 
+            }
+        });
+        
         show.setDisable(true); table.getSelectionModel().selectedItemProperty().addListener((o, old, value) -> show.setDisable(value == null));
         var previous = button("← Trước", "quiet", () -> { app.setHistoryPage(page - 1); app.historyView(); }); previous.setDisable(page <= 1);
         var next = button("Sau →", "quiet", () -> { app.setHistoryPage(page + 1); app.historyView(); }); next.setDisable(true);
@@ -235,6 +284,7 @@ final class ManagementViews {
         var layout = new BorderPane(table); layout.setTop(heading); layout.setBottom(column(12, text("Chỉ hiển thị kết quả đã lưu trên Server.", "muted"), row(12, count, space(), previous, next, show))); app.showManagement("Lịch sử", layout);
         app.call("HISTORY_LIST", object().put("page", page).put("page_size", 10), response -> { if (layout.getScene() == null) return; var rows = new ArrayList<JsonNode>(); response.path("items").forEach(rows::add); table.setItems(FXCollections.observableArrayList(rows)); table.setPlaceholder(text("Chưa có ván thi đã lưu", "muted")); count.setText(response.path("total").asInt() + " ván · Trang " + page); next.setDisable(!response.path("has_more").asBoolean()); });
     }
+
     void password(boolean required) {
         var old = new PasswordField(); var fresh = new PasswordField(); var repeat = new PasswordField(); var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);
         var form = column(18, text(required ? "Đổi mật khẩu tạm" : "Đổi mật khẩu", "title"), text(required ? "Đổi mật khẩu trước khi quản lý ngân hàng hoặc phòng thi." : "Sau khi đổi, đăng nhập lại bằng mật khẩu mới.", "muted"), field("Mật khẩu hiện tại", old), field("Mật khẩu mới · ít nhất 8 ký tự", fresh), field("Nhập lại mật khẩu mới", repeat), error);
