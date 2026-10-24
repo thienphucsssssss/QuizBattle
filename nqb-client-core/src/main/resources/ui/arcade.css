@@ -65,6 +65,9 @@
 .table-row-cell:selected { -fx-background-color: #e2f5cf; }
 .table-row-cell:selected .text { -fx-fill: -ink; }
 .table-cell { -fx-border-color: transparent; -fx-alignment: CENTER_LEFT; -fx-padding: 8; }
+.table-cell.question-select-cell { -fx-alignment: CENTER; -fx-padding: 0; }
+.table-view .column-header#bank-selection-column .label { -fx-alignment: CENTER; }
+.question-pick { -fx-min-width: 44; -fx-min-height: 44; -fx-padding: 10; -fx-alignment: CENTER; -fx-font-size: 16; }
 .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
 .scroll-pane, .scroll-pane > .viewport { -fx-background-color: transparent; }
 .scroll-bar:horizontal, .scroll-bar:vertical { -fx-background-color: transparent; }

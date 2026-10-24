@@ -4,7 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import vn.edu.hutech.nqb.client.*;
+import java.io.IOException;
+import java.net.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -17,7 +21,7 @@ class ServerIntegrationTest {
     @TempDir Path data;
     static final char[] KEY_PASSWORD="ephemeral-test-only".toCharArray();
     static Path key,trust;
-    QuizServer server; int port; final List<Client> clients=new ArrayList<>();
+    QuizServer server; int port,nextStudentIp=1; final List<Client> clients=new ArrayList<>();
     @BeforeAll static void certificates() throws Exception {
         key=certs.resolve("server.p12");trust=certs.resolve("trust.p12");Path certificate=certs.resolve("server.cer");
         keytool("-genkeypair","-alias","test","-keyalg","RSA","-keysize","2048","-validity","2","-dname","CN=localhost","-ext","SAN=ip:127.0.0.1,dns:localhost","-storetype","PKCS12","-keystore",key.toString(),"-storepass",new String(KEY_PASSWORD));
@@ -33,16 +37,174 @@ class ServerIntegrationTest {
     @AfterEach void close(){clients.forEach(Client::close);if(server!=null)server.close();}
     final class Client implements AutoCloseable {
         final TlsQuizGateway gateway;final BlockingQueue<JsonNode> events=new LinkedBlockingQueue<>();
-        Client()throws Exception{gateway=TlsQuizGateway.connect(new Endpoint("127.0.0.1",port),trust,KEY_PASSWORD);gateway.onEvent(events::add);clients.add(this);}
+        Client()throws Exception{this("127.0.0.1");}
+        Client(String sourceIp)throws Exception{gateway=connectFrom(sourceIp);gateway.onEvent(events::add);clients.add(this);}
         JsonNode request(String type,ObjectNode payload)throws Exception{return gateway.request(type,payload).get(8,TimeUnit.SECONDS);}
         JsonNode event(String type)throws Exception{long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(9);while(System.nanoTime()<until){var e=events.poll(100,TimeUnit.MILLISECONDS);if(e!=null&&e.path("type").asText().equals(type))return e.path("payload");}throw new AssertionError("Missing event "+type);}
         @Override public void close(){gateway.close();}
     }
+    // Forward encrypted bytes unchanged; the real gateway still performs TLS and hostname verification.
+    // Only the upstream socket's source address changes to simulate separate student machines.
+    private TlsQuizGateway connectFrom(String sourceIp)throws Exception {
+        if(sourceIp.equals("127.0.0.1"))return TlsQuizGateway.connect(new Endpoint("127.0.0.1",port),trust,KEY_PASSWORD);
+        try(var forwarder=new ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))){
+            int targetPort=port;
+            Thread.ofVirtual().start(()->{
+                try(var upstream=new Socket();var downstream=forwarder.accept()){
+                    upstream.bind(new InetSocketAddress(sourceIp,0));upstream.connect(new InetSocketAddress("127.0.0.1",targetPort),5000);
+                    upstream.setTcpNoDelay(true);downstream.setTcpNoDelay(true);
+                    Thread.ofVirtual().start(()->relay(downstream,upstream));relay(upstream,downstream);
+                }catch(IOException ignored){/* The real gateway reports transport failures. */}
+            });
+            return TlsQuizGateway.connect(new Endpoint("127.0.0.1",forwarder.getLocalPort()),trust,KEY_PASSWORD);
+        }
+    }
+    private static void relay(Socket from,Socket to){
+        try{from.getInputStream().transferTo(to.getOutputStream());}catch(IOException ignored){}
+        finally{try{from.close();}catch(IOException ignored){}try{to.close();}catch(IOException ignored){}}
+    }
     Client admin()throws Exception{var c=new Client();assertEquals("ADMIN",c.request("LOGIN",obj().put("username","admin").put("password","Admin-test-only-1")).path("role").asText());return c;}
     String room(Client host,int count)throws Exception{return host.request("ROOM_CONFIGURE",obj().put("room_name","Lớp LAN").put("question_count",count).put("duration_seconds",5)).path("room_code").asText();}
-    Client guest(String code,String name)throws Exception{var c=new Client();c.request("JOIN",obj().put("room_code",code).put("nickname",name));return c;}
+    Client guest(String code,String name)throws Exception{var c=new Client("127.0.0."+nextStudentIp++);c.request("JOIN",obj().put("room_code",code).put("nickname",name));return c;}
     void error(Client c,String code,String type,ObjectNode p){var ex=assertThrows(ExecutionException.class,()->c.request(type,p));assertEquals(code,assertInstanceOf(GatewayException.class,ex.getCause()).code());}
     private ObjectNode importRow(String content){return obj().put("content",content).put("option_a","TCP").put("option_b","UDP").put("option_c","IP").put("option_d","ARP").put("correct_answer","A").put("category","Mạng LAN");}
+    @Test void sameIpCannotJoinFromAnotherApplicationOrSpoofedIdentity()throws Exception {
+        var host=admin();String code=room(host,1);var first=new Client();
+        var joined=first.request("JOIN",obj().put("room_code",code).put("nickname","Học sinh đầu"));
+        var extra=new Client();
+        error(extra,"IP_ALREADY_IN_USE","JOIN",obj().put("room_code",code).put("nickname","Học sinh khác")
+            .put("ip_address","203.0.113.99").put("player_id","another-student").put("username","another-account"));
+        error(extra,"IP_ALREADY_IN_USE","JOIN",obj().put("room_code",code).put("nickname","Học sinh đầu"));
+        error(extra,"AUTH_REQUIRED","READY_SET",obj().put("ready",true));
+        first.request("READY_SET",obj().put("ready",true));
+        var state=host.request("ROOM_STATE",obj());assertEquals(1,state.path("players").size());
+        assertEquals(joined.path("player_id"),state.path("players").get(0).path("player_id"));
+        assertEquals(joined.path("avatar_id"),state.path("players").get(0).path("avatar_id"));
+        assertEquals(1,state.path("ready_count").asInt());
+    }
+    @Test void simultaneousStudentJoinsFromSameIpHaveExactlyOneWinner()throws Exception {
+        var host=admin();String code=room(host,1);var first=new Client();var second=new Client();
+        var one=first.gateway.request("JOIN",obj().put("room_code",code).put("nickname","Một"));
+        var two=second.gateway.request("JOIN",obj().put("room_code",code).put("nickname","Hai"));
+        int winners=0,rejected=0;
+        for(var response:List.of(one,two))try{response.get(8,TimeUnit.SECONDS);winners++;}
+        catch(ExecutionException failure){assertEquals("IP_ALREADY_IN_USE",assertInstanceOf(GatewayException.class,failure.getCause()).code());rejected++;}
+        assertEquals(1,winners);assertEquals(1,rejected);
+        assertEquals(1,host.request("ROOM_STATE",obj()).path("connected_player_count").asInt());
+    }
+    @ParameterizedTest @ValueSource(strings={"LEAVE","LOGOUT"})
+    void studentDepartureImmediatelyReleasesIp(String departure)throws Exception {
+        var host=admin();String code=room(host,1);var first=new Client();var replacement=new Client();
+        first.request("JOIN",obj().put("room_code",code).put("nickname","Trước"));
+        var attempt=obj().put("room_code",code).put("nickname","Sau");
+        error(replacement,"IP_ALREADY_IN_USE","JOIN",attempt);
+        first.request(departure,obj());
+        assertEquals("Sau",replacement.request("JOIN",attempt).path("nickname").asText());
+        assertEquals(1,host.request("ROOM_STATE",obj()).path("players").size());
+    }
+    @Test void resetKeepsActiveIpReservedAndRoomCloseReleasesIt()throws Exception {
+        var host=admin();String code=room(host,1);var first=new Client();var extra=new Client();
+        first.request("JOIN",obj().put("room_code",code).put("nickname","Giữ chỗ"));
+        String resetCode=host.request("ROOM_RESET",obj()).path("room_code").asText();
+        error(extra,"IP_ALREADY_IN_USE","JOIN",obj().put("room_code",resetCode).put("nickname","Mở thêm"));
+        host.request("ROOM_CLOSE",obj());first.event("ROOM_CLOSED");
+        String newCode=room(host,1);
+        assertEquals("Mở thêm",extra.request("JOIN",obj().put("room_code",newCode).put("nickname","Mở thêm")).path("nickname").asText());
+        assertEquals(1,host.request("ROOM_STATE",obj()).path("players").size());
+    }
+    @Test void detectedDisconnectReleasesIpForAnotherStudent()throws Exception {
+        var host=admin();String code=room(host,1);var first=new Client();var replacement=new Client();
+        first.request("JOIN",obj().put("room_code",code).put("nickname","Mất mạng"));
+        var attempt=obj().put("room_code",code).put("nickname","Kết nối mới");
+        error(replacement,"IP_ALREADY_IN_USE","JOIN",attempt);first.close();
+        JsonNode state;long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
+        do{state=host.request("ROOM_STATE",obj());if(state.path("players").isEmpty())break;Thread.sleep(30);}while(System.nanoTime()<until);
+        assertTrue(state.path("players").isEmpty());
+        assertEquals("Kết nối mới",replacement.request("JOIN",attempt).path("nickname").asText());
+    }
+    @Test void invalidJoinDoesNotReserveIp()throws Exception {
+        var host=admin();String code=room(host,1);var invalid=new Client();var valid=new Client();
+        error(invalid,"WRONG_ROOM","JOIN",obj().put("room_code","INVALID").put("nickname","Sai phòng"));
+        valid.request("JOIN",obj().put("room_code",code).put("nickname","Đúng phòng"));
+        error(invalid,"IP_ALREADY_IN_USE","JOIN",obj().put("room_code",code).put("nickname","Thử lại"));
+        assertEquals(1,host.request("ROOM_STATE",obj()).path("players").size());
+    }
+    @Test void roomTrackingUsesSocketIpAndRestrictsItToOwnerAndAdmin()throws Exception {
+        var admin=admin();var owner=new Client();
+        owner.request("REGISTER",obj().put("username","tracking.owner").put("display_name","Chủ phòng").put("password","Tracking-test-only-1"));
+        owner.request("LOGIN",obj().put("username","tracking.owner").put("password","Tracking-test-only-1"));
+        String code=room(owner,1);var student=new Client();
+        student.request("JOIN",obj().put("room_code",code).put("nickname","Minh IP").put("ip_address","203.0.113.99"));
+        for(var manager:List.of(owner,admin)){
+            var state=manager.request("ROOM_STATE",obj());
+            assertEquals(code,state.path("room_code").asText());assertEquals("Lớp LAN",state.path("room_name").asText());
+            assertEquals("127.0.0.1",state.path("players").get(0).path("ip_address").asText());
+            assertTrue(state.path("players").get(0).path("connected").asBoolean());
+        }
+        var unrelated=new Client();
+        unrelated.request("REGISTER",obj().put("username","tracking.observer").put("display_name","Giảng viên khác").put("password","Tracking-test-only-2"));
+        unrelated.request("LOGIN",obj().put("username","tracking.observer").put("password","Tracking-test-only-2"));
+        assertFalse(unrelated.request("ROOM_STATE",obj()).path("players").get(0).has("ip_address"));
+        assertFalse(student.request("ROOM_STATE",obj()).path("players").get(0).has("ip_address"));
+        assertFalse(student.event("ROOM_STATE").path("players").get(0).has("ip_address"));
+        owner.request("ROOM_CONFIGURE",obj().put("room_name","Phòng đổi tên"));
+        JsonNode updated;
+        do{updated=owner.event("ROOM_STATE");}while(!updated.path("room_name").asText().equals("Phòng đổi tên"));
+        assertEquals("127.0.0.1",updated.path("players").get(0).path("ip_address").asText());
+        assertFalse(unrelated.event("ROOM_STATE").path("players").get(0).has("ip_address"));
+        assertFalse(new Client().request("ROOM_BROWSE",obj()).toString().contains("ip_address"));
+    }
+    @Test void roomTrackingRetainsLastIpAfterDisconnectAndRemovesItOnReset()throws Exception {
+        var host=admin();String code=room(host,1);var a=guest(code,"Mất mạng");var b=guest(code,"Còn mạng");
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());a.event("QUESTION");a.close();
+        JsonNode state;long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
+        do{state=host.request("ROOM_STATE",obj());if(!state.path("players").get(0).path("connected").asBoolean())break;Thread.sleep(30);}while(System.nanoTime()<until);
+        assertEquals(2,state.path("players").size());assertFalse(state.path("players").get(0).path("connected").asBoolean());
+        assertEquals("127.0.0.1",state.path("players").get(0).path("ip_address").asText());
+        assertEquals(code,state.path("room_code").asText());
+        host.request("ABORT_GAME",obj());var reset=host.request("ROOM_RESET",obj());
+        assertNotEquals(code,reset.path("room_code").asText());assertEquals(1,reset.path("players").size());
+        assertEquals("Còn mạng",reset.path("players").get(0).path("nickname").asText());
+        assertEquals("127.0.0.2",reset.path("players").get(0).path("ip_address").asText());
+        b.request("LEAVE",obj());
+        until=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
+        do{state=host.request("ROOM_STATE",obj());if(state.path("players").isEmpty())break;Thread.sleep(30);}while(System.nanoTime()<until);
+        assertTrue(state.path("players").isEmpty());
+    }
+    @Test void trackingLogsMembershipAndRoomChangesWithAuthoritativeIp()throws Exception {
+        try(var logs=new TrackingLogs()){
+            var host=admin();String code=room(host,1);var a=new Client();
+            var joined=a.request("JOIN",obj().put("room_code",code).put("nickname","Minh \"IP\"").put("ip_address","203.0.113.99"));
+            String playerId=joined.path("player_id").asText();var event=logs.next("JOINED");
+            assertEquals(code,event.path("room_code").asText());assertEquals("Lớp LAN",event.path("room_name").asText());
+            assertEquals(playerId,event.path("player_id").asText());assertEquals("Minh \"IP\"",event.path("nickname").asText());
+            assertEquals("127.0.0.1",event.path("ip_address").asText());assertTrue(event.path("connected").asBoolean());
+            java.time.Instant.parse(event.path("timestamp_utc").asText());
+            host.request("ROOM_CONFIGURE",obj().put("room_name","Phòng mới"));
+            assertEquals("Phòng mới",logs.next("ROOM_UPDATED").path("room_name").asText());
+            String newCode=host.request("ROOM_RESET",obj()).path("room_code").asText();
+            assertEquals(newCode,logs.next("ROOM_RESET").path("room_code").asText());
+            a.request("LEAVE",obj());event=logs.next("LEFT");assertFalse(event.path("connected").asBoolean());assertEquals(newCode,event.path("room_code").asText());
+            var b=guest(newCode,"Lan");logs.next("JOINED");b.close();
+            assertFalse(logs.next("DISCONNECTED").path("connected").asBoolean());
+            guest(newCode,"Còn trong phòng");logs.next("JOINED");host.request("ROOM_CLOSE",obj());
+            event=logs.next("ROOM_CLOSED");assertEquals(newCode,event.path("room_code").asText());assertFalse(event.path("connected").asBoolean());
+            assertTrue(logs.events.isEmpty(),"Each departure must be logged once");
+        }
+    }
+    private static final class TrackingLogs extends java.util.logging.Handler implements AutoCloseable {
+        final com.fasterxml.jackson.databind.ObjectMapper mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+        final BlockingQueue<JsonNode> events=new LinkedBlockingQueue<>();
+        final java.util.logging.Logger logger=java.util.logging.Logger.getLogger(QuizServer.class.getName());
+        TrackingLogs(){logger.addHandler(this);}
+        @Override public void publish(java.util.logging.LogRecord record){
+            String prefix="NQB_STUDENT_TRACKING ";
+            if(record.getMessage().startsWith(prefix))try{events.add(mapper.readTree(record.getMessage().substring(prefix.length())));}catch(Exception e){throw new AssertionError(e);}
+        }
+        JsonNode next(String expected)throws Exception{var event=events.poll(3,TimeUnit.SECONDS);assertNotNull(event,"Missing tracking event "+expected);assertEquals(expected,event.path("event").asText());return event;}
+        @Override public void flush(){}
+        @Override public void close(){logger.removeHandler(this);}
+    }
     @Test void managerCanMonitorSubmissionsWithoutExposingAnswersToStudents()throws Exception {
         var host=admin();String code=room(host,1);var a=guest(code,"Minh");var b=guest(code,"Lan");
         a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
@@ -189,7 +351,7 @@ class ServerIntegrationTest {
     @Test void tenPlayersCompleteOneRealTlsRound()throws Exception {
         var host=admin();String code=room(host,1);var guests=new ArrayList<Client>();
         for(int i=0;i<10;i++){var c=guest(code,"Player "+i);c.request("READY_SET",obj().put("ready",true));guests.add(c);}
-        var extra=new Client();error(extra,"ROOM_FULL","JOIN",obj().put("room_code",code).put("nickname","Thứ 11"));
+        var extra=new Client("127.0.0.11");error(extra,"ROOM_FULL","JOIN",obj().put("room_code",code).put("nickname","Thứ 11"));
         host.request("START_GAME",obj());for(var c:guests){var q=c.event("QUESTION");assertTrue(c.request("ANSWER",obj().put("session_id",q.path("session_id").asText()).put("question_id",q.path("question_id").asInt()).put("answer","A")).path("accepted").asBoolean());}
         for(var c:guests){var end=c.event("GAME_OVER");assertEquals(10,end.path("ranking").size());assertTrue(end.path("result_saved").asBoolean());}
     }

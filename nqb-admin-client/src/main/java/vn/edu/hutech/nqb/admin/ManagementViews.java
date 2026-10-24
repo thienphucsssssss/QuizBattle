@@ -3,6 +3,7 @@ package vn.edu.hutech.nqb.admin;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import javafx.animation.PauseTransition;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.geometry.*;
@@ -33,6 +34,26 @@ final class ManagementViews {
     private TableColumn<JsonNode, String> activeColumn() {
         var column = new TableColumn<JsonNode, String>("Trạng thái"); column.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().path("is_active").asBoolean() ? "Đang bật" : "Đã tắt")); column.setPrefWidth(115); column.setSortable(false); return column;
     }
+    private TableColumn<JsonNode,JsonNode> questionSelectionColumn(Runnable changed) {
+        var column=new TableColumn<JsonNode,JsonNode>();column.setId("bank-selection-column");column.setMinWidth(64);column.setPrefWidth(64);column.setMaxWidth(64);column.setSortable(false);column.setResizable(false);column.setReorderable(false);
+        column.setCellValueFactory(value->new ReadOnlyObjectWrapper<>(value.getValue()));
+        column.setCellFactory(ignored->new TableCell<>() {
+            private final CheckBox check=new CheckBox();
+            {
+                getStyleClass().add("question-select-cell");check.getStyleClass().add("question-pick");check.setTooltip(new Tooltip("Tick để chọn câu hỏi cho bộ. Bỏ tick để bỏ chọn."));
+                check.setOnAction(event->{
+                    JsonNode question=getItem();if(isEmpty()||question==null)return;int id=question.path("question_id").asInt();
+                    app.updateBankSelection(List.of(id),check.isSelected()?List.of(id):List.of());getTableView().getSelectionModel().select(getIndex());changed.run();
+                });
+            }
+            @Override protected void updateItem(JsonNode question,boolean empty) {
+                super.updateItem(question,empty);setText(null);
+                if(empty||question==null){check.setId(null);setGraphic(null);return;}
+                int id=question.path("question_id").asInt();check.setId("question-check-"+id);check.setSelected(app.bankQuestionSelected(id));check.setAccessibleText("Chọn câu hỏi: "+question.path("content_preview").asText());setGraphic(check);
+            }
+        });
+        return column;
+    }
     private ObjectNode filters(String keyword, String category, String active, int page, String sort) {
         var p = object().put("keyword", keyword).put("page", page).put("page_size", 10).put("sort", sort.equals("ID tăng dần") ? "ID_ASC" : "UPDATED_DESC");
         if (!category.equals("Tất cả chủ đề")) p.put("category", category);
@@ -40,8 +61,8 @@ final class ManagementViews {
         return p;
     }
     void bank(String keyword, String category, String active, String sort, int page) {
-        var data = table(); data.getColumns().addAll(textColumn("ID", "question_id", 64), textColumn("Nội dung câu hỏi", "content_preview", 450), textColumn("Chủ đề", "category", 140), activeColumn());
-        data.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        var data = table();
+        var checkPage=new CheckBox();checkPage.setId("bank-check-page");checkPage.getStyleClass().add("question-pick");checkPage.setAllowIndeterminate(false);checkPage.setAccessibleText("Chọn tất cả câu hỏi trên trang hiện tại");checkPage.setTooltip(new Tooltip("Tick hoặc bỏ tick tất cả câu hỏi trên trang này. Các trang khác giữ lựa chọn hiện tại."));
         TextField search = new TextField(keyword); search.setPromptText("Tìm nội dung câu hỏi…"); search.setMaxWidth(Double.MAX_VALUE);
         var sets=new ComboBox<QuestionSets.Choice>();sets.setId("bank-question-set");sets.setAccessibleText("Lọc bộ câu hỏi");sets.setPrefWidth(255);sets.setMinWidth(180);sets.setValue(QuestionSets.Choice.all());sets.setDisable(true);
         ComboBox<String> categories = new ComboBox<>(FXCollections.observableArrayList("Tất cả chủ đề")); categories.setValue(category); categories.setPrefWidth(190);
@@ -53,17 +74,32 @@ final class ManagementViews {
         var importFile=button("Nhập từ Excel / Word","quiet",()->new QuestionImportView(app).show());importFile.setDisable(!app.editsAllowed());importFile.setId("bank-import");
         var manageSets=button("Bộ câu hỏi","quiet",()->{
             var p=filters(search.getText(),categories.getValue(),statuses.getValue(),1,order.getValue()).put("question_set_id",app.bankQuestionSet());
-            QuestionSets.manage(app,p,data.getSelectionModel().getSelectedItems().stream().map(q->q.path("question_id").asInt()).toList());
+            QuestionSets.manage(app,p,app.bankSelectedQuestions());
         });manageSets.setId("bank-manage-sets");manageSets.setDisable(!app.editsAllowed());
         var fileActions=new FlowPane(12,8,importFile,manageSets,button("Xem mẫu / Tải mẫu","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage())));
+        var selectedCount=text("","caption");selectedCount.setId("bank-selected-count");selectedCount.setTooltip(new Tooltip("Tổng số câu đã tick trên mọi trang và bộ lọc. Tick ô bên cạnh câu hỏi để chọn hoặc bỏ chọn."));
+        var selectPage=button("Chọn cả trang","quiet",()->{});selectPage.setId("bank-select-page");selectPage.setDisable(true);
+        var clearSelection=button("Bỏ chọn tất cả","link-button",()->{});clearSelection.setId("bank-clear-selection");
+        Runnable selectionSummary=()->{
+            int total=app.bankSelectedQuestions().size();selectedCount.setText("Đã chọn "+total+" câu");clearSelection.setDisable(total==0);
+            long checked=data.getItems().stream().filter(q->app.bankQuestionSelected(q.path("question_id").asInt())).count();int size=data.getItems().size();
+            checkPage.setDisable(size==0);checkPage.setSelected(size>0&&checked==size);checkPage.setIndeterminate(checked>0&&checked<size);
+        };
+        Consumer<Boolean> markPage=checked->{var ids=data.getItems().stream().map(q->q.path("question_id").asInt()).toList();app.updateBankSelection(ids,checked?ids:List.of());data.refresh();selectionSummary.run();};
+        selectPage.setOnAction(e->markPage.accept(true));checkPage.setOnAction(e->markPage.accept(checkPage.isSelected()));
+        clearSelection.setOnAction(e->{app.clearBankSelection();data.getSelectionModel().clearSelection();data.refresh();selectionSummary.run();});
+        var checkColumn=questionSelectionColumn(selectionSummary);checkColumn.setGraphic(checkPage);
+        data.getColumns().addAll(checkColumn,textColumn("Nội dung câu hỏi", "content_preview", 450),textColumn("Chủ đề", "category", 140),activeColumn());
+        selectionSummary.run();
+        var selectionActions=new FlowPane(12,8,selectPage,clearSelection,selectedCount);
         var filterRow = new FlowPane(12, 12, field("Chủ đề", categories), field("Trạng thái", statuses), field("Sắp xếp", order));
         var searchRow=row(12,search,sets);HBox.setHgrow(search,Priority.ALWAYS);
-        var top = column(16, header, fileActions, searchRow, filterRow, count); top.setPadding(new Insets(0, 0, 18, 0));
+        var top = column(16, header, fileActions, searchRow, filterRow, selectionActions, count); top.setPadding(new Insets(0, 0, 18, 0));
         var inspector = column(14, text("CHI TIẾT CÂU HỎI", "caption"), text("Chọn một câu trong danh sách", "subtitle")); inspector.setPrefWidth(300); inspector.setMaxWidth(340); inspector.getStyleClass().add("panel");
         var content = new BorderPane(data); var detailScroll = scroll(inspector); detailScroll.setPrefWidth(320); BorderPane.setMargin(detailScroll, new Insets(0, 0, 0, 20)); content.setRight(detailScroll);
         content.widthProperty().addListener((o, before, width) -> content.setRight(width.doubleValue() < 1020 ? null : detailScroll));
         Button previous = new Button("← Trước"), next = new Button("Sau →"); previous.setDisable(page <= 1);
-        var inspect = button("Xem câu đã chọn", "quiet", () -> { var row = data.getSelectionModel().getSelectedItem(); if (row != null) openDetail(row.path("question_id").asInt()); });
+        var inspect = button("Xem chi tiết", "quiet", () -> { var row = data.getSelectionModel().getSelectedItem(); if (row != null) openDetail(row.path("question_id").asInt()); });
         inspect.setDisable(true);
         var clear = button("Xóa bộ lọc", "link-button", () -> { app.setBankQuestionSet(0);app.setBankFilter("", "Tất cả chủ đề", "Tất cả trạng thái", "Mới cập nhật", 1); app.bankView(); });
         var bottom = row(12, paging, clear, space(), inspect, previous, next); bottom.setPadding(new Insets(16, 0, 0, 0));
@@ -73,7 +109,9 @@ final class ManagementViews {
             app.setBankFilter(search.getText(), categories.getValue(), statuses.getValue(), order.getValue(), page);
             app.call("QUESTION_LIST", filters(search.getText(), categories.getValue(), statuses.getValue(), page, order.getValue()).put("question_set_id",app.bankQuestionSet()), response -> {
                 if (version != requestVersion || layout.getScene() == null) return;
-                List<JsonNode> rows = new ArrayList<>(); response.path("items").forEach(rows::add); data.setItems(FXCollections.observableArrayList(rows));
+                List<JsonNode> rows = new ArrayList<>(); response.path("items").forEach(rows::add);
+                data.setItems(FXCollections.observableArrayList(rows));
+                selectPage.setDisable(rows.isEmpty());selectionSummary.run();
                 data.setPlaceholder(column(8, text("Không tìm thấy câu hỏi", "subtitle"), text("Thử bỏ bớt điều kiện lọc hoặc thêm câu hỏi mới.", "muted")));
                 count.setText(response.path("total").asInt() + " câu phù hợp" + (!app.editsAllowed() ? " · Chỉ xem: phòng không ở trạng thái chờ" : ""));
                 paging.setText("Trang " + page + " / " + Math.max(1, (response.path("total").asInt() + 9) / 10)); next.setDisable(!response.path("has_more").asBoolean());
@@ -117,7 +155,7 @@ final class ManagementViews {
         var toggle = button(question.path("is_active").asBoolean() ? "Tắt câu hỏi" : "Bật câu hỏi", "quiet", () -> app.call("QUESTION_SET_ACTIVE", object().put("question_id", question.path("question_id").asInt()).put("is_active", !question.path("is_active").asBoolean()), ignored -> { app.notice("Đã cập nhật trạng thái câu hỏi.", false); app.bankView(); })); toggle.setDisable(!app.editsAllowed());
         var delete = button("Xóa câu hỏi", "danger", () -> {
             var confirm = new Alert(Alert.AlertType.CONFIRMATION, "Câu hỏi sẽ bị xóa khỏi ngân hàng. Thao tác này không có Undo.", ButtonType.CANCEL, ButtonType.OK); confirm.initOwner(app.ownerStage()); confirm.setHeaderText("Xóa câu Q" + question.path("question_id").asInt() + "?"); styleDialog(confirm);
-            if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) app.call("QUESTION_DELETE", object().put("question_id", question.path("question_id").asInt()), ignored -> { app.bankView(); app.notice("Đã xóa câu hỏi.", false); });
+            if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) app.call("QUESTION_DELETE", object().put("question_id", question.path("question_id").asInt()), ignored -> { app.removeBankSelection(question.path("question_id").asInt());app.bankView(); app.notice("Đã xóa câu hỏi.", false); });
         }); delete.setDisable(!app.editsAllowed());
         nodes.getChildren().addAll(new Separator(), edit, toggle, delete); return nodes;
     }

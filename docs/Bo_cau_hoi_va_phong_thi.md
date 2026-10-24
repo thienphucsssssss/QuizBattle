@@ -14,8 +14,13 @@ Cập nhật 25/10/2026. Mỗi Admin/giảng viên có các bộ câu hỏi riê
 ## Tạo bộ từ câu đã có
 
 1. Trong Ngân hàng, lọc nội dung, chủ đề, trạng thái hoặc bộ hiện có để thu hẹp danh sách.
-2. Bấm **Bộ câu hỏi**, nhập **Tên bộ mới**.
-3. Chọn **Tạo từ kết quả lọc** để lấy toàn bộ kết quả trên mọi trang, tối đa 500 câu. Hoặc dùng Ctrl/Shift chọn các dòng ở trang ngân hàng hiện tại rồi chọn **Tạo từ N câu đã chọn**.
+2. Tick ô ở cột đầu của từng câu hỏi (thay cột ID), hoặc tick ô trên đầu cột / bấm **Chọn cả trang** để chọn 10 câu ở trang đang xem. Ô trên đầu cột có dấu gạch khi mới tick một phần; bỏ tick ô này chỉ bỏ chọn trang hiện tại. Sang **Sau →** và tick thêm: lựa chọn được cộng dồn qua các trang và bộ lọc. Nhãn **Đã chọn N câu** hiển thị tổng hiện tại; quay lại trang trước sẽ thấy các ô vẫn được tick.
+3. Bấm **Bộ câu hỏi**, nhập **Tên bộ mới**, rồi chọn **Tạo từ N câu đã chọn**. Số N là số câu thực tế đã chọn, không phải ô nhập. Ví dụ: chọn 10 câu trang 1 và 10 câu trang 2 thì nút hiển thị **Tạo từ 20 câu đã chọn**.
+4. Hoặc chọn **Tạo từ kết quả lọc** để lấy toàn bộ kết quả trên mọi trang, tối đa 500 câu, không cần chọn từng trang. Ví dụ ngân hàng có 40 câu phù hợp thì tạo được bộ 40 câu dù danh sách chỉ hiện 10 câu/trang.
+
+**Bỏ chọn tất cả** xóa lựa chọn ở mọi trang, kể cả các câu đang bị bộ lọc ẩn đi. Lựa chọn cũng được xóa khi đăng xuất/đăng nhập lại để không dùng nhầm câu của tài khoản hoặc Server khác. Mỗi bộ tối đa 500 câu; nếu chọn quá giới hạn, nút tạo từ lựa chọn bị khóa và hiển thị hướng dẫn bỏ bớt.
+
+Bấm vào nội dung dòng để xem chi tiết không thay đổi các ô đã tick. Nút **Xem chi tiết** mở câu đang được xem; tạo bộ dùng các câu đã tick. Có thể Tab tới ô tick rồi nhấn Space để chọn/bỏ chọn.
 
 Bộ lọc cạnh ô tìm kiếm cho phép xem riêng từng bộ. Xóa bộ chỉ xóa tên/liên kết bộ, các câu vẫn ở trong ngân hàng và những bộ khác. Phòng đang dùng bộ phải chuyển sang nguồn khác hoặc đóng phòng trước khi xóa bộ.
 
@@ -45,6 +50,18 @@ Database v1 nâng lên v2 bằng transaction, thêm `question_sets` và `questio
 
 Khởi động lại cả Server và Client từ bản source vừa build để dùng các điều khiển/API mới. Các bài kiểm thử dùng database, chứng chỉ và tài khoản tạm.
 
+## Khi Client mới kết nối với Server cũ
+
+Thông báo **“Yêu cầu không được hỗ trợ”** khi tải bộ câu hỏi nghĩa là Server đang kết nối chưa có API này. Build xong không thay mã đang nằm trong tiến trình Java đã chạy: cần tắt cửa sổ Server cũ, mở lại Server từ cùng thư mục dự án/bộ cài với Client, đợi `NQB_SERVER_READY`, rồi mở và đăng nhập lại Client. Không cần xóa database, tạo lại tài khoản hay nhập lại câu hỏi.
+
+`run.bat` hiện kiểm tra dấu vân tay của source, cấu hình build và bản biên dịch thay vì chỉ nhìn dấu `ready` cũ. Khi source hoặc bản biên dịch thay đổi, launcher tự build lại trước khi chạy. Thông báo trên Client cũng hướng dẫn cập nhật/khởi động lại Server; form dừng trạng thái đang tải và chặn lưu khi chưa tải được bộ.
+
 ## Kiểm chứng bản cập nhật
 
 Build/install Maven thành công với 111 bài kiểm thử, không có lỗi. Kiểm thử giao diện trực tiếp ở 1024×640 và 1366×768 đã xác nhận nhập/gom bộ, lọc ngân hàng, cảnh báo thiếu câu, chọn bộ cho phòng, câu thi thuộc đúng bộ và giữ lựa chọn sau reset; các luồng LAN, quản trị và nhập file hiện có vẫn đạt.
+
+Bản sửa tương thích cùng ngày: build/install đạt **116 bài kiểm thử**, không lỗi hoặc bỏ qua. Kiểm thử launcher thực thi trên dự án tạm có đường dẫn chứa khoảng trắng, xác nhận marker cũ, thay đổi/xóa source và thay đổi runtime class đều kích hoạt build lại; source không đổi tái sử dụng bản build. Kiểm thử giao diện 1024×640 đạt cả luồng chọn bộ trên Server hiện hành và lỗi `UNKNOWN_TYPE` giả lập từ Server cũ: kết thúc loading, hướng dẫn cập nhật/khởi động lại, không cho lưu nguồn chưa tải được. Log tại `tmp/server-compat-final-build.log`, `tmp/server-compat-ui.log`; ảnh tại `output/server-compat-qa/1024/`.
+
+Bản sửa chọn câu qua nhiều trang: build/install toàn dự án đạt **119 bài kiểm thử**, không lỗi hoặc bỏ qua. Kiểm thử giao diện 1024×640 xác nhận chọn 10+10 câu ở hai trang tạo được bộ 20 câu thật trên Server; quay lại khôi phục lựa chọn, bỏ một câu còn 19, bỏ chọn tất cả xóa cả các trang ẩn, nút chọn cả trang hoạt động và đổi tài khoản xóa lựa chọn cũ. Các luồng giao diện hiện có vẫn đạt. Log tại `tmp/question-selection-final-build.log`, `tmp/question-selection-final-ui.log`; ảnh tại `output/question-selection-final/1024/`.
+
+Bản cập nhật ô tick: **119 bài kiểm thử** đạt. Kiểm thử giao diện 1024×640 xác nhận tick từng câu, trạng thái chọn một phần của ô đầu cột, chọn/bỏ cả trang không ảnh hưởng trang khác, xem chi tiết không làm mất tick, tạo đủ bộ 20 câu qua hai trang và xóa lựa chọn khi đổi tài khoản. Đã kiểm tra ảnh ô tick ở đầu cột và từng dòng thẳng hàng/cùng kích thước. Log tại `tmp/question-checkbox-final-build.log`, `tmp/question-checkbox-final-ui.log`; ảnh tại `output/question-checkbox-final/1024/`.

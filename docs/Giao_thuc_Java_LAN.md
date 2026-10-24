@@ -1,5 +1,17 @@
 # Giao thức Network Quiz Battle Java LAN
 
+## Một học sinh hoạt động trên mỗi IP — cập nhật 25/10/2026
+
+Mỗi IP nguồn mà Server nhìn thấy chỉ được có **một học sinh còn kết nối**. JOIN từ kết nối khác có cùng IP trả `ERROR` với `code=IP_ALREADY_IN_USE` và thông báo: “Máy/IP này đã có một học sinh đang hoạt động. Hãy rời phiên học sinh hiện tại trước khi tham gia lại.” Quy tắc áp dụng dù đổi biệt danh, gửi danh tính/IP giả hoặc mở ứng dụng khác; phiên đang hoạt động được giữ nguyên. Server lấy IP từ socket TLS và kiểm tra trên Game Worker trước khi cấp `player_id`/avatar, nên hai JOIN đồng thời cùng IP chỉ có một thành công. Không đổi protocol_version/schema SQLite.
+
+LEAVE/LOGOUT, socket đã đóng hoặc heartbeat hết hạn giải phóng IP; ROOM_CLOSE kết thúc toàn bộ phiên học sinh. ROOM_RESET vẫn giữ IP của học sinh còn kết nối. Dòng kết quả của người mất mạng không giữ chỗ IP; các điều kiện chỉ JOIN khi WAITING, biệt danh không trùng và còn chỗ vẫn áp dụng. Kết nối quản lý và kết nối chưa JOIN không chiếm lượt học sinh. IP là địa chỉ nguồn Server quan sát được: các thiết bị cùng IP qua NAT chia sẻ giới hạn; không suy ra định danh phần cứng. Xem [hướng dẫn vận hành](Theo_doi_hoc_sinh_va_IP.md).
+
+## Theo dõi học sinh/phòng/IP — cập nhật 25/10/2026
+
+`ROOM_STATE` và các phản hồi chứa snapshot phòng bổ sung `players[].ip_address` chỉ khi người nhận là Admin hoặc giảng viên chủ phòng. Trường này lấy từ socket TLS tại JOIN, giữ IP cuối nếu học sinh mất mạng trong ván; `connected` xác định trạng thái hiện tại. Tên/mã phòng tiếp tục nằm ở `room_name`/`room_code` của snapshot. Học sinh, giảng viên khác, `ROOM_BROWSE`, ranking và lịch sử điểm không nhận IP. Không đổi protocol_version hoặc schema SQLite.
+
+Server ghi console log `NQB_STUDENT_TRACKING` cho JOINED/LEFT/DISCONNECTED/ROOM_UPDATED/ROOM_RESET/ROOM_CLOSED với thời gian UTC, server/player ID, nickname, tên/mã phòng, IP và trạng thái. Reset dọn cả socket đã đóng nhưng chưa được tick xử lý. Xem [cách sử dụng và giới hạn](Theo_doi_hoc_sinh_va_IP.md).
+
 ## Bộ câu hỏi riêng cho phòng — cập nhật 25/10/2026
 
 Thêm `QUESTION_SET_LIST/CREATE/DELETE` cho quản lý theo chủ sở hữu; tạo/xóa chỉ khi phòng chờ, có cache mutation như các thao tác câu hỏi khác. `QUESTION_LIST` nhận bộ lọc `question_set_id`; `QUESTION_IMPORT_COMMIT` nhận `question_set_name` để tạo hoặc thêm các câu đã nhập vào bộ cùng transaction. `ROOM_CONFIGURE` nhận `question_set_id` (0: toàn bộ ngân hàng; bỏ trường: giữ nguồn của phòng hiện tại). `ROOM_STATE` trả ID/tên bộ. Chỉ lấy câu đang bật trong bộ đã chọn và không bù bằng câu ngoài bộ; kiểm tra lại khi bắt đầu. Mẫu Office và protocol_version giữ nguyên. Database nâng v1→v2 bằng transaction để thêm bộ/liên kết mà giữ dữ liệu cũ. Xem `Bo_cau_hoi_va_phong_thi.md`.

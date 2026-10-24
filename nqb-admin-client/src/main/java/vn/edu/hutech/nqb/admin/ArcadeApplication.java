@@ -42,6 +42,7 @@ public final class ArcadeApplication extends Application {
     private String role = "", route = "", session = "", nickname = "";
     private volatile int connectionGeneration;
     private int bankPage = 1, userPage = 1, historyPage = 1,bankQuestionSet;
+    private final Set<Integer> bankSelectedQuestions=new LinkedHashSet<>();
     private String bankKeyword = "", bankCategory = "Tất cả chủ đề", bankStatus = "Tất cả trạng thái", bankSort = "Mới cập nhật";
     private String userKeyword = "", userStatus = "Tất cả trạng thái";
     private AnswerState answer;
@@ -119,6 +120,7 @@ public final class ArcadeApplication extends Application {
     }
     private void auth(String selectedRole) { auth(selectedRole, false); }
     private void auth(String selectedRole, boolean registering) {
+        bankSelectedQuestions.clear();
         if(lanEntry!=null){lanEntry.close();lanEntry=null;}
         closeGateway(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); room = object(); answer = null; passwordRequired = false;
         user = object();
@@ -275,7 +277,12 @@ public final class ArcadeApplication extends Application {
         gateway.request(type, payload).whenComplete((value, error) -> Platform.runLater(() -> { if (token != connectionGeneration) return; if (error != null) failure.accept(unwrap(error)); else success.accept(value); }));
     }
     private static Throwable unwrap(Throwable error) { while (error instanceof CompletionException && error.getCause() != null) error = error.getCause(); return error; }
-    static String message(Throwable error) { error = unwrap(error); return error.getMessage() == null ? "Không hoàn thành yêu cầu. Hãy thử lại." : error.getMessage(); }
+    static String message(Throwable error) {
+        error = unwrap(error);
+        if(error instanceof GatewayException gatewayError && gatewayError.code().equals("UNKNOWN_TYPE"))
+            return "Server chưa hỗ trợ tính năng này. Hãy tắt Server cũ, mở lại Server và Client từ cùng bản cập nhật.";
+        return error.getMessage() == null ? "Không hoàn thành yêu cầu. Hãy thử lại." : error.getMessage();
+    }
     void notice(String value, boolean error) {
         feedback.setText(value); feedback.getStyleClass().remove("error"); if (error) feedback.getStyleClass().add("error"); feedback.setManaged(true); feedback.setVisible(true);
         sfx.event(error ? SfxSlots.Cue.UI_ERROR : SfxSlots.Cue.UI_SUCCESS, "notice", value.hashCode());
@@ -301,6 +308,11 @@ public final class ArcadeApplication extends Application {
     void setBankFilter(String keyword, String category, String status, String sort, int page) { bankKeyword = keyword; bankCategory = category; bankStatus = status; bankSort = sort; bankPage = page; }
     int bankQuestionSet(){return bankQuestionSet;}
     void setBankQuestionSet(int id){bankQuestionSet=id;bankPage=1;}
+    List<Integer> bankSelectedQuestions(){return List.copyOf(bankSelectedQuestions);}
+    boolean bankQuestionSelected(int id){return bankSelectedQuestions.contains(id);}
+    void updateBankSelection(Collection<Integer> pageIds,Collection<Integer> selectedIds){bankSelectedQuestions.removeAll(pageIds);bankSelectedQuestions.addAll(selectedIds);}
+    void clearBankSelection(){bankSelectedQuestions.clear();}
+    void removeBankSelection(int id){bankSelectedQuestions.remove(id);}
     void setUserFilter(String keyword, String status, int page) { userKeyword = keyword; userStatus = status; userPage = page; }
     boolean editsAllowed() { return canEdit(); }
     Stage ownerStage() { return stage; }
@@ -461,7 +473,7 @@ public final class ArcadeApplication extends Application {
             var values=new ArrayList<QuestionSets.Choice>();values.add(QuestionSets.Choice.all());values.addAll(sets);source.setItems(FXCollections.observableArrayList(values));
             int chosen=room.path("question_set_id").asInt();source.setValue(values.stream().filter(v->v.id()==chosen).findFirst().orElse(values.getFirst()));source.setDisable(false);save.setDisable(false);
             if(sets.isEmpty())pool.setText("Chưa có bộ riêng. Nhập file hoặc tạo bộ trong Ngân hàng câu hỏi.");
-        },failure->showError(error,"Không tải được bộ câu hỏi: "+message(failure)+". Đóng và mở lại cấu hình để thử lại."));
+        },failure->{pool.setText("Không tải được danh sách bộ câu hỏi.");showError(error,message(failure));});
     }
     private void event(JsonNode event) {
         JsonNode p = event.path("payload");

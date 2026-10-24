@@ -11,10 +11,12 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.function.Consumer;
+import java.util.logging.Logger;
 import static vn.edu.hutech.nqb.server.Wire.*;
 
 /** One bounded game worker owns all room and JDBC state; one writer per TLS socket. */
 public final class QuizServer implements AutoCloseable {
+    private static final Logger LOG=Logger.getLogger(QuizServer.class.getName());
     private final ServerConfig config;
     private final QuizStore store;
     private final SSLServerSocket listener;
@@ -40,8 +42,8 @@ public final class QuizServer implements AutoCloseable {
     private static ThreadPoolExecutor pool(String name,int count,int size) {return new ThreadPoolExecutor(count,count,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(size),Thread.ofPlatform().daemon().name(name+"-",0).factory(),new ThreadPoolExecutor.AbortPolicy());}
     private record Attempts(long start,int count) { }
     private static final class Player {
-        final String id,nickname,avatarAtJoin; Peer peer; boolean ready; String answer="",avatar; int score,correct,roundPoints; long answerElapsedNanos=-1;
-        Player(String id,String nickname,String avatar,Peer peer){this.id=id;this.nickname=nickname;this.avatar=this.avatarAtJoin=avatar;this.peer=peer;}
+        final String id,nickname,avatarAtJoin,ipAddress; Peer peer; boolean ready; String answer="",avatar; int score,correct,roundPoints; long answerElapsedNanos=-1;
+        Player(String id,String nickname,String avatar,Peer peer){this.id=id;this.nickname=nickname;this.avatar=this.avatarAtJoin=avatar;this.peer=peer;this.ipAddress=peer.socket.getInetAddress().getHostAddress();}
     }
     private record Cached(String signature,ObjectNode response) { }
     public QuizServer(ServerConfig config,SSLContext tls,QuizStore store) throws Exception {
@@ -103,7 +105,7 @@ public final class QuizServer implements AutoCloseable {
             if(++p.rateCount>60)throw fail("RATE_LIMITED","Gửi quá nhiều yêu cầu. Hãy chờ một chút.");
             if(type.equals("PING")){p.send(envelope("PONG",id,obj()));return;}
             if(type.equals("ROOM_BROWSE")){p.send(envelope("ROOM_BROWSE_OK",id,publicDirectory()));return;}
-            if(type.equals("LOGOUT")||type.equals("LEAVE")){p.send(envelope(type+"_OK",id,obj()));p.closeAfterWrite=true;detach(p);return;}
+            if(type.equals("LOGOUT")||type.equals("LEAVE")){p.send(envelope(type+"_OK",id,obj()));p.closeAfterWrite=true;detach(p,"LEFT");return;}
             if(p.authBusy)throw fail("SERVER_BUSY","Đang xử lý xác thực. Hãy chờ.");
             if(type.equals("LOGIN")){login(p,id,payload);return;}
             if(type.equals("REGISTER")){register(p,id,payload);return;}
@@ -145,7 +147,10 @@ public final class QuizServer implements AutoCloseable {
                     String name=text(payload,"room_name",80);int count=integer(payload,"question_count",10,1,20),seconds=integer(payload,"duration_seconds",15,5,120);
                     int selectedSet=integer(payload,"question_set_id",questionSetId,0,Integer.MAX_VALUE);String selectedName="";
                     if(selectedSet>0){var set=store.questionSet(p.userId,selectedSet);if(set.path("active_count").asInt()<count)throw fail("NOT_ENOUGH_QUESTIONS","Bộ câu hỏi chỉ có "+set.path("active_count").asInt()+" câu đang bật. Hãy giảm số câu hoặc bật thêm câu.");selectedName=set.path("name").asText();}
-                    if(owner==0){owner=p.userId;roomCode=newCode();}roomName=name;questionCount=count;questionSeconds=seconds;questionSetId=selectedSet;questionSetName=selectedName;p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
+                    boolean renamed=!roomName.equals(name);
+                    if(owner==0){owner=p.userId;roomCode=newCode();}roomName=name;questionCount=count;questionSeconds=seconds;questionSetId=selectedSet;questionSetName=selectedName;
+                    if(renamed)for(var v:players.values())track("ROOM_UPDATED",v,v.peer!=null&&!v.peer.gone.get());
+                    p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
                 case "AVATAR_SET"->{Player player=student(p);waiting();if(player.ready)throw fail("ALREADY_READY","Bỏ sẵn sàng trước khi đổi linh vật.");
                     try{avatars.select(player.id,text(payload,"avatar_id",30));}catch(IllegalArgumentException invalid){throw fail("INVALID_AVATAR","Linh vật không hợp lệ.");}catch(IllegalStateException taken){throw new Failure("AVATAR_TAKEN","Linh vật đã có người chọn.",state(p,false));}
                     player.avatar=avatars.snapshot().get(player.id);p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
@@ -157,7 +162,17 @@ public final class QuizServer implements AutoCloseable {
                 case "ANSWER"->answer(p,id,request);
                 case "ABORT_GAME"->{host(p);if(!running())throw fail("INVALID_STATE","Không có ván đang chạy.");p.send(envelope(type+"_OK",id,obj()));abort();}
                 case "ROOM_RESET","ROOM_CLOSE"->{host(p);if(running())throw fail("INVALID_STATE","Hãy kết thúc ván trước.");
-                    if(type.equals("ROOM_CLOSE"))closeRoom();else{phase=GamePhase.WAITING;roomCode=newCode();session="";questions=List.of();players.values().forEach(v->{v.ready=false;v.score=0;v.correct=0;v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;});players.values().removeIf(v->{if(v.peer==null){avatars.leave(v.id);return true;}return false;});}
+                    if(type.equals("ROOM_CLOSE"))closeRoom();else{
+                        // A socket may already be closed before the next tick detaches it.
+                        // Remove it while the old room code still identifies its departure.
+                        players.values().removeIf(v->{
+                            if(v.peer!=null&&!v.peer.gone.get()&&!v.peer.closeAfterWrite)return false;
+                            if(v.peer!=null){track("DISCONNECTED",v,false);v.peer.playerId="";v.peer=null;}
+                            avatars.leave(v.id);return true;
+                        });
+                        phase=GamePhase.WAITING;roomCode=newCode();session="";questions=List.of();
+                        players.values().forEach(v->{v.ready=false;v.score=0;v.correct=0;v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;track("ROOM_RESET",v,!v.peer.gone.get());});
+                    }
                     p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
                 default->throw fail("UNKNOWN_TYPE","Yêu cầu không được hỗ trợ.");
             }
@@ -250,9 +265,13 @@ public final class QuizServer implements AutoCloseable {
         unauthenticated(p);waiting();if(owner==0||!roomCode.equals(request.path("room_code").asText()))throw fail("WRONG_ROOM","Mã phòng không đúng hoặc phòng đã đóng.");
         String nickname=text(request.path("payload"),"nickname",24);String key=TextNormalizer.key(nickname);
         if(nickname.codePoints().anyMatch(Character::isISOControl))throw fail("INVALID_INPUT","Biệt danh phải nằm trên một dòng.");
+        String ip=p.socket.getInetAddress().getHostAddress();
+        if(players.values().stream().anyMatch(v->v.ipAddress.equals(ip)&&v.peer!=null&&!v.peer.gone.get()&&!v.peer.closeAfterWrite))
+            throw fail("IP_ALREADY_IN_USE","Máy/IP này đã có một học sinh đang hoạt động. Hãy rời phiên học sinh hiện tại trước khi tham gia lại.");
         if(players.values().stream().anyMatch(v->TextNormalizer.key(v.nickname).equals(key)))throw fail("NICKNAME_TAKEN","Biệt danh đã có người dùng.");
         if(players.size()>=config.maxPlayers())throw fail("ROOM_FULL","Phòng đã đủ người.");
-        String playerId=UUID.randomUUID().toString(),avatar=avatars.join(playerId);players.put(playerId,new Player(playerId,nickname,avatar,p));p.playerId=playerId;
+        String playerId=UUID.randomUUID().toString(),avatar=avatars.join(playerId);var player=new Player(playerId,nickname,avatar,p);players.put(playerId,player);p.playerId=playerId;
+        track("JOINED",player,true);
         p.send(envelope("JOIN_OK",id,obj().put("player_id",playerId).put("nickname",nickname).put("avatar_id",avatar).put("room_code",roomCode)));broadcastState();
     }
     private String newCode(){String chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";var r=new java.security.SecureRandom();var b=new StringBuilder();for(int i=0;i<6;i++)b.append(chars.charAt(r.nextInt(chars.length())));return b.toString();}
@@ -272,10 +291,12 @@ public final class QuizServer implements AutoCloseable {
     private long remaining(){return Math.max(0,TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime()));}
     private ObjectNode state(Peer viewer,boolean includeGame){
         var list=array();int ready=0,connected=0,answered=0;
+        boolean canTrack=viewer.userId!=0&&(viewer.userId==owner||viewer.role.equals("ADMIN"));
         for(var v:players.values()){
             boolean live=v.peer!=null&&!v.peer.gone.get();if(live){connected++;if(v.ready)ready++;if(!v.answer.isEmpty())answered++;}
             var player=obj().put("player_id",v.id).put("nickname",v.nickname).put("avatar_id",v.avatar).put("ready",v.ready).put("connected",live);
             if(viewer.userId!=0)player.put("answered",!v.answer.isEmpty()).put("score",v.score).put("correct_count",v.correct);
+            if(canTrack)player.put("ip_address",v.ipAddress);
             list.add(player);
         }
         var state=obj().put("phase",phase.name()).put("room_code",roomCode).put("room_name",roomName).put("session_id",session).put("is_owner",owner!=0&&owner==viewer.userId)
@@ -300,15 +321,22 @@ public final class QuizServer implements AutoCloseable {
     private boolean participant(Peer p){return !p.gone.get()&&!p.closeAfterWrite&&((owner!=0&&p.userId==owner)||(!p.playerId.isEmpty()&&players.containsKey(p.playerId)));}
     private void emitAll(String type,ObjectNode value){for(var p:peers)if(participant(p))p.send(envelope(type,null,value));}
     private void broadcastState(){for(var p:peers)if(!p.gone.get()&&!p.closeAfterWrite&&!p.mustChange&&(p.userId!=0||!p.playerId.isEmpty()))p.send(envelope("ROOM_STATE",null,state(p,false)));}
-    private void detach(Peer p){
+    private void track(String event,Player player,boolean connected){
+        var entry=obj().put("timestamp_utc",Instant.now().toString()).put("event",event).put("server_id",serverId)
+            .put("player_id",player.id).put("nickname",player.nickname).put("room_code",roomCode).put("room_name",roomName)
+            .put("ip_address",player.ipAddress).put("connected",connected);
+        LOG.info("NQB_STUDENT_TRACKING "+entry);
+    }
+    private void detach(Peer p,String event){
         var v=players.get(p.playerId);if(v==null||v.peer!=p)return;v.peer=null;v.ready=false;
+        track(event,v,false);
         if(!running()){players.remove(v.id);avatars.leave(v.id);}p.playerId="";
         if(running()&&players.values().stream().noneMatch(player->player.peer!=null&&!player.peer.gone.get()))abort();else broadcastState();
     }
     private void tick()throws SQLException{
         long now=System.nanoTime();boolean changed=false;
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;
-        for(var p:peers){if(now-p.lastSeen>TimeUnit.SECONDS.toNanos(20)||(p.userId==0&&p.playerId.isEmpty()&&now-p.connected>TimeUnit.SECONDS.toNanos(10)))p.close();if(p.gone.get()){detach(p);peers.remove(p);changed=true;}}
+        for(var p:peers){if(now-p.lastSeen>TimeUnit.SECONDS.toNanos(20)||(p.userId==0&&p.playerId.isEmpty()&&now-p.connected>TimeUnit.SECONDS.toNanos(10)))p.close();if(p.gone.get()){detach(p,"DISCONNECTED");peers.remove(p);changed=true;}}
         if(changed)broadcastState();
         if(!running()||now<deadline)return;
         switch(phase){
@@ -332,6 +360,7 @@ public final class QuizServer implements AutoCloseable {
     private void openQuestion(){phase=GamePhase.QUESTION_ACTIVE;players.values().forEach(v->{v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;});questionOpenedAtNanos=System.nanoTime();deadline=questionOpenedAtNanos+TimeUnit.SECONDS.toNanos(questionSeconds);emitAll("QUESTION",publicQuestion());broadcastState();}
     private void abort(){phase=GamePhase.FINISHED;aborted=true;resultSaved=false;emitAll("GAME_ABORTED",obj().put("session_id",session).put("message","Ván thi đã hủy."));broadcastState();}
     private void closeRoom(){
+        for(var v:players.values())track("ROOM_CLOSED",v,false);
         for(var v:players.values())if(v.peer!=null){v.peer.send(envelope("ROOM_CLOSED",null,obj().put("message","Giảng viên đã đóng phòng.")));v.peer.closeAfterWrite=true;}
         players.clear();avatars.clear();owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";
     }

@@ -6,6 +6,8 @@ Cập nhật 22/10/2026 theo yêu cầu người dùng: màn khởi động là 
 
 ## Định hướng
 
+Cập nhật 25/10/2026 — chọn câu bằng ô tick: thay cột ID ở Ngân hàng bằng CheckBox native, vùng bấm 44×44 trong dòng hiện có. Ô ở đầu cột chọn/bỏ trang hiện tại và hiển thị trạng thái chọn một phần. Lựa chọn tick độc lập với dòng đang xem chi tiết, giữ qua phân trang/bộ lọc, đồng bộ với tổng Đã chọn và nút tạo bộ. Giữ palette, typography, kích thước cột và các thao tác Chọn cả trang/Bỏ chọn tất cả hiện có.
+
 Cập nhật 25/10/2026 — bộ câu hỏi: dùng ComboBox native để lọc bộ ở Ngân hàng và chọn nguồn trong cấu hình phòng; kèm số câu đang bật/tổng câu. Dialog Bộ câu hỏi tạo từ các dòng chọn hoặc toàn bộ kết quả lọc, xóa bộ giữ câu gốc. Nhập Excel/Word có trường tên bộ mặc định theo tên tệp trong cùng toolbar. Giữ palette/font/khung hiện có; form cấu hình phòng cuộn riêng để nút Lưu/Hủy luôn nằm ngoài vùng cuộn và thông báo lỗi không ép mất nút.
 
 Cập nhật 25/10/2026: bỏ thanh trắng phía trên của workspace Admin/giảng viên theo yêu cầu người dùng. Sidebar chạy từ đỉnh cửa sổ, thông tin LAN/tài khoản và Cài đặt dùng các vị trí hiện có trong sidebar. Thông báo chỉ chiếm chỗ trong vùng nội dung khi có nội dung cần hiển thị. Thanh thao tác của học sinh giữ nguyên vì không có sidebar quản lý.

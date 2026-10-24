@@ -66,7 +66,7 @@ final class CommanderViews {
     }
     private void monitor() {
         players = table("monitor-players");
-        players.getColumns().addAll(List.of(col("Thí sinh", p -> p.path("nickname").asText(), 210), col("Kết nối", p -> !app.managementConnected() ? "Chưa xác định" : p.path("connected").asBoolean() ? "Đang kết nối" : "Mất kết nối", 135),
+        players.getColumns().addAll(List.of(col("Thí sinh", p -> p.path("nickname").asText(), 210), col("Địa chỉ IP", p -> p.path("ip_address").asText("—"), 160), col("Kết nối", p -> !app.managementConnected() ? "Chưa xác định" : p.path("connected").asBoolean() ? "Đang kết nối" : "Mất kết nối", 135),
             col("Tiến độ", this::playerStatus, 170), col("Điểm", p -> p.path("score").asText("—"), 90)));
         submitted.setId("monitor-submitted");
         var progress = row(20, column(4,text("TIẾN ĐỘ", "caption"),submitted), space(), column(4,text("THỜI GIAN CÒN LẠI", "caption"),timer));
@@ -83,7 +83,7 @@ final class CommanderViews {
         summary.setId("arena-summary");
         var tools = row(12,search,filter); HBox.setHgrow(search,Priority.ALWAYS);
         players = table("arena-players"); players.getColumns().addAll(List.of(col("Hạng", this::rank,65), col("Thí sinh", p -> p.path("nickname").asText(),220),
-            col("Trạng thái",this::playerStatus,160),col("Điểm",p -> p.path("score").asText("—"),85),col("Câu đúng",p -> p.path("correct_count").asText("—"),85)));
+            col("Địa chỉ IP",p -> p.path("ip_address").asText("—"),160),col("Trạng thái",this::playerStatus,160),col("Điểm",p -> p.path("score").asText("—"),85),col("Câu đúng",p -> p.path("correct_count").asText("—"),85)));
         var content = new BorderPane(players); content.setTop(column(12,tools,summary)); BorderPane.setMargin(players,new Insets(16,0,0,0));layout.setCenter(content);
         var note = text("Điểm và thứ hạng cập nhật sau khi Server chấm câu hỏi. Lọc danh sách không ảnh hưởng thí sinh đang thi.","muted");note.setPadding(new Insets(16,0,0,0));layout.setBottom(note);
         search.textProperty().addListener((o,before,after) -> updatePlayers()); filter.setOnAction(e -> updatePlayers());

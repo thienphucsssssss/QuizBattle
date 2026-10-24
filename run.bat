@@ -72,13 +72,15 @@ call mvn -B -ntp exec:help -Ddetail=false
 if errorlevel 1 exit /b 1
 if not exist tmp mkdir tmp
 if errorlevel 1 exit /b 1
-echo ready>"tmp\run-build.ok"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Source-Build.ps1" -Record
+if errorlevel 1 exit /b 1
 echo [OK] Build thanh cong.
+echo Neu Server/Client cu dang mo, hay tat va mo lai ca hai de dung ban cap nhat.
 exit /b 0
 
 :ensure_build
-if not exist "tmp\run-build.ok" goto build
-for %%M in (nqb-shared nqb-server nqb-client-core nqb-admin-client nqb-player-client) do if not exist "%%M\target\%%M-*.jar" goto build
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Source-Build.ps1" >nul 2>&1
+if errorlevel 1 goto build
 exit /b 0
 
 :setup
@@ -151,7 +153,8 @@ goto finish
 echo Dung: run.bat [build^|setup^|server^|admin^|player]
 echo Nhan doi run.bat de mo menu.
 echo Lan dau tren cung may: setup, server, doi NQB_SERVER_READY, admin/player.
-echo Chon build sau khi sua ma nguon. Can JDK 21 va Maven 3.9.x.
+echo Tu build lai khi ma nguon thay doi. Can JDK 21 va Maven 3.9.x.
+echo Sau khi cap nhat, tat Server/Client cu roi mo lai ca hai.
 echo Chay nhieu may LAN: xem docs\PHAT_TRIEN_NHOM.md, muc 3.
 goto finish
 

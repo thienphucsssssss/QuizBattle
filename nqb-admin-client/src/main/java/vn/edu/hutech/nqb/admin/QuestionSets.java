@@ -35,12 +35,12 @@ final class QuestionSets {
         var table=new TableView<Choice>();table.setId("question-sets-table");table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);table.setMinHeight(100);table.setPrefHeight(180);
         table.getColumns().addAll(List.of(col("Tên bộ",Choice::name,350),col("Tổng câu",s->Integer.toString(s.total()),100),col("Đang bật",s->Integer.toString(s.active()),100)));
         var name=new TextField();name.setId("question-set-name");name.setPromptText("VD: Ôn tập TCP/IP");
-        var status=text("","muted");status.setId("question-set-status");
+        var status=text(selectedIds.size()>500?"Bạn đang chọn "+selectedIds.size()+" câu. Mỗi bộ tối đa 500 câu; hãy bỏ bớt lựa chọn trong Ngân hàng.":"","muted");status.setId("question-set-status");
         var fromFilter=button("Tạo từ kết quả lọc","ink-button",()->{});fromFilter.setId("set-create-filtered");
         var fromSelection=button("Tạo từ "+selectedIds.size()+" câu đã chọn","quiet",()->{});fromSelection.setId("set-create-selected");
         var delete=button("Xóa bộ","danger",()->{});delete.setId("set-delete");delete.setDisable(true);
         var buttons=new FlowPane(10,8,fromFilter,fromSelection,delete);
-        Consumer<Boolean> busy=value->{name.setDisable(value);table.setDisable(value);fromFilter.setDisable(value||!app.editsAllowed());fromSelection.setDisable(value||selectedIds.isEmpty()||!app.editsAllowed());delete.setDisable(value||table.getSelectionModel().getSelectedItem()==null||!app.editsAllowed());};
+        Consumer<Boolean> busy=value->{name.setDisable(value);table.setDisable(value);fromFilter.setDisable(value||!app.editsAllowed());fromSelection.setDisable(value||selectedIds.isEmpty()||selectedIds.size()>500||!app.editsAllowed());delete.setDisable(value||table.getSelectionModel().getSelectedItem()==null||!app.editsAllowed());};
         Runnable refresh=()->{busy.accept(true);load(app,dialog::isShowing,values->{table.setItems(FXCollections.observableArrayList(values));table.setPlaceholder(text("Chưa có bộ câu hỏi. Nhập từ file hoặc tạo từ ngân hàng.","muted"));busy.accept(false);},error->{busy.accept(false);status.setText(ArcadeApplication.message(error));});};
         table.getSelectionModel().selectedItemProperty().addListener((o,before,after)->delete.setDisable(after==null||!app.editsAllowed()));
         Consumer<Boolean> create=selectedOnly->{
@@ -61,7 +61,8 @@ final class QuestionSets {
                 if(!dialog.isShowing())return;if(app.bankQuestionSet()==selected.id())app.setBankQuestionSet(0);status.setText("Đã xóa bộ. Các câu hỏi vẫn ở trong ngân hàng.");refresh.run();app.bankView();
             },error->{if(dialog.isShowing()){busy.accept(false);status.setText(ArcadeApplication.message(error));}});
         });
-        var content=column(12,text("Tạo bộ từ toàn bộ kết quả đang lọc hoặc các dòng đã chọn ở trang ngân hàng hiện tại. Mỗi bộ tối đa 500 câu.","muted"),table,field("Tên bộ mới",name),buttons,status);VBox.setVgrow(table,Priority.ALWAYS);
+        var help=text("Chọn thêm câu ở các trang Ngân hàng để tăng số trên nút. Tạo từ kết quả lọc lấy toàn bộ câu phù hợp. Tối đa 500 câu/bộ.","muted");help.setMaxWidth(Double.MAX_VALUE);help.setMinHeight(Region.USE_PREF_SIZE);status.setMinHeight(Region.USE_PREF_SIZE);
+        var content=column(12,help,table,field("Tên bộ mới",name),buttons,status);VBox.setVgrow(table,Priority.ALWAYS);
         dialog.getDialogPane().setContent(content);dialog.getDialogPane().setPrefSize(760,Math.min(560,app.ownerStage().getHeight()-40));dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);((Button)dialog.getDialogPane().lookupButton(ButtonType.CLOSE)).setText("Đóng");dialog.show();refresh.run();
     }
     private static TableColumn<Choice,String> col(String title,Function<Choice,String> value,double width){var col=new TableColumn<Choice,String>(title);col.setPrefWidth(width);col.setSortable(false);col.setCellValueFactory(c->new ReadOnlyStringWrapper(value.apply(c.getValue())));return col;}

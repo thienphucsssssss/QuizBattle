@@ -8,6 +8,8 @@ import vn.edu.hutech.nqb.client.*;
 import vn.edu.hutech.nqb.server.*;
 import java.awt.image.BufferedImage;
 import javax.imageio.ImageIO;
+import java.io.IOException;
+import java.net.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -43,10 +45,28 @@ public final class LiveLanUiCheck {
         } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config"); }
     }
     private static TlsQuizGateway connect() throws Exception { return TlsQuizGateway.connect(new Endpoint("127.0.0.1", port), trust, SECRET.toCharArray()); }
+    // Simulate another LAN machine while keeping the production gateway's TLS verification intact.
+    private static TlsQuizGateway connect(String sourceIp)throws Exception {
+        try(var forwarder=new ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))){
+            int targetPort=port;
+            Thread.ofVirtual().start(()->{
+                try(var upstream=new Socket();var downstream=forwarder.accept()){
+                    upstream.bind(new InetSocketAddress(sourceIp,0));upstream.connect(new InetSocketAddress("127.0.0.1",targetPort),5000);
+                    upstream.setTcpNoDelay(true);downstream.setTcpNoDelay(true);
+                    Thread.ofVirtual().start(()->relay(downstream,upstream));relay(upstream,downstream);
+                }catch(IOException ignored){/* The real gateway reports transport failures. */}
+            });
+            return TlsQuizGateway.connect(new Endpoint("127.0.0.1",forwarder.getLocalPort()),trust,SECRET.toCharArray());
+        }
+    }
+    private static void relay(Socket from,Socket to){
+        try{from.getInputStream().transferTo(to.getOutputStream());}catch(IOException ignored){}
+        finally{try{from.close();}catch(IOException ignored){}try{to.close();}catch(IOException ignored){}}
+    }
     private static JsonNode request(QuizGateway gateway, String type, com.fasterxml.jackson.databind.node.ObjectNode payload) throws Exception { return gateway.request(type, payload).get(8, TimeUnit.SECONDS); }
     private static void run(ArcadeApplication app) throws Exception {
         fx(() -> { assertLogin(app); snapshot(app,"00-login-role-selection"); });
-        try (var host = connect(); var opponent = connect();var third=connect()) {
+        try (var host = connect(); var opponent = connect("127.0.0.2");var third=connect("127.0.0.3")) {
             request(host, "LOGIN", object().put("username", "admin").put("password", SECRET));
             if(request(host,"QUESTION_LIST",object()).path("total").asInt()!=0)throw new AssertionError("New Server must have an empty bank");
             for(int i=1;i<=20;i++)request(host,"QUESTION_CREATE",object().put("content","Test-only question "+i).put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA"));
@@ -68,7 +88,15 @@ public final class LiveLanUiCheck {
             await(()->app.qaScene().lookup("#lan-rooms") instanceof javafx.scene.control.ListView<?> list && list.getItems().size()==1);
             fx(()->{snapshot(app,"00-discovered-room-list");((javafx.scene.control.ToggleButton)app.qaScene().lookup("#lan-code-mode")).fire();app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();((TextField)app.qaScene().lookup("#room-code-input")).setText(code.startsWith("A")?"BBBBBB":"AAAAAA");app.qaClick("Tham gia phòng   →");});
             await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains("Không tìm thấy mã phòng")));
-            fx(()->{snapshot(app,"00-code-not-found");((javafx.scene.control.ToggleButton)app.qaScene().lookup("#lan-browse-mode")).fire();((javafx.scene.control.ListView<?>)app.qaScene().lookup("#lan-rooms")).getSelectionModel().select(0);app.qaClick("Tham gia phòng   →");});
+            try(var sameIpStudent=connect()){
+                request(sameIpStudent,"JOIN",object().put("room_code",code).put("nickname","Phiên học sinh hiện tại"));
+                fx(()->{snapshot(app,"00-code-not-found");((javafx.scene.control.ToggleButton)app.qaScene().lookup("#lan-browse-mode")).fire();((javafx.scene.control.ListView<?>)app.qaScene().lookup("#lan-rooms")).getSelectionModel().select(0);app.qaClick("Tham gia phòng   →");});
+                await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains("Máy/IP này đã có một học sinh đang hoạt động")));
+                fx(()->{if(app.qaConnected())throw new AssertionError("Same-IP student received a second session");snapshot(app,"00-duplicate-student-ip-rejected");});
+                if(request(host,"ROOM_STATE",object()).path("connected_player_count").asInt()!=3)throw new AssertionError("Rejected JOIN changed the active student list");
+                request(sameIpStudent,"LEAVE",object());
+            }
+            fx(()->app.qaClick("Thử lại"));
             await(app::qaConnected);fx(()->{app.qaCloseAuxiliary();snapshot(app,"00-joined-by-lan-list");app.qaLogout();});
             fx(() -> { app.qaStudentAuth(); fillForm(app, "Minh Ánh", code); app.qaClick("Tham gia phòng   →"); });
             await(() -> app.qaConnected() && app.qaPhase().equals("WAITING"));
@@ -97,6 +125,7 @@ public final class LiveLanUiCheck {
         }
         fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
         await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app) == 10); fx(() -> snapshot(app, "08-live-bank"));
+        checkQuestionSelectionAcrossPages(app);
         fx(app::historyView); await(() -> tableSize(app) == 1); fx(() -> snapshot(app, "09-live-history"));
         checkCommander(app);
         fx(() -> { app.qaSettings(); var dialog = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing()).toList().getLast().getScene(); dialog.getRoot().applyCss(); dialog.getRoot().layout();
@@ -104,12 +133,14 @@ public final class LiveLanUiCheck {
             if (sound.isDisabled() || dialog.lookup(".slider") == null) throw new AssertionError("SFX controls unavailable");
             if (!(dialog.lookup("#music-enabled") instanceof javafx.scene.control.CheckBox background) || background.isDisabled() || dialog.lookup("#music-volume") == null) throw new AssertionError("Music controls unavailable");
             saveImage(dialog.snapshot(null), "10-sound-settings"); app.qaCloseAuxiliary(); });
+        fx(app::bankView);await(()->tableSize(app)==10);fx(()->{bankCheck(app,bankTable(app).getItems().getFirst().path("question_id").asInt()).fire();assertBankCheckedCount(app,1);});
         fx(app::qaLogout); await(() -> app.qaScene().lookup("#login-role")!=null); fx(() -> { assertLogin(app); snapshot(app,"11-logout-clears-role"); });
         fx(() -> { app.qaTeacherAuth(); fillForm(app,"admin",""); app.qaClick("Đăng nhập   →"); });
         await(() -> app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n -> n instanceof javafx.scene.control.Label l && l.getText().contains("không thuộc vai trò")));
         fx(() -> { if(app.qaConnected())throw new AssertionError("Role mismatch granted a session"); snapshot(app,"12-role-mismatch"); });
         fx(() -> { app.qaWelcome(); app.qaTeacherAuth(); fillForm(app,"teacher.qa",""); ((TextField)app.qaScene().lookup("#login-password")).setText(SECRET+"-changed"); app.qaClick("Đăng nhập   →"); });
         await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app)==0 && app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n -> n instanceof javafx.scene.control.Label l && l.getText().startsWith("0 câu phù hợp")));
+        fx(()->{if(!((javafx.scene.control.Label)app.qaScene().lookup("#bank-selected-count")).getText().equals("Đã chọn 0 câu"))throw new AssertionError("Question selection leaked into another account");});
         fx(() -> { if(app.qaScene().getRoot().lookupAll(".button").stream().anyMatch(n -> n instanceof javafx.scene.control.Button b && b.getText().equals("Người dùng")))throw new AssertionError("Teacher sees Admin navigation"); snapshot(app,"13-teacher-empty-bank"); });
         checkQuestionImport(app);
         fx(app::qaLogout); await(() -> app.qaScene().lookup("#login-role")!=null); fx(() -> assertLogin(app));
@@ -141,11 +172,11 @@ public final class LiveLanUiCheck {
         var created=new CompletableFuture<JsonNode>();
         fx(()->app.call("ROOM_CONFIGURE",object().put("room_name","Giám sát LAN").put("question_count",1).put("duration_seconds",5),created::complete,created::completeExceptionally));
         String code=created.get(8,TimeUnit.SECONDS).path("room_code").asText();
-        try(var a=connect();var b=connect()){
+        try(var a=connect("127.0.0.2");var b=connect("127.0.0.3")){
             request(a,"JOIN",object().put("room_code",code).put("nickname","Minh Giám sát"));request(b,"JOIN",object().put("room_code",code).put("nickname","Lan Đấu trường"));
             request(a,"READY_SET",object().put("ready",true));request(b,"READY_SET",object().put("ready",true));
             await(()->tableSize(app)==2);
-            fx(()->{snapshot(app,"09c-monitor-ready");app.qaClick("Bắt đầu ván thi");});
+            fx(()->{assertTableText(app,"127.0.0.2");snapshot(app,"09c-monitor-ready");app.qaClick("Bắt đầu ván thi");});
             await(()->app.qaPhase().equals("QUESTION_ACTIVE"));
             await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().startsWith("Câu 1/1")));
             fx(()->assertTableText(app,"Đang trả lời"));
@@ -155,7 +186,7 @@ public final class LiveLanUiCheck {
             await(()->app.qaScene().lookup("#monitor-submitted") instanceof javafx.scene.control.Label l&&l.getText().contains("1/2"));
             fx(()->{snapshot(app,"09e-monitor-submitted");app.qaClick("Đấu trường thí sinh");});
             await(()->app.qaScene().lookup("#arena-search")!=null&&tableSize(app)==2);
-            fx(()->((TextField)app.qaScene().lookup("#arena-search")).setText("Minh"));await(()->tableSize(app)==1);
+            fx(()->{assertTableText(app,"127.0.0.2");((TextField)app.qaScene().lookup("#arena-search")).setText("Minh");});await(()->tableSize(app)==1);
             await(()->app.qaPhase().equals("FINISHED"));
             fx(()->assertTableText(app,"Đã kết thúc"));
             fx(()->{snapshot(app,"09f-arena-filtered-final");if(app.qaScene().lookup("#arena-search")==null||tableSize(app)!=1)throw new AssertionError("Arena search or page lost during game: rows="+tableSize(app)+", search="+app.qaScene().lookup("#arena-search"));((TextField)app.qaScene().lookup("#arena-search")).clear();});
@@ -211,8 +242,64 @@ public final class LiveLanUiCheck {
         if(uiRequest(app,"QUESTION_LIST").path("total").asInt()!=3)throw new AssertionError("Excel + Word not committed");
         System.out.println("QUESTION_IMPORT_UI_PASS: XLSX/DOCX, preview, validation, duplicate opt-in, cancel, selected atomic commit, template roundtrip");
         checkQuestionSets(app);
+        checkUnsupportedQuestionSets(app);
     }
     private static javafx.scene.Scene dialogScene(String id){return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene()!=null&&w.getScene().lookup("#"+id)!=null).findFirst().orElseThrow().getScene();}
+    @SuppressWarnings("unchecked")
+    private static javafx.scene.control.TableView<JsonNode> bankTable(ArcadeApplication app){return (javafx.scene.control.TableView<JsonNode>)app.qaScene().lookup(".table-view");}
+    private static javafx.scene.control.CheckBox bankPageCheck(ArcadeApplication app){var check=app.qaScene().lookup("#bank-check-page");if(!(check instanceof javafx.scene.control.CheckBox box))throw new AssertionError("Question bank needs a checkbox column in place of ID");return box;}
+    private static javafx.scene.control.CheckBox bankCheck(ArcadeApplication app,int id){app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();var check=app.qaScene().lookup("#question-check-"+id);if(!(check instanceof javafx.scene.control.CheckBox box))throw new AssertionError("Question checkbox missing for "+id);return box;}
+    private static void assertBankCheckedCount(ArcadeApplication app,int expected){if(!((javafx.scene.control.Label)app.qaScene().lookup("#bank-selected-count")).getText().equals("Đã chọn "+expected+" câu"))throw new AssertionError("Unexpected total checked questions, expected "+expected);}
+    private static void checkQuestionSelectionAcrossPages(ArcadeApplication app)throws Exception {
+        int[] first={0};
+        fx(()->{
+            first[0]=bankTable(app).getItems().getFirst().path("question_id").asInt();bankPageCheck(app).fire();assertBankCheckedCount(app,10);
+            if(!bankCheck(app,first[0]).isSelected())throw new AssertionError("Header checkbox did not check visible rows");app.qaClick("Sau →");
+        });
+        await(()->tableSize(app)==10&&bankTable(app).getItems().getFirst().path("question_id").asInt()!=first[0]);
+        fx(()->{
+            var firstOnPage=bankCheck(app,bankTable(app).getItems().getFirst().path("question_id").asInt());
+            if(firstOnPage.isSelected())throw new AssertionError("Page 1 checks leaked into unrelated page 2 rows");firstOnPage.fire();assertBankCheckedCount(app,11);
+            if(!bankPageCheck(app).isIndeterminate())throw new AssertionError("Partially checked page needs a mixed header state");
+            bankTable(app).getSelectionModel().select(1);assertBankCheckedCount(app,11);
+            if(!firstOnPage.isSelected())throw new AssertionError("Inspecting a row cleared a checked question");
+            firstOnPage.fire();assertBankCheckedCount(app,10);bankPageCheck(app).fire();assertBankCheckedCount(app,20);
+            bankPageCheck(app).fire();assertBankCheckedCount(app,10);bankPageCheck(app).fire();assertBankCheckedCount(app,20);
+            snapshot(app,"08a-checkbox-bank-page2");app.qaClick("Bộ câu hỏi");
+        });
+        await(()->!dialogScene("set-create-selected").lookup("#set-create-selected").isDisabled());
+        fx(()->{
+            var scene=dialogScene("set-create-selected");var create=(javafx.scene.control.Button)scene.lookup("#set-create-selected");
+            if(!create.getText().equals("Tạo từ 20 câu đã chọn"))throw new AssertionError("Selection lost the first page: "+create.getText());
+            ((TextField)scene.lookup("#question-set-name")).setText("Bộ chọn qua hai trang QA");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"08a-selected-20-across-pages");create.fire();
+        });
+        await(()->dialogScene("question-sets-table").lookup("#question-sets-table") instanceof javafx.scene.control.TableView<?> t&&t.getItems().stream().anyMatch(item->item.toString().contains("20/20")));
+        JsonNode sets=uiRequest(app,"QUESTION_SET_LIST");var created=java.util.stream.StreamSupport.stream(sets.path("items").spliterator(),false).filter(s->s.path("name").asText().equals("Bộ chọn qua hai trang QA")).findFirst().orElseThrow();
+        if(created.path("question_count").asInt()!=20)throw new AssertionError("Set did not contain the 20 selected questions");
+        fx(()->{app.qaCloseAuxiliary();app.qaClick("← Trước");});
+        await(()->tableSize(app)==10&&bankTable(app).getItems().getFirst().path("question_id").asInt()==first[0]);
+        fx(()->{
+            if(!bankCheck(app,first[0]).isSelected()||!bankPageCheck(app).isSelected())throw new AssertionError("Returning to page 1 did not restore checks");
+            bankCheck(app,first[0]).fire();assertBankCheckedCount(app,19);app.qaClick("Bộ câu hỏi");
+        });
+        await(()->!dialogScene("set-create-selected").lookup("#set-create-selected").isDisabled());
+        fx(()->{
+            if(!((javafx.scene.control.Button)dialogScene("set-create-selected").lookup("#set-create-selected")).getText().equals("Tạo từ 19 câu đã chọn"))throw new AssertionError("Deselecting one row removed the wrong page selections");
+            app.qaCloseAuxiliary();((javafx.scene.control.Button)app.qaScene().lookup("#bank-clear-selection")).fire();
+            if(bankCheck(app,first[0]).isSelected()||bankPageCheck(app).isSelected()||bankPageCheck(app).isIndeterminate())throw new AssertionError("Clear selection retained visible checks");assertBankCheckedCount(app,0);
+            snapshot(app,"08b-cleared-bank-selection");app.qaClick("Sau →");
+        });
+        await(()->tableSize(app)==10&&bankTable(app).getItems().getFirst().path("question_id").asInt()!=first[0]);
+        fx(()->{
+            if(bankCheck(app,bankTable(app).getItems().getFirst().path("question_id").asInt()).isSelected())throw new AssertionError("Clear selection retained hidden-page checks");
+            ((javafx.scene.control.Button)app.qaScene().lookup("#bank-select-page")).fire();
+            if(!bankPageCheck(app).isSelected())throw new AssertionError("Select current page did not check all rows");assertBankCheckedCount(app,10);
+            ((javafx.scene.control.Button)app.qaScene().lookup("#bank-clear-selection")).fire();app.qaClick("← Trước");
+        });
+        await(()->tableSize(app)==10&&bankTable(app).getItems().getFirst().path("question_id").asInt()==first[0]);
+        uiRequest(app,"QUESTION_SET_DELETE",object().put("question_set_id",created.path("question_set_id").asInt()));
+        System.out.println("QUESTION_SELECTION_UI_PASS: checkbox column, mixed header, independent row inspection, checked 20 across pages, saved all 20, restored checks, unchecked one, cleared hidden pages");
+    }
     private static void selectNamedSet(javafx.scene.control.ComboBox<?> combo,String name) {
         for(int i=0;i<combo.getItems().size();i++)if(combo.getItems().get(i).toString().startsWith(name+" · ")){combo.getSelectionModel().select(i);return;}
         throw new AssertionError("Question set missing from selector: "+name);
@@ -244,7 +331,7 @@ public final class LiveLanUiCheck {
         await(()->app.roomSnapshot().path("question_set_id").asInt()==setId);
         fx(()->snapshot(app,"13j-room-selected-set"));
         String code=uiRequest(app,"ROOM_STATE").path("room_code").asText();
-        try(var a=connect();var b=connect()){
+        try(var a=connect("127.0.0.2");var b=connect("127.0.0.3")){
             request(a,"JOIN",object().put("room_code",code).put("nickname","Set Player A"));request(b,"JOIN",object().put("room_code",code).put("nickname","Set Player B"));
             request(a,"READY_SET",object().put("ready",true));request(b,"READY_SET",object().put("ready",true));await(()->app.roomSnapshot().path("ready_count").asInt()==2);
             fx(()->app.qaClick("Bắt đầu ván thi   →"));await(()->app.qaPhase().equals("QUESTION_ACTIVE"));
@@ -256,6 +343,40 @@ public final class LiveLanUiCheck {
         System.out.println("QUESTION_SET_UI_PASS: import grouping, cancel, bank filter, create from filter, room selection, insufficient pool, actual selected-set gameplay, reset");
     }
     private static int tableSize(ArcadeApplication app) { var table = app.qaScene().getRoot().lookup(".table-view"); return table instanceof javafx.scene.control.TableView<?> t ? t.getItems().size() : -1; }
+    private static void checkUnsupportedQuestionSets(ArcadeApplication app)throws Exception {
+        var field=ArcadeApplication.class.getDeclaredField("gateway");field.setAccessible(true);
+        QuizGateway[] original={null};
+        fx(()->{try{
+            original[0]=(QuizGateway)field.get(app);
+            // Only reproduce the old Server's unsupported endpoint; keep the live TLS session for all other requests.
+            field.set(app,new QuizGateway(){
+                public CompletableFuture<JsonNode> request(String type,com.fasterxml.jackson.databind.node.ObjectNode payload){
+                    return type.equals("QUESTION_SET_LIST")?CompletableFuture.failedFuture(new GatewayException("UNKNOWN_TYPE","Yêu cầu không được hỗ trợ.",object())):original[0].request(type,payload);
+                }
+                public void onEvent(java.util.function.Consumer<JsonNode> listener){original[0].onEvent(listener);}
+                public boolean isPreview(){return false;}
+                public void close(){ }
+            });
+            app.roomView();
+        }catch(ReflectiveOperationException error){throw new RuntimeException(error);}});
+        try {
+            // A pending ROOM_STATE may rebuild the lobby between separate lookup and click turns.
+            await(()->{
+                var root=app.qaScene().getRoot();root.applyCss();root.layout();
+                var create=root.lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button b&&b.getText().equals("Tạo phòng")).findFirst();
+                if(create.isEmpty())return false;
+                ((javafx.scene.control.Button)create.get()).fire();return true;
+            });
+            await(()->dialogScene("room-question-pool").lookup("#room-question-pool") instanceof javafx.scene.control.Label l&&l.getText().startsWith("Không tải được"));
+            fx(()->{
+                var scene=dialogScene("room-question-set");scene.getRoot().applyCss();scene.getRoot().layout();
+                if(!scene.lookup("#room-config-save").isDisabled())throw new AssertionError("Unsupported Server allowed saving a room source");
+                if(scene.getRoot().lookupAll(".label").stream().noneMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains("Server cũ")&&l.getText().contains("bản cập nhật")))throw new AssertionError("Server restart guidance missing");
+                saveImage(scene.snapshot(null),"13l-old-server-guidance");app.qaCloseAuxiliary();
+            });
+        } finally {fx(()->{try{field.set(app,original[0]);}catch(IllegalAccessException error){throw new RuntimeException(error);}});}
+        System.out.println("SERVER_COMPATIBILITY_UI_PASS: old Server ends loading, explains update/restart, blocks invalid save");
+    }
     private static void fillForm(ArcadeApplication app, String identity, String code) {
         var root = app.qaScene().getRoot(); root.applyCss(); root.layout();
         if(root.lookup("#server-host")!=null || root.lookup("#server-port")!=null)throw new AssertionError("IP/port fields remain in Client");
