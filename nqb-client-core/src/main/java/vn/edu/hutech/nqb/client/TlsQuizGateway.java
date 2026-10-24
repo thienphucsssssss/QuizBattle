@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.prefs.Preferences; // THÊM IMPORT NÀY
 
 /** TLS-only transport. No trust-all, no plaintext retry and no fixture fallback. */
 public final class TlsQuizGateway implements QuizGateway {
@@ -29,9 +30,25 @@ public final class TlsQuizGateway implements QuizGateway {
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile Consumer<JsonNode> listener = ignored -> { };
 
+    // --- BẮT ĐẦU PHẦN THÊM MỚI: TẠO VÀ LƯU MACHINE ID ---
+    private static final String MACHINE_ID = loadOrGenerateMachineId();
+
+    private static String loadOrGenerateMachineId() {
+        // Sử dụng Preferences để lưu ID an toàn vào HĐH (Registry với Windows)
+        Preferences prefs = Preferences.userNodeForPackage(TlsQuizGateway.class);
+        String id = prefs.get("client_machine_id", null);
+        if (id == null) {
+            id = UUID.randomUUID().toString();
+            prefs.put("client_machine_id", id);
+        }
+        return id;
+    }
+    // --- KẾT THÚC PHẦN THÊM MỚI ---
+
     public static TlsQuizGateway connect(Endpoint endpoint, Path truststore, char[] password) throws Exception {
         return connect(endpoint,truststore,password,5000);
     }
+    
     public static TlsQuizGateway connect(Endpoint endpoint, Path truststore, char[] password, int timeoutMillis) throws Exception {
         if(timeoutMillis<1||timeoutMillis>5000)throw new IllegalArgumentException("Invalid TLS timeout");
         KeyStore store = KeyStore.getInstance("PKCS12");
@@ -75,6 +92,11 @@ public final class TlsQuizGateway implements QuizGateway {
         if (pending.size() >= 64) return CompletableFuture.failedFuture(new GatewayException("BUSY", "Có quá nhiều yêu cầu đang chờ.", object()));
         var message = object().put("protocol_version", Protocol.VERSION).put("type", type).put("request_id", id);
         var body = payload.deepCopy();
+        
+        // --- THÊM MỚI: TỰ ĐỘNG GẮN MACHINE_ID VÀO MỌI PAYLOAD GỬI ĐI ---
+        body.put("machine_id", MACHINE_ID);
+        // ---------------------------------------------------------------
+
         if (body.has("room_code")) message.set("room_code", body.remove("room_code"));
         if (body.has("session_id") && !type.startsWith("HISTORY_")) message.set("session_id", body.remove("session_id"));
         message.set("payload", body);
@@ -123,6 +145,7 @@ public final class TlsQuizGateway implements QuizGateway {
         } catch (Exception ignored) { /* Never log authentication payloads or credentials. */ }
         finally { fail(); }
     }
+    
     private void write() {
         try {
             while (!closed.get()) {
@@ -131,6 +154,7 @@ public final class TlsQuizGateway implements QuizGateway {
             }
         } catch (Exception ignored) { fail(); }
     }
+    
     private synchronized void fail() {
         if (closed.compareAndSet(false, true)) {
             try { socket.close(); } catch (Exception ignored) { }
@@ -140,6 +164,7 @@ public final class TlsQuizGateway implements QuizGateway {
             listener.accept(object().put("type", "DISCONNECTED").set("payload", object()));
         }
     }
+    
     @Override public void onEvent(Consumer<JsonNode> listener) { this.listener = listener; }
     @Override public boolean isPreview() { return false; }
     @Override public void close() { fail(); }

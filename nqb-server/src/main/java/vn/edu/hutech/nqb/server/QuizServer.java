@@ -30,6 +30,11 @@ public final class QuizServer implements AutoCloseable {
     private final LinkedHashMap<String,Attempts> registrationLimits=new LinkedHashMap<>();
     private final LinkedHashMap<String,Player> players=new LinkedHashMap<>();
     private final AvatarRoster avatars=new AvatarRoster();
+    
+    // --- VỊ TRÍ SỬA 1: THÊM BỘ NHỚ LƯU RÀNG BUỘC (MÃ MÁY <-> NICKNAME) ---
+    private final Map<String,String> deviceBindings = new ConcurrentHashMap<>();
+    // -------------------------------------------------------------------
+
     private GamePhase phase=GamePhase.WAITING;
     private int owner, questionCount=10, questionSeconds=15, questionIndex;
     private String roomCode="",roomName="",session="",started="";
@@ -111,6 +116,18 @@ public final class QuizServer implements AutoCloseable {
             if(type.equals("PASSWORD_CHANGE")){manager(p);changePassword(p,id,payload);return;}
             if(p.mustChange)throw fail("PASSWORD_CHANGE_REQUIRED","Hãy đổi mật khẩu tạm trước khi tiếp tục.");
             if(type.equals("ROOM_STATE")){p.send(envelope("ROOM_STATE_OK",id,state(p,true)));return;}
+            
+            // --- VỊ TRÍ SỬA 2: THÊM API ĐỂ GIẢNG VIÊN GỠ LIÊN KẾT MÁY (GHI NHẬT KÝ RA CONSOLE) ---
+            if(type.equals("DEVICE_UNBIND")){
+                manager(p); 
+                String targetNick = text(payload,"nickname",24);
+                deviceBindings.values().removeIf(n->TextNormalizer.key(n).equals(TextNormalizer.key(targetNick)));
+                System.out.println("LOG [Giảng viên ID: " + p.userId + "]: Đã gỡ liên kết máy cho học sinh '" + targetNick + "'.");
+                p.send(envelope("DEVICE_UNBIND_OK",id,obj()));
+                return;
+            }
+            // -------------------------------------------------------------------------------------
+
             if(type.startsWith("USER_")){admin(p);users(p,id,type,payload);return;}
             if(type.startsWith("QUESTION_")){
                 manager(p);boolean mutation=Set.of("QUESTION_CREATE","QUESTION_UPDATE","QUESTION_DELETE","QUESTION_SET_ACTIVE","QUESTION_IMPORT_COMMIT").contains(type);
@@ -201,8 +218,6 @@ public final class QuizServer implements AutoCloseable {
             p.userId=current.id();p.credentialVersion=current.version();p.role=current.role();p.mustChange=current.change();p.send(envelope("LOGIN_OK",id,current.publicData()));
         },()->Arrays.fill(chars,'\0'));
     }
-    @FunctionalInterface private interface Work<T>{T run()throws Exception;}
-    @FunctionalInterface private interface Complete<T>{void accept(T value)throws Exception;}
     private <T>void asyncAuth(Peer p,String id,Work<T> job,Complete<T> done,Runnable cleanup){
         p.authBusy=true;
         try{auth.execute(()->{
@@ -240,15 +255,30 @@ public final class QuizServer implements AutoCloseable {
         var result=store.editUser(type,data);if(type.equals("USER_SET_ACTIVE")){revoke(target);if(owner==target)closeRoom();broadcastState();}p.send(envelope(type+"_OK",id,result));
     }
     private void revoke(int id){for(var p:peers)if(p.userId==id){p.closeAfterWrite=true;p.cache.clear();}}
+    
+    // --- VỊ TRÍ SỬA 3: THÊM KIỂM TRA RÀNG BUỘC MACHINE_ID VÀ NICKNAME VÀO HÀM JOIN ---
     private void join(Peer p,String id,JsonNode request){
         unauthenticated(p);waiting();if(owner==0||!roomCode.equals(request.path("room_code").asText()))throw fail("WRONG_ROOM","Mã phòng không đúng hoặc phòng đã đóng.");
         String nickname=text(request.path("payload"),"nickname",24);String key=TextNormalizer.key(nickname);
         if(nickname.codePoints().anyMatch(Character::isISOControl))throw fail("INVALID_INPUT","Biệt danh phải nằm trên một dòng.");
+
+        String machineId = request.path("payload").path("machine_id").asText("");
+        if(machineId.isEmpty())throw fail("INVALID_INPUT","Phiên bản Client quá cũ (không có mã máy). Vui lòng cập nhật.");
+        String bound = deviceBindings.get(machineId);
+        if(bound == null){
+            if(deviceBindings.values().stream().anyMatch(n->TextNormalizer.key(n).equals(key))) throw fail("ACCOUNT_BOUND_TO_OTHER","Tài khoản này đã được sử dụng trên một máy khác.");
+            deviceBindings.put(machineId, nickname); // Tự động gán máy cho lần đầu
+        } else if(!TextNormalizer.key(bound).equals(key)){
+            throw fail("DEVICE_BOUND_TO_OTHER","Tài khoản này không được phép sử dụng trên máy hiện tại. Vui lòng liên hệ giảng viên/quản trị viên.");
+        }
+        // ---------------------------------------------------------------------------------
+
         if(players.values().stream().anyMatch(v->TextNormalizer.key(v.nickname).equals(key)))throw fail("NICKNAME_TAKEN","Biệt danh đã có người dùng.");
         if(players.size()>=config.maxPlayers())throw fail("ROOM_FULL","Phòng đã đủ người.");
         String playerId=UUID.randomUUID().toString(),avatar=avatars.join(playerId);players.put(playerId,new Player(playerId,nickname,avatar,p));p.playerId=playerId;
         p.send(envelope("JOIN_OK",id,obj().put("player_id",playerId).put("nickname",nickname).put("avatar_id",avatar).put("room_code",roomCode)));broadcastState();
     }
+
     private String newCode(){String chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";var r=new java.security.SecureRandom();var b=new StringBuilder();for(int i=0;i<6;i++)b.append(chars.charAt(r.nextInt(chars.length())));return b.toString();}
     private void answer(Peer p,String id,JsonNode request){
         Player player=student(p);JsonNode data=request.path("payload");int qid=integer(data,"question_id",0,1,Integer.MAX_VALUE);String choice=text(data,"answer",1);
