@@ -154,6 +154,49 @@
 #lan-rooms .list-cell:filled:selected { -fx-background-color: #e1e8ff; }
 #lan-rooms { -fx-background-color: white; -fx-border-color: -line; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 4; }
 #lan-rooms .list-cell:empty { -fx-background-color: white; }
+
+/* Question bank: preserve the shared palette while separating browsing and details. */
+.bank-title { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 28px; -fx-text-fill: #202146; }
+.bank-header-actions .button { -fx-font-size: 13px; -fx-padding: 10 14; }
+.bank-filter-panel { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 14; }
+.bank-filter-panel .text-field { -fx-font-size: 14px; -fx-min-height: 42; }
+.bank-filter-panel .combo-box { -fx-font-size: 13px; -fx-min-height: 40; -fx-padding: 3 6; -fx-border-color: #e0e5f1; -fx-background-color: #f7f9ff; }
+.bank-filter-panel .combo-box:focused { -fx-border-color: #256c90; }
+.bank-toolbar .button, .bank-footer .button { -fx-font-size: 13px; -fx-min-height: 40; -fx-padding: 8 12; }
+.bank-selection-total { -fx-font-size: 12px; -fx-text-fill: #344a20; -fx-background-color: #eef7dc; -fx-background-radius: 10; -fx-padding: 9 12; }
+.bank-footer .label { -fx-font-size: 12px; }
+.bank-table .column-header-background { -fx-background-color: transparent; -fx-background-radius: 0; }
+.bank-table .column-header .label { -fx-font-size: 12px; -fx-text-fill: #66728a; }
+.bank-table .table-row-cell:filled { -fx-background-color: white; -fx-background-insets: 4 0; -fx-background-radius: 14; -fx-border-width: 0; -fx-padding: 4 0; }
+.bank-table .table-row-cell:filled:hover { -fx-background-color: #f2f5ff; }
+.bank-table .table-row-cell:filled:selected { -fx-background-color: #3049d5, #edf2ff; -fx-background-insets: 4 0, 4 0 4 3; -fx-background-radius: 14, 12; }
+.bank-table .table-cell { -fx-background-color: transparent; -fx-border-width: 0; }
+.bank-table .bank-preview-cell { -fx-padding: 8 14; -fx-alignment: CENTER_LEFT; }
+.bank-question-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: #202146; }
+.bank-question-meta { -fx-font-size: 12px; -fx-text-fill: #66728a; }
+.bank-preview-cell .bank-question-title .text { -fx-fill: #202146; }
+.bank-preview-cell .bank-question-meta .text { -fx-fill: #66728a; }
+.bank-preview-cell .bank-category .text { -fx-fill: #344b92; }
+.bank-preview-cell .bank-status.active .text { -fx-fill: #385923; }
+.bank-preview-cell .bank-status.inactive .text { -fx-fill: #7b5963; }
+.bank-category { -fx-font-size: 11px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-text-fill: #344b92; -fx-background-color: #edf1ff; -fx-background-radius: 7; -fx-padding: 4 8; }
+.bank-status { -fx-font-size: 11px; -fx-background-radius: 7; -fx-padding: 4 8; }
+.bank-status.active { -fx-text-fill: #385923; -fx-background-color: #eaf4dc; }
+.bank-status.inactive { -fx-text-fill: #7b5963; -fx-background-color: #f6e9ec; }
+.bank-inspector { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-width: 1; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 0; }
+.bank-inspector > .viewport { -fx-background-color: transparent; }
+.bank-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: #202146; }
+.bank-question-code { -fx-font-size: 11px; -fx-text-fill: #66728a; -fx-background-color: #f1f4fb; -fx-background-radius: 6; -fx-padding: 4 6; }
+.bank-detail-question { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 17px; -fx-text-fill: #202146; }
+.bank-answer-option { -fx-background-color: #f4f6fc; -fx-background-radius: 11; -fx-border-color: transparent; -fx-border-radius: 11; -fx-border-width: 1; -fx-padding: 11; }
+.bank-answer-option.correct { -fx-background-color: #eef8dd; -fx-border-color: #bfdc90; }
+.bank-answer-letter { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 13px; -fx-text-fill: #526387; -fx-background-color: #e6ebf8; -fx-background-radius: 7; -fx-padding: 4 0; }
+.bank-answer-option.correct .bank-answer-letter { -fx-background-color: #3049d5; -fx-text-fill: white; }
+.bank-answer-text { -fx-font-size: 14px; -fx-text-fill: #202146; }
+.bank-answer-note { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: #426621; }
+.bank-detail-content .button { -fx-font-size: 13px; -fx-padding: 8 12; }
+.bank-detail-dialog .bank-answer-option { -fx-background-color: white; -fx-border-color: #e2e7f3; }
+.bank-detail-dialog .bank-answer-option.correct { -fx-background-color: #eef8dd; -fx-border-color: #bfdc90; }
 .import-correct { -fx-background-color: #e4fac0; -fx-text-fill: #264400; -fx-padding: 8 12; -fx-background-radius: 10; }
 .import-option { -fx-padding: 3 12; }
 .import-warning { -fx-text-fill: #7c4a05; }

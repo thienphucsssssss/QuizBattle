@@ -6,6 +6,8 @@ Cập nhật 22/10/2026 theo yêu cầu người dùng: màn khởi động là 
 
 ## Định hướng
 
+Cập nhật 25/10/2026 — nâng cấp Ngân hàng theo ảnh tham khảo: giữ sidebar và palette cobalt/lime hiện tại; gom tìm kiếm/bộ lọc vào một vùng trắng có viền nhẹ, đưa nhập/thêm câu lên đầu. Danh sách vẫn dùng TableView ảo hóa và ô tick, mỗi hàng có chủ đề, trạng thái, nội dung rõ cấp chữ và thời gian cập nhật. Khung bên phải hiển thị bốn đáp án thật, đáp án đúng nền lime; hàng đang xem có vạch cobalt. Khi cửa sổ hẹp, các nút đầu trang xuống dòng và dùng dialog Xem chi tiết. CSS chỉ áp dụng cho Ngân hàng, không đổi các trang quản lý khác. Không bổ sung điểm số, độ khó hoặc thống kê giả từ ảnh tham khảo.
+
 Cập nhật 25/10/2026 — chọn câu bằng ô tick: thay cột ID ở Ngân hàng bằng CheckBox native, vùng bấm 44×44 trong dòng hiện có. Ô ở đầu cột chọn/bỏ trang hiện tại và hiển thị trạng thái chọn một phần. Lựa chọn tick độc lập với dòng đang xem chi tiết, giữ qua phân trang/bộ lọc, đồng bộ với tổng Đã chọn và nút tạo bộ. Giữ palette, typography, kích thước cột và các thao tác Chọn cả trang/Bỏ chọn tất cả hiện có.
 
 Cập nhật 25/10/2026 — bộ câu hỏi: dùng ComboBox native để lọc bộ ở Ngân hàng và chọn nguồn trong cấu hình phòng; kèm số câu đang bật/tổng câu. Dialog Bộ câu hỏi tạo từ các dòng chọn hoặc toàn bộ kết quả lọc, xóa bộ giữ câu gốc. Nhập Excel/Word có trường tên bộ mặc định theo tên tệp trong cùng toolbar. Giữ palette/font/khung hiện có; form cấu hình phòng cuộn riêng để nút Lưu/Hủy luôn nằm ngoài vùng cuộn và thông báo lỗi không ép mất nút.

@@ -2,6 +2,12 @@
 
 Cập nhật 25/10/2026. Mỗi Admin/giảng viên có các bộ câu hỏi riêng. Một câu có thể nằm trong nhiều bộ; chủ đề của câu được giữ nguyên.
 
+## Giao diện Ngân hàng câu hỏi
+
+Tìm kiếm và các bộ lọc được gom phía trên danh sách. Nút **Nhập từ Excel / Word** và **+ Thêm câu hỏi** nằm ở đầu trang; **Bộ câu hỏi**, **Mẫu câu hỏi** và các thao tác chọn nằm ngay dưới bộ lọc.
+
+Mỗi hàng hiển thị chủ đề, trạng thái đang bật/đã tắt, nội dung xem trước và thời gian cập nhật. Tick ô đầu dòng để chọn cho bộ; bấm nội dung để xem chi tiết độc lập với lựa chọn tick. Khi cửa sổ rộng, chi tiết hiện bên phải; khi hẹp, bấm **Xem chi tiết** để mở cửa sổ có vùng cuộn. Bốn đáp án được tách rõ, đáp án đúng có nền xanh nhạt và nhãn **Đáp án đúng**. Các nút chỉnh sửa, bật/tắt và xóa vẫn kiểm tra quyền/trạng thái phòng như trước.
+
 ## Tạo bộ khi nhập Excel hoặc Word
 
 1. Vào **Ngân hàng câu hỏi → Nhập từ Excel / Word** và chọn tệp.
@@ -57,6 +63,8 @@ Thông báo **“Yêu cầu không được hỗ trợ”** khi tải bộ câu 
 `run.bat` hiện kiểm tra dấu vân tay của source, cấu hình build và bản biên dịch thay vì chỉ nhìn dấu `ready` cũ. Khi source hoặc bản biên dịch thay đổi, launcher tự build lại trước khi chạy. Thông báo trên Client cũng hướng dẫn cập nhật/khởi động lại Server; form dừng trạng thái đang tải và chặn lưu khi chưa tải được bộ.
 
 ## Kiểm chứng bản cập nhật
+
+Bản nâng cấp giao diện Ngân hàng: **126 bài kiểm thử** đạt; kiểm thử giao diện 1024×640 và 1366×768 đạt các luồng xem đủ bốn đáp án thật, đánh dấu đáp án đúng, chuyển nhanh câu đang xem, xóa chi tiết khi lọc rỗng, tick qua nhiều trang và tạo bộ. Đã xem ảnh câu/đáp án tiếng Việt dài và các thao tác trong vùng cuộn. Log: `tmp/bank-polish-final-build.log`, `tmp/bank-polish-final-1024.log`, `tmp/bank-polish-final-1366.log`; ảnh: `output/bank-polish-final/`.
 
 Build/install Maven thành công với 111 bài kiểm thử, không có lỗi. Kiểm thử giao diện trực tiếp ở 1024×640 và 1366×768 đã xác nhận nhập/gom bộ, lọc ngân hàng, cảnh báo thiếu câu, chọn bộ cho phòng, câu thi thuộc đúng bộ và giữ lựa chọn sau reset; các luồng LAN, quản trị và nhập file hiện có vẫn đạt.
 

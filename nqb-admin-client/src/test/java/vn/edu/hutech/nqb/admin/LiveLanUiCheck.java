@@ -69,7 +69,17 @@ public final class LiveLanUiCheck {
         try (var host = connect(); var opponent = connect("127.0.0.2");var third=connect("127.0.0.3")) {
             request(host, "LOGIN", object().put("username", "admin").put("password", SECRET));
             if(request(host,"QUESTION_LIST",object()).path("total").asInt()!=0)throw new AssertionError("New Server must have an empty bank");
-            for(int i=1;i<=20;i++)request(host,"QUESTION_CREATE",object().put("content","Test-only question "+i).put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA"));
+            var examples=List.of(
+                List.of("Giao thức nào cung cấp dịch vụ truyền dữ liệu tin cậy giữa các ứng dụng trong mạng máy tính?","TCP (Transmission Control Protocol)","UDP (User Datagram Protocol)","IP (Internet Protocol)","ICMP (Internet Control Message Protocol)","Kiến trúc TCP/IP"),
+                List.of("Địa chỉ nào xác định thiết bị trong cùng một mạng cục bộ ở tầng liên kết dữ liệu?","Địa chỉ MAC","Địa chỉ thư điện tử","Tên người dùng","Số hiệu tiến trình","Mạng LAN"),
+                List.of("Trong ứng dụng Java dùng TCP, lớp nào đại diện cho điểm cuối kết nối ở phía máy khách?","Socket","ServerSocket","DatagramPacket","MulticastSocket (dùng cho giao tiếp multicast trên mạng, không đại diện cho kết nối TCP giữa một máy khách và máy chủ)","Lập trình mạng"),
+                List.of("Dịch vụ nào chuyển đổi tên miền thành địa chỉ IP để máy tính tìm đến máy chủ?","DNS (Domain Name System)","DHCP (Dynamic Host Configuration Protocol)","FTP (File Transfer Protocol)","SMTP (Simple Mail Transfer Protocol)","Ứng dụng mạng")
+            );
+            for(int i=1;i<=20;i++){
+                var q=object().put("content","Test-only question "+i).put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA");
+                if(i>=17){var sample=examples.get(i-17);q.put("content",sample.get(0)).put("option_a",sample.get(1)).put("option_b",sample.get(2)).put("option_c",sample.get(3)).put("option_d",sample.get(4)).put("category",sample.get(5));}
+                request(host,"QUESTION_CREATE",q);
+            }
             request(host,"USER_CREATE",object().put("username","teacher.qa").put("display_name","Teacher QA").put("temporary_password",SECRET));
             fx(app::qaStudentAuth);
             await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().equals("Chờ giảng viên mở phòng.")));
@@ -125,6 +135,7 @@ public final class LiveLanUiCheck {
         }
         fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
         await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app) == 10); fx(() -> snapshot(app, "08-live-bank"));
+        checkBankPresentation(app);
         checkQuestionSelectionAcrossPages(app);
         fx(app::historyView); await(() -> tableSize(app) == 1); fx(() -> snapshot(app, "09-live-history"));
         checkCommander(app);
@@ -247,6 +258,32 @@ public final class LiveLanUiCheck {
     private static javafx.scene.Scene dialogScene(String id){return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene()!=null&&w.getScene().lookup("#"+id)!=null).findFirst().orElseThrow().getScene();}
     @SuppressWarnings("unchecked")
     private static javafx.scene.control.TableView<JsonNode> bankTable(ArcadeApplication app){return (javafx.scene.control.TableView<JsonNode>)app.qaScene().lookup(".table-view");}
+    private static void checkBankPresentation(ArcadeApplication app)throws Exception {
+        int[] id={0};fx(()->{id[0]=bankTable(app).getItems().get(1).path("question_id").asInt();bankTable(app).getSelectionModel().select(0);bankTable(app).getSelectionModel().select(1);});
+        JsonNode question=uiRequest(app,"QUESTION_GET",object().put("question_id",id[0]));
+        boolean[] wide={false};fx(()->wide[0]=app.qaScene().getWidth()>=1280);
+        if(wide[0])await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().equals(question.path("content").asText())));
+        else {
+            fx(()->app.qaClick("Xem chi tiết"));
+            await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene()!=app.qaScene()&&w.getScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().equals(question.path("content").asText()))));
+        }
+        fx(()->{
+            var scene=wide[0]?app.qaScene():javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene()!=app.qaScene()).toList().getLast().getScene();
+            scene.getRoot().applyCss();scene.getRoot().layout();
+            if(scene.lookup("#bank-detail-content")==null)throw new AssertionError("Question details need a readable question and structured answer preview");
+            for(String letter:List.of("A","B","C","D")){
+                var option=scene.lookup("#bank-answer-"+letter);
+                if(!(option instanceof javafx.scene.Parent parent)||parent.lookupAll(".label").stream().noneMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().equals(question.path("option_"+letter.toLowerCase(Locale.ROOT)).asText())))throw new AssertionError("Detail preview omitted or changed answer "+letter);
+                if(option.getStyleClass().contains("correct")!=letter.equals(question.path("correct_answer").asText()))throw new AssertionError("Detail preview marked the wrong correct answer");
+            }
+            assertBankCheckedCount(app,0);saveImage(scene.snapshot(null),"08c-bank-full-detail");
+            var scroller=(javafx.scene.control.ScrollPane)(wide[0]?scene.lookup("#bank-inspector"):scene.lookup(".scroll-pane"));scroller.setVvalue(1);scene.getRoot().layout();saveImage(scene.snapshot(null),"08e-bank-detail-actions");scroller.setVvalue(0);
+            if(!wide[0])app.qaCloseAuxiliary();
+        });
+        fx(()->((TextField)app.qaScene().lookup("#bank-search")).setText("no-question-matches-this-filter-qa"));await(()->tableSize(app)==0);
+        fx(()->{if(bankTable(app).getSelectionModel().getSelectedItem()!=null||app.qaScene().lookup("#bank-detail-content")!=null)throw new AssertionError("Empty results retained the previous question details");snapshot(app,"08d-bank-empty-filter");((TextField)app.qaScene().lookup("#bank-search")).clear();});await(()->tableSize(app)==10);
+        System.out.println("QUESTION_BANK_PRESENTATION_UI_PASS: latest focused question, four actual options, correct-answer marker, independent checks, responsive detail view");
+    }
     private static javafx.scene.control.CheckBox bankPageCheck(ArcadeApplication app){var check=app.qaScene().lookup("#bank-check-page");if(!(check instanceof javafx.scene.control.CheckBox box))throw new AssertionError("Question bank needs a checkbox column in place of ID");return box;}
     private static javafx.scene.control.CheckBox bankCheck(ArcadeApplication app,int id){app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();var check=app.qaScene().lookup("#question-check-"+id);if(!(check instanceof javafx.scene.control.CheckBox box))throw new AssertionError("Question checkbox missing for "+id);return box;}
     private static void assertBankCheckedCount(ArcadeApplication app,int expected){if(!((javafx.scene.control.Label)app.qaScene().lookup("#bank-selected-count")).getText().equals("Đã chọn "+expected+" câu"))throw new AssertionError("Unexpected total checked questions, expected "+expected);}
