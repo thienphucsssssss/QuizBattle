@@ -34,6 +34,55 @@
 .sidebar .sidebar-scroll { -fx-padding: 0; }
 .sidebar .scroll-bar .thumb { -fx-background-color: #63709c; }
 .commander-table .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
+/* Approved monitor/arena polish only; preserve the shared product palette and navigation. */
+.commander-live .title { -fx-font-size: 28px; }
+.commander-live .muted { -fx-font-size: 12px; }
+.commander-live .commander-round { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 15px; -fx-text-fill: #3049d5; }
+.commander-progress-panel { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 12 20; }
+.commander-live .commander-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 28px; -fx-text-fill: #202146; }
+.commander-live .commander-timer-urgent { -fx-text-fill: #a33827; }
+.commander-live .progress-bar { -fx-padding: 2 0; -fx-pref-height: 12; }
+.commander-live .progress-bar .track { -fx-background-color: #e8edf9; -fx-background-radius: 6; }
+.commander-live .progress-bar .bar { -fx-background-color: #3049d5; -fx-background-insets: 0; -fx-background-radius: 6; -fx-padding: 4; }
+.commander-live .commander-filter { -fx-background-color: white; -fx-text-fill: -ink; -fx-font-size: 12px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-border-color: #dce2f0; -fx-border-radius: 10; -fx-background-radius: 10; -fx-padding: 8 12; -fx-min-height: 40; -fx-cursor: hand; }
+.commander-live .commander-filter:hover { -fx-background-color: #edf2ff; }
+.commander-live .commander-filter:selected { -fx-background-color: #3049d5; -fx-text-fill: white; -fx-border-color: #3049d5; }
+.commander-live .commander-filter:focused { -fx-border-color: #256c90; -fx-border-width: 2; }
+.commander-live .commander-filter:disabled { -fx-opacity: .55; }
+.commander-live .commander-footer { -fx-padding: 12 0 0 0; }
+.commander-live .commander-footer .button { -fx-font-size: 12px; -fx-padding: 8 12; }
+.commander-live .commander-table { -fx-fixed-cell-size: 64; }
+.commander-live .commander-table .column-header-background { -fx-background-color: #e9eef9; }
+.commander-live .commander-table .column-header { -fx-size: 40; }
+.commander-live .commander-table .column-header .label { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; }
+.commander-live .commander-table .table-row-cell:filled { -fx-background-color: white; -fx-border-color: transparent transparent #edf0f8 transparent; }
+.commander-live .commander-table .table-row-cell:filled:hover { -fx-background-color: #f4f6ff; }
+.commander-live .commander-table .table-row-cell:filled:selected { -fx-background-color: #3049d5, #edf2ff; -fx-background-insets: 3 0, 3 0 3 3; -fx-background-radius: 8, 7; -fx-border-color: transparent; }
+.commander-live .commander-table .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
+.commander-live .commander-table .table-cell { -fx-font-size: 13px; -fx-padding: 8 10; -fx-alignment: CENTER_LEFT; }
+.commander-live .commander-table .commander-number-cell { -fx-alignment: CENTER_RIGHT; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; }
+.commander-live .commander-table .commander-number-cell.column-header .label { -fx-alignment: CENTER_RIGHT; }
+.commander-live .commander-table .commander-rank-cell { -fx-text-fill: #3049d5; }
+.commander-live .commander-player-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 14px; -fx-text-fill: -ink; }
+.commander-live .commander-ip { -fx-font-size: 11px; -fx-text-fill: -muted; }
+.commander-live .commander-badge { -fx-font-size: 11px; -fx-padding: 5 8; -fx-background-radius: 7; }
+.commander-live .commander-badge.success { -fx-background-color: #eaf4dc; -fx-text-fill: #385923; }
+.commander-live .commander-badge.pending { -fx-background-color: #fff0d8; -fx-text-fill: #785019; }
+.commander-live .commander-badge.offline { -fx-background-color: #fbe2de; -fx-text-fill: #9c3026; }
+.commander-live .commander-badge.unknown { -fx-background-color: #edf1fb; -fx-text-fill: #48567c; }
+.commander-live .commander-table .commander-player-name .text { -fx-fill: -ink; }
+.commander-live .commander-table .commander-ip .text { -fx-fill: -muted; }
+.commander-live .commander-table .commander-badge.success .text { -fx-fill: #385923; }
+.commander-live .commander-table .commander-badge.pending .text { -fx-fill: #785019; }
+.commander-live .commander-table .commander-badge.offline .text { -fx-fill: #9c3026; }
+.commander-live .commander-table .commander-badge.unknown .text { -fx-fill: #48567c; }
+.commander-live .commander-tools { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 8 14; }
+.commander-live .commander-tools .text-field, .commander-live .commander-tools .combo-box { -fx-font-size: 13px; -fx-min-height: 40; }
+.commander-live .commander-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 15px; -fx-text-fill: -ink; }
+.commander-live .commander-leader { -fx-background-color: #edf2ff; -fx-border-radius: 10; -fx-background-radius: 10; -fx-padding: 8 10; }
+.commander-live .commander-leader-rank { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 21px; -fx-text-fill: #3049d5; }
+.commander-live .commander-leader-score { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 13px; -fx-text-fill: #3049d5; }
+.commander-live .commander-player-detail { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 12; -fx-background-radius: 12; -fx-padding: 12 16; }
 .button { -fx-cursor: hand; -fx-background-radius: 14; -fx-border-radius: 14; -fx-border-color: transparent; -fx-border-width: 2; -fx-padding: 10 18; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-background-color: #e8ecf7; -fx-text-fill: -ink; -fx-min-height: 44; }
 .button:hover { -fx-background-color: #d9dfd3; }
 .button:pressed { -fx-opacity: 0.85; }

@@ -184,7 +184,7 @@ public final class LiveLanUiCheck {
         await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals(Integer.toString(previousMatches)));
         fx(()->{snapshot(app,"09a-commander-overview");app.qaClick("Giám sát thi đấu");});
         await(()->app.qaScene().lookup("#monitor-players")!=null);
-        fx(()->{if(tableSize(app)!=0)throw new AssertionError("Closed room retained players");snapshot(app,"09b-monitor-empty");});
+        fx(()->{if(tableSize(app)!=0)throw new AssertionError("Closed room retained players");if(app.qaScene().lookup("#monitor-progress")==null)throw new AssertionError("Monitor needs a native progress bar");snapshot(app,"09b-monitor-empty");});
         var created=new CompletableFuture<JsonNode>();
         fx(()->app.call("ROOM_CONFIGURE",object().put("room_name","Giám sát LAN").put("question_count",1).put("duration_seconds",5),created::complete,created::completeExceptionally));
         String code=created.get(8,TimeUnit.SECONDS).path("room_code").asText();
@@ -205,14 +205,27 @@ public final class LiveLanUiCheck {
             var state=request(a,"ROOM_STATE",object());
             request(a,"ANSWER",object().put("session_id",state.path("session_id").asText()).put("question_id",state.path("question").path("question_id").asInt()).put("answer","A"));
             await(()->app.qaScene().lookup("#monitor-submitted") instanceof javafx.scene.control.Label l&&l.getText().contains("1/2"));
-            fx(()->{snapshot(app,"09e-monitor-submitted");app.qaClick("Đấu trường thí sinh");});
+            fx(()->{
+                var progress=(javafx.scene.control.ProgressBar)app.qaScene().lookup("#monitor-progress");
+                if(Math.abs(progress.getProgress()-.5)>.001)throw new AssertionError("Monitor submission progress is not authoritative");
+                ((javafx.scene.control.ToggleButton)app.qaScene().lookup("#monitor-filter-pending")).fire();
+                if(tableSize(app)!=1)throw new AssertionError("Pending filter did not isolate the unanswered student");
+                ((javafx.scene.control.ToggleButton)app.qaScene().lookup("#monitor-filter-all")).fire();
+                if(tableSize(app)!=2)throw new AssertionError("Monitor filter changed the actual room roster");
+                snapshot(app,"09e-monitor-submitted");app.qaClick("Đấu trường thí sinh");
+            });
             await(()->app.qaScene().lookup("#arena-search")!=null&&tableSize(app)==2);
-            fx(()->{assertTableText(app,"127.0.0.2");((TextField)app.qaScene().lookup("#arena-search")).setText("Minh");});await(()->tableSize(app)==1);
+            fx(()->{
+                var table=(javafx.scene.control.TableView<?>)app.qaScene().lookup("#arena-players");
+                table.getSelectionModel().select(0);
+                if(!(app.qaScene().lookup("#arena-player-details") instanceof javafx.scene.control.Label detail)||!detail.getText().contains("127.0.0."))throw new AssertionError("Arena selection did not expose the Server-recorded IP");
+                ((TextField)app.qaScene().lookup("#arena-search")).setText("Minh");
+            });await(()->tableSize(app)==1);
             await(()->app.qaPhase().equals("FINISHED"));
             // TableView.refresh() recreates cells on a render pulse, after the room event.
             await(()->{app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();return hasTableText(app,"Đã kết thúc");});
             fx(()->assertTableText(app,"Đã kết thúc"));
-            fx(()->{snapshot(app,"09f-arena-filtered-final");if(app.qaScene().lookup("#arena-search")==null||tableSize(app)!=1)throw new AssertionError("Arena search or page lost during game: rows="+tableSize(app)+", search="+app.qaScene().lookup("#arena-search"));((TextField)app.qaScene().lookup("#arena-search")).clear();});
+            fx(()->{if(app.qaScene().lookup("#arena-leaders")==null)throw new AssertionError("Arena did not show authoritative leaders after grading");snapshot(app,"09f-arena-filtered-final");if(app.qaScene().lookup("#arena-search")==null||tableSize(app)!=1)throw new AssertionError("Arena search or page lost during game: rows="+tableSize(app)+", search="+app.qaScene().lookup("#arena-search"));((TextField)app.qaScene().lookup("#arena-search")).clear();});
             await(()->tableSize(app)==2);
         }
         await(()->app.qaScene().lookup("#arena-summary") instanceof javafx.scene.control.Label l&&l.getText().contains("0 đang kết nối"));
@@ -229,7 +242,7 @@ public final class LiveLanUiCheck {
             throw new AssertionError("Visible table cells did not update to current phase: "+expected);
     }
     private static boolean hasTableText(ArcadeApplication app,String expected) {
-        return app.qaScene().getRoot().lookupAll(".table-cell").stream().anyMatch(n->n instanceof javafx.scene.control.TableCell<?,?> c&&expected.equals(c.getText()));
+        return app.qaScene().getRoot().lookupAll(".table-cell").stream().anyMatch(n->n instanceof javafx.scene.control.TableCell<?,?> c&&(expected.equals(c.getText())||c.lookupAll(".label").stream().anyMatch(child->child instanceof javafx.scene.control.Label label&&expected.equals(label.getText()))));
     }
     private static void assertLogin(ArcadeApplication app) {
         if(app.qaConnected())throw new AssertionError("Unauthenticated screen has a session");
