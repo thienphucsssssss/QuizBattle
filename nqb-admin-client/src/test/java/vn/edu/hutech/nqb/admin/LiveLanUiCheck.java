@@ -65,6 +65,7 @@ public final class LiveLanUiCheck {
     }
     private static JsonNode request(QuizGateway gateway, String type, com.fasterxml.jackson.databind.node.ObjectNode payload) throws Exception { return gateway.request(type, payload).get(8, TimeUnit.SECONDS); }
     private static void run(ArcadeApplication app) throws Exception {
+        var playedQuestionIds=new HashSet<Integer>();
         fx(() -> { assertLogin(app); snapshot(app,"00-login-role-selection"); });
         try (var host = connect(); var opponent = connect("127.0.0.2");var third=connect("127.0.0.3")) {
             request(host, "LOGIN", object().put("username", "admin").put("password", SECRET));
@@ -117,6 +118,7 @@ public final class LiveLanUiCheck {
             for (int i = 1; i <= 2; i++) {
                 final int number = i; await(() -> app.qaPhase().equals("QUESTION_ACTIVE"));
                 if(number==2)Thread.sleep(1100);
+                playedQuestionIds.add(request(host,"ROOM_STATE",object()).path("question").path("question_id").asInt());
                 fx(() -> { assertMusic(app, MusicSlots.Track.GAME); snapshot(app, "03-question-" + number); app.qaAnswer("A"); });
                 if(number==1){var state=request(host,"ROOM_STATE",object());request(opponent,"ANSWER",object().put("session_id",state.path("session_id").asText()).put("question_id",state.path("question").path("question_id").asInt()).put("answer","A"));}
                 await(() -> app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n -> n instanceof javafx.scene.control.Label l && l.getText().contains("Đã nhận đáp án A")));
@@ -138,6 +140,8 @@ public final class LiveLanUiCheck {
         checkBankPresentation(app);
         checkQuestionSelectionAcrossPages(app);
         fx(app::historyView); await(() -> tableSize(app) == 1); fx(() -> snapshot(app, "09-live-history"));
+        checkHistoryResults(app);
+        checkHistoryReuse(app,playedQuestionIds);
         checkCommander(app);
         fx(() -> { app.qaSettings(); var dialog = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing()).toList().getLast().getScene(); dialog.getRoot().applyCss(); dialog.getRoot().layout();
             var sound = (javafx.scene.control.CheckBox)dialog.getRoot().lookupAll(".check-box").stream().filter(n -> n instanceof javafx.scene.control.CheckBox c && c.getText().equals("Âm thanh giao diện")).findFirst().orElseThrow();
@@ -168,6 +172,7 @@ public final class LiveLanUiCheck {
     }
     private static void assertMusic(ArcadeApplication app, MusicSlots.Track track) { if (app.qaMusicTrack() != track) throw new AssertionError("Wrong music for " + app.qaPhase() + ": " + app.qaMusicTrack()); }
     private static void checkCommander(ArcadeApplication app)throws Exception {
+        int previousMatches=uiRequest(app,"HISTORY_LIST").path("total").asInt();
         fx(()->{
             for(String title:List.of("Tổng quan","Ngân hàng câu hỏi","Phòng thi","Giám sát thi đấu","Đấu trường thí sinh","Lịch sử & Bảng xếp hạng","Cài đặt","Người dùng","Đổi mật khẩu","Đăng xuất")) {
                 var nav=app.qaScene().getRoot().lookupAll(".sidebar .button").stream().filter(n->n instanceof javafx.scene.control.Button b&&b.getText().equals(title)).findFirst();
@@ -176,7 +181,7 @@ public final class LiveLanUiCheck {
             app.qaClick("Tổng quan");
         });
         await(()->app.qaScene().lookup("#overview-questions") instanceof javafx.scene.control.Label l&&l.getText().equals("20"));
-        await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals("1"));
+        await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals(Integer.toString(previousMatches)));
         fx(()->{snapshot(app,"09a-commander-overview");app.qaClick("Giám sát thi đấu");});
         await(()->app.qaScene().lookup("#monitor-players")!=null);
         fx(()->{if(tableSize(app)!=0)throw new AssertionError("Closed room retained players");snapshot(app,"09b-monitor-empty");});
@@ -184,7 +189,12 @@ public final class LiveLanUiCheck {
         fx(()->app.call("ROOM_CONFIGURE",object().put("room_name","Giám sát LAN").put("question_count",1).put("duration_seconds",5),created::complete,created::completeExceptionally));
         String code=created.get(8,TimeUnit.SECONDS).path("room_code").asText();
         try(var a=connect("127.0.0.2");var b=connect("127.0.0.3")){
-            request(a,"JOIN",object().put("room_code",code).put("nickname","Minh Giám sát"));request(b,"JOIN",object().put("room_code",code).put("nickname","Lan Đấu trường"));
+            request(a,"JOIN",object().put("room_code",code).put("nickname","Minh Giám sát"));
+            await(()->tableSize(app)==1);
+            fx(()->{var start=(javafx.scene.control.Button)app.qaScene().getRoot().lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button button&&button.getText().equals("Bắt đầu ván thi")).findFirst().orElseThrow();if(!start.isDisabled())throw new AssertionError("Unready student enabled monitor start");});
+            request(a,"READY_SET",object().put("ready",true));await(()->app.roomSnapshot().path("ready_count").asInt()==1);
+            fx(()->{var start=(javafx.scene.control.Button)app.qaScene().getRoot().lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button button&&button.getText().equals("Bắt đầu ván thi")).findFirst().orElseThrow();if(start.isDisabled())throw new AssertionError("One ready student cannot start from monitor");});
+            request(b,"JOIN",object().put("room_code",code).put("nickname","Lan Đấu trường"));
             request(a,"READY_SET",object().put("ready",true));request(b,"READY_SET",object().put("ready",true));
             await(()->tableSize(app)==2);
             fx(()->{assertTableText(app,"127.0.0.2");snapshot(app,"09c-monitor-ready");app.qaClick("Bắt đầu ván thi");});
@@ -199,6 +209,8 @@ public final class LiveLanUiCheck {
             await(()->app.qaScene().lookup("#arena-search")!=null&&tableSize(app)==2);
             fx(()->{assertTableText(app,"127.0.0.2");((TextField)app.qaScene().lookup("#arena-search")).setText("Minh");});await(()->tableSize(app)==1);
             await(()->app.qaPhase().equals("FINISHED"));
+            // TableView.refresh() recreates cells on a render pulse, after the room event.
+            await(()->{app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();return hasTableText(app,"Đã kết thúc");});
             fx(()->assertTableText(app,"Đã kết thúc"));
             fx(()->{snapshot(app,"09f-arena-filtered-final");if(app.qaScene().lookup("#arena-search")==null||tableSize(app)!=1)throw new AssertionError("Arena search or page lost during game: rows="+tableSize(app)+", search="+app.qaScene().lookup("#arena-search"));((TextField)app.qaScene().lookup("#arena-search")).clear();});
             await(()->tableSize(app)==2);
@@ -208,13 +220,16 @@ public final class LiveLanUiCheck {
         await(()->app.qaScene().lookup("#management-settings")!=null);
         fx(()->{snapshot(app,"09h-commander-settings");app.qaClick("Âm thanh & giao diện");app.qaCloseAuxiliary();});
         var closed=new CompletableFuture<JsonNode>();fx(()->app.call("ROOM_CLOSE",object(),closed::complete,closed::completeExceptionally));closed.get(8,TimeUnit.SECONDS);
-        fx(()->app.qaClick("Tổng quan"));await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals("2"));
+        fx(()->app.qaClick("Tổng quan"));await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals(Integer.toString(previousMatches+1)));
         System.out.println("COMMANDER_UI_PASS: real overview, all sidebar routes, monitor submissions, arena search, retained routes, disconnects, settings");
     }
     private static void assertTableText(ArcadeApplication app,String expected) {
         app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();
-        if(app.qaScene().getRoot().lookupAll(".table-cell").stream().noneMatch(n->n instanceof javafx.scene.control.TableCell<?,?> c&&expected.equals(c.getText())))
+        if(!hasTableText(app,expected))
             throw new AssertionError("Visible table cells did not update to current phase: "+expected);
+    }
+    private static boolean hasTableText(ArcadeApplication app,String expected) {
+        return app.qaScene().getRoot().lookupAll(".table-cell").stream().anyMatch(n->n instanceof javafx.scene.control.TableCell<?,?> c&&expected.equals(c.getText()));
     }
     private static void assertLogin(ArcadeApplication app) {
         if(app.qaConnected())throw new AssertionError("Unauthenticated screen has a session");
@@ -255,7 +270,60 @@ public final class LiveLanUiCheck {
         checkQuestionSets(app);
         checkUnsupportedQuestionSets(app);
     }
+    private static void checkHistoryResults(ArcadeApplication app)throws Exception {
+        String[] session={""};
+        fx(()->{var table=bankTable(app);table.getSelectionModel().select(0);session[0]=table.getItems().getFirst().path("session_id").asText();});
+        JsonNode saved=uiRequest(app,"HISTORY_GET",object().put("session_id",session[0]));
+        fx(()->app.qaClick("Xem bảng điểm"));
+        await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene()!=app.qaScene()&&w.getScene().lookup(".dialog-pane")!=null));
+        fx(()->{
+            var scene=javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene()!=app.qaScene()&&w.getScene().lookup(".dialog-pane")!=null).findFirst().orElseThrow().getScene();
+            scene.getRoot().applyCss();scene.getRoot().layout();
+            if(scene.lookup("#history-results")==null||scene.lookup("#victory-podium")==null)throw new AssertionError("Stored match needs the shared podium and a complete result view");
+            if(!(scene.lookup("#history-reuse") instanceof javafx.scene.control.Button reuse)||reuse.isDisabled())throw new AssertionError("A stored question source needs an enabled reuse action");
+            var board=(RankBoard)scene.lookup("#history-ranking");
+            if(board==null||board.getChildren().size()!=saved.path("ranking").size())throw new AssertionError("Stored result omitted players");
+            for(int i=0;i<saved.path("ranking").size();i++){
+                var entry=saved.path("ranking").get(i);String description=board.getChildren().get(i).getAccessibleText();
+                if(!description.contains("Hạng "+entry.path("rank").asInt()+",")||!description.contains(entry.path("nickname").asText())||!description.contains(entry.path("score").asInt()+" điểm")||!description.contains(entry.path("correct_count").asInt()+" câu đúng"))throw new AssertionError("Stored rank/score/correct count changed: "+description);
+            }
+            saveImage(scene.snapshot(null),"09i-history-results");
+            var scroller=(javafx.scene.control.ScrollPane)scene.lookup("#history-results-scroll");scroller.setVvalue(1);scene.getRoot().layout();saveImage(scene.snapshot(null),"09j-history-ranking");app.qaCloseAuxiliary();
+        });
+    }
     private static javafx.scene.Scene dialogScene(String id){return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene()!=null&&w.getScene().lookup("#"+id)!=null).findFirst().orElseThrow().getScene();}
+    @SuppressWarnings("unchecked")
+    private static void checkHistoryReuse(ArcadeApplication app,Set<Integer> originalIds)throws Exception {
+        var saved=uiRequest(app,"HISTORY_LIST").path("items").get(0);String sourceSession=saved.path("session_id").asText();
+        for(int attempt=0;attempt<2;attempt++){
+            fx(()->app.qaClick("Xem bảng điểm"));
+            await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene().lookup("#history-reuse")!=null));
+            fx(()->((javafx.scene.control.Button)dialogScene("history-reuse").lookup("#history-reuse")).fire());
+            await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene().lookup("#room-reuse-history")!=null));
+            await(()->!dialogScene("room-config-save").lookup("#room-config-save").isDisabled());
+            fx(()->{
+                var scene=dialogScene("room-reuse-history");
+                if(!((javafx.scene.control.CheckBox)scene.lookup("#room-reuse-history")).isSelected()||!scene.lookup("#room-question-set").isDisabled())throw new AssertionError("History source was not preselected");
+                if(!((TextField)scene.lookup("#room-name")).getText().equals(saved.path("room_name").asText())||((javafx.scene.control.Spinner<Integer>)scene.lookup("#room-question-count")).getValue()!=2||((javafx.scene.control.Spinner<Integer>)scene.lookup("#room-question-seconds")).getValue()!=5)throw new AssertionError("Original room defaults were not restored");
+                scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"09k-reuse-room-config");
+            });
+            if(attempt==0){fx(app::qaCloseAuxiliary);if(!uiRequest(app,"ROOM_STATE").path("room_code").asText().isEmpty())throw new AssertionError("Cancel created or reset a room");}
+            else fx(()->{
+                var scene=dialogScene("room-reuse-history");((javafx.scene.control.Spinner<Integer>)scene.lookup("#room-question-count")).getValueFactory().setValue(3);((javafx.scene.control.Button)scene.lookup("#room-config-save")).fire();
+                if(!scene.lookup("#room-config-error").isVisible())throw new AssertionError("Oversized historical source was accepted");
+                ((TextField)scene.lookup("#room-name")).setText("Ôn lại từ lịch sử");((javafx.scene.control.Spinner<Integer>)scene.lookup("#room-question-count")).getValueFactory().setValue(1);((javafx.scene.control.Button)scene.lookup("#room-config-save")).fire();
+            });
+        }
+        await(()->app.roomSnapshot().path("history_session_id").asText().equals(sourceSession));
+        try(var student=connect("127.0.0.2")){
+            request(student,"JOIN",object().put("room_code",app.roomSnapshot().path("room_code").asText()).put("nickname","Thi lại từ đề đã lưu"));request(student,"READY_SET",object().put("ready",true));uiRequest(app,"START_GAME");
+            await(()->app.qaPhase().equals("QUESTION_ACTIVE"));var question=uiRequest(app,"ROOM_STATE").path("question");
+            if(!originalIds.contains(question.path("question_id").asInt()))throw new AssertionError("Replay borrowed a different bank question");
+            fx(()->snapshot(app,"09l-history-reuse-game"));await(()->app.qaPhase().equals("FINISHED"));uiRequest(app,"ROOM_CLOSE");
+        }
+        fx(app::historyView);await(()->tableSize(app)==2);
+        System.out.println("HISTORY_REUSE_UI_PASS: score action, prefilled exact source/count/duration, cancel without mutation, source size guard, real reused-question gameplay and new saved result");
+    }
     @SuppressWarnings("unchecked")
     private static javafx.scene.control.TableView<JsonNode> bankTable(ArcadeApplication app){return (javafx.scene.control.TableView<JsonNode>)app.qaScene().lookup(".table-view");}
     private static void checkBankPresentation(ArcadeApplication app)throws Exception {
@@ -368,9 +436,9 @@ public final class LiveLanUiCheck {
         await(()->app.roomSnapshot().path("question_set_id").asInt()==setId);
         fx(()->snapshot(app,"13j-room-selected-set"));
         String code=uiRequest(app,"ROOM_STATE").path("room_code").asText();
-        try(var a=connect("127.0.0.2");var b=connect("127.0.0.3")){
-            request(a,"JOIN",object().put("room_code",code).put("nickname","Set Player A"));request(b,"JOIN",object().put("room_code",code).put("nickname","Set Player B"));
-            request(a,"READY_SET",object().put("ready",true));request(b,"READY_SET",object().put("ready",true));await(()->app.roomSnapshot().path("ready_count").asInt()==2);
+        try(var a=connect("127.0.0.2")){
+            request(a,"JOIN",object().put("room_code",code).put("nickname","Set Player A"));
+            request(a,"READY_SET",object().put("ready",true));await(()->app.roomSnapshot().path("ready_count").asInt()==1);
             fx(()->app.qaClick("Bắt đầu ván thi   →"));await(()->app.qaPhase().equals("QUESTION_ACTIVE"));
             if(!allowed.contains(uiRequest(app,"ROOM_STATE").path("question").path("question_id").asInt()))throw new AssertionError("Room used a question outside its set");
             fx(()->snapshot(app,"13k-selected-set-game"));uiRequest(app,"ABORT_GAME");await(()->app.qaPhase().equals("FINISHED"));

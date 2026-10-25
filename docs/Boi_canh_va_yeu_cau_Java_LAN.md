@@ -165,7 +165,7 @@ Không có DB và schema Java thật được xác minh ở baseline hiện tạ
 ## 11 Luật thi giữ nguyên
 
 - Một phòng, một owner. Configure/Start/Abort/Reset/Close chỉ owner, kể cả tài khoản ADMIN khác cũng không tự giành phòng.
-- Start cần ít nhất hai Player kết nối, tất cả ready và đủ câu đang bật của owner; nghiệm thu dùng ba Player. Mặc định 10 câu, 15 giây/câu, countdown/result 3 giây.
+- Start cần ít nhất một Player kết nối, tất cả ready và đủ câu đang bật của owner; nghiệm thu dùng ba Player. Mặc định 10 câu, 15 giây/câu, countdown/result 3 giây.
 - WAITING → COUNTDOWN → QUESTION_ACTIVE → SHOW_RESULT → SHOW_RANKING → câu tiếp hoặc FINISHED. JOIN/CRUD câu hỏi chỉ khi WAITING; không sửa snapshot giữa ván. SHOW_RESULT 3 giây, SHOW_RANKING 4,5 giây, kể cả câu cuối; bảng hạng và deadline do Server quyết định.
 
 - Bổ sung UI v2: guest chọn một trong 24 linh vật vector (không tài khoản học sinh). JOIN gán một avatar trống, AVATAR_SET cho đổi trong WAITING trước ready; mỗi avatar chỉ thuộc một người trong phòng. Server kiểm tra và giữ chỗ nguyên tử, không tin player_id Client tự khai. UI khóa avatar đã có chủ, cập nhật bằng ROOM_STATE; lỗi giữ avatar cũ. Giới hạn tải mục tiêu vẫn 10 Player. Hiện đã có UI/Preview và unit test, chưa có handler LAN.

@@ -8,7 +8,7 @@ Cập nhật 16/10/2026: đã có Server nghiệp vụ TLS, SQLite, auth worker,
 
 Server và Client đều viết bằng Java 21. Một Server console trong LAN; hai ứng dụng JavaFX là Client quản lý (giảng viên/Admin) và Client học sinh (Player). TCP Socket qua TLS là kênh truyền trực tiếp, không thay bằng HTTP, WebSocket, Discord hay nền tảng quiz có sẵn.
 
-Nhiều tài khoản ADMIN/TEACHER, nhưng chỉ một phòng có một chủ phòng đã đăng nhập tại một thời điểm; tối đa 10 Player theo cấu hình ban đầu. Học sinh nhập nickname/mã phòng, không đăng ký tài khoản. Start cần ít nhất hai Player đang kết nối và tất cả ready; nghiệm thu dùng ít nhất ba Player trên ít nhất hai máy vật lý.
+Nhiều tài khoản ADMIN/TEACHER, nhưng chỉ một phòng có một chủ phòng đã đăng nhập tại một thời điểm; tối đa 10 Player theo cấu hình ban đầu. Học sinh nhập nickname/mã phòng, không đăng ký tài khoản. Start cần ít nhất một Player đang kết nối và tất cả ready; nghiệm thu dùng ít nhất ba Player trên ít nhất hai máy vật lý.
 
 Ngân hàng có câu hỏi bốn lựa chọn, một đáp án đúng; tài khoản quản lý chỉ CRUD/tìm kiếm ngân hàng và lịch sử chung cuộc của mình. Admin cấp/khóa/reset tài khoản giảng viên. Không làm tài khoản học sinh, tự đăng ký tài khoản quản trị, nhiều phòng, đồng bộ giữa các Server, khôi phục phiên Player, web/mobile, chat, lưu từng đáp án hay chống gian lận nâng cao. Nhập CSV/bộ cài là mở rộng sau MVP.
 
@@ -101,7 +101,7 @@ WAITING → COUNTDOWN → QUESTION_ACTIVE → SHOW_RESULT → SHOW_RANKING
 
 ROOM_CONFIGURE khi phòng chưa có owner sẽ nhận chủ phòng từ user_id đã xác thực; xử lý tuần tự bởi Game Worker. Owner khác thì trả ROOM_BUSY. Chỉ owner được Configure/Start/Abort/Reset/Close; ADMIN cũng không giành phòng của giảng viên khác. ROOM_CLOSE ở WAITING/FINISHED dọn lobby/trạng thái/mã cũ và giải phóng owner; ROOM_RESET vẫn giữ owner để tổ chức tiếp.
 
-Start kiểm tra owner, ít nhất hai Player, tất cả ready và đủ câu đang bật của owner. Snapshot câu hỏi/người chơi kèm avatar_id; mặc định 10 câu, 15 giây/câu, countdown/kết quả 3 giây, bảng hạng từng câu 4,5 giây. JOIN và CRUD bị từ chối ngoài WAITING; không đổi bộ câu giữa ván. Xem ngân hàng/lịch sử không sửa vẫn được phép theo quyền.
+Start kiểm tra owner, ít nhất một Player, tất cả ready và đủ câu đang bật của owner. Snapshot câu hỏi/người chơi kèm avatar_id; mặc định 10 câu, 15 giây/câu, countdown/kết quả 3 giây, bảng hạng từng câu 4,5 giây. JOIN và CRUD bị từ chối ngoài WAITING; không đổi bộ câu giữa ván. Xem ngân hàng/lịch sử không sửa vẫn được phép theo quyền.
 
 Mỗi câu: Server đặt deadline trước broadcast QUESTION. ANSWER cần request_id, session_id, question_id và A/B/C/D. Chấp nhận duy nhất đáp án hợp lệ đầu tiên của Player cho câu đó; ANSWER_ACK mới là xác nhận đã ghi nhận, gửi thành công ở Client không phải ACK. Đáp án trễ/trùng/sai câu không đổi điểm.
 

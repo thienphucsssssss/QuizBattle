@@ -324,19 +324,47 @@ final class ManagementViews {
         }); dialog.show();
     }
     void history(int page) {
-        var table = table(); table.getColumns().addAll(textColumn("Phòng thi", "room_name", 280), textColumn("Kết thúc (UTC)", "ended_at_utc", 280), textColumn("Số câu", "question_count", 100), textColumn("Người chơi", "player_count", 120));
-        var heading = column(6, text("Lịch sử của tôi", "title"), text("Các ván do tài khoản của bạn tổ chức.", "muted")); heading.setPadding(new Insets(0,0,20,0));
-        var show = button("Xem bảng điểm", "ink-button", () -> { JsonNode chosen = table.getSelectionModel().getSelectedItem(); if (chosen != null) app.call("HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()), details -> {
-            var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog); dialog.setHeaderText(details.path("room_name").asText("Bảng điểm"));
-            var list = column(12); details.path("ranking").forEach(v -> list.getChildren().add(row(16, text("#" + v.path("rank").asInt(), "subtitle"), text(v.path("nickname").asText()), space(), text(v.path("score").asInt() + " điểm", "subtitle"))));
-            dialog.getDialogPane().setContent(list); dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE); dialog.show();
-        }); });
-        show.setDisable(true); table.getSelectionModel().selectedItemProperty().addListener((o, old, value) -> show.setDisable(value == null));
+        var table=table();table.setId("history-matches");table.getStyleClass().add("history-table");table.setFixedCellSize(84);
+        var room=new TableColumn<JsonNode,JsonNode>("Phòng thi");room.setCellValueFactory(c->new ReadOnlyObjectWrapper<>(c.getValue()));room.setPrefWidth(310);room.setMinWidth(190);room.setSortable(false);
+        room.setCellFactory(ignored->new TableCell<>() {
+            private final Label title=text("","history-room-name"),subtitle=text("Kết quả đã lưu","history-room-meta");
+            private final VBox content=column(5,title,subtitle);
+            {getStyleClass().add("history-room-cell");title.setWrapText(false);title.setMaxWidth(Double.MAX_VALUE);content.prefWidthProperty().bind(widthProperty().subtract(30));}
+            @Override protected void updateItem(JsonNode item,boolean empty){super.updateItem(item,empty);setText(null);if(empty||item==null){setGraphic(null);return;}title.setText(item.path("room_name").asText());title.setTooltip(new Tooltip(title.getText()));setGraphic(content);}
+        });
+        var ended=new TableColumn<JsonNode,String>("Kết thúc");ended.setCellValueFactory(c->new ReadOnlyStringWrapper(HistoryResults.endedAt(c.getValue())));ended.setPrefWidth(220);ended.setMinWidth(175);ended.setSortable(false);
+        table.getColumns().addAll(room,ended,historyCountColumn("Số câu","question_count"),historyCountColumn("Thí sinh","player_count"));
+        var heading=column(6,text("Lịch sử của tôi","title"),text("Xem lại các ván bạn tổ chức và kết quả từng thí sinh.","muted"));
+        var top=row(16,heading,space(),button("Làm mới","quiet",app::historyView));top.setPadding(new Insets(0,0,20,0));
+        var count=text("Đang tải…","history-total");var hint=text("Chọn một ván thi để xem bảng điểm và bục vinh danh.","muted");
+        var layout=new BorderPane(table);layout.getStyleClass().add("history-view");
+        var show=button("Xem bảng điểm","ink-button",()->{});boolean[] loading={false};
+        Runnable open=()->{
+            JsonNode chosen=table.getSelectionModel().getSelectedItem();if(chosen==null||loading[0])return;
+            loading[0]=true;show.setDisable(true);show.setText("Đang tải…");hint.setText("Đang tải bảng điểm…");hint.getStyleClass().remove("error");
+            app.call("HISTORY_GET",object().put("session_id",chosen.path("session_id").asText()),details->{
+                if(layout.getScene()==null)return;loading[0]=false;show.setText("Xem bảng điểm");show.setDisable(table.getSelectionModel().getSelectedItem()==null);hint.setText("Chọn một ván thi để xem bảng điểm và bục vinh danh.");HistoryResults.dialog(app.ownerStage(),chosen,details,()->app.roomConfigFromHistory(details)).show();
+            },failure->{if(layout.getScene()==null)return;loading[0]=false;show.setText("Xem bảng điểm");show.setDisable(table.getSelectionModel().getSelectedItem()==null);hint.setText(ArcadeApplication.message(failure));hint.getStyleClass().add("error");});
+        };
+        show.setOnAction(event->open.run());show.setDisable(true);table.getSelectionModel().selectedItemProperty().addListener((o,old,value)->show.setDisable(loading[0]||value==null));
+        table.setRowFactory(ignored->{var line=new TableRow<JsonNode>();line.setOnMouseClicked(event->{if(event.getButton()==MouseButton.PRIMARY&&event.getClickCount()==2&&!line.isEmpty())open.run();});return line;});
+        table.setOnKeyPressed(event->{if(event.getCode()==KeyCode.ENTER){open.run();event.consume();}});
         var previous = button("← Trước", "quiet", () -> { app.setHistoryPage(page - 1); app.historyView(); }); previous.setDisable(page <= 1);
         var next = button("Sau →", "quiet", () -> { app.setHistoryPage(page + 1); app.historyView(); }); next.setDisable(true);
-        var count = text("Đang tải…", "muted");
-        var layout = new BorderPane(table); layout.setTop(heading); layout.setBottom(column(12, text("Chỉ hiển thị kết quả đã lưu trên Server.", "muted"), row(12, count, space(), previous, next, show))); app.showManagement("Lịch sử", layout);
-        app.call("HISTORY_LIST", object().put("page", page).put("page_size", 10), response -> { if (layout.getScene() == null) return; var rows = new ArrayList<JsonNode>(); response.path("items").forEach(rows::add); table.setItems(FXCollections.observableArrayList(rows)); table.setPlaceholder(text("Chưa có ván thi đã lưu", "muted")); count.setText(response.path("total").asInt() + " ván · Trang " + page); next.setDisable(!response.path("has_more").asBoolean()); });
+        var footer=column(10,hint,row(10,count,space(),previous,next,show));footer.getStyleClass().add("history-footer");footer.setPadding(new Insets(14,0,0,0));
+        layout.setTop(top);layout.setBottom(footer);table.setPlaceholder(text("Đang tải lịch sử thi đấu…","muted"));app.showManagement("Lịch sử",layout);
+        app.call("HISTORY_LIST",object().put("page",page).put("page_size",10),response->{
+            if(layout.getScene()==null)return;var rows=new ArrayList<JsonNode>();response.path("items").forEach(rows::add);table.setItems(FXCollections.observableArrayList(rows));
+            var empty=column(8,text("Chưa có ván thi đã lưu","history-section-title"),text("Kết quả sẽ xuất hiện sau khi bạn tổ chức và hoàn thành một ván thi.","muted"));empty.setAlignment(Pos.CENTER);empty.setMaxWidth(400);table.setPlaceholder(empty);
+            count.setText(response.path("total").asInt()+" ván · Trang "+page);next.setDisable(!response.path("has_more").asBoolean());
+        },failure->{if(layout.getScene()==null)return;count.setText("Chưa tải được");table.setPlaceholder(column(12,text("Không tải được lịch sử","history-section-title"),button("Thử lại","quiet",app::historyView)));hint.setText(ArcadeApplication.message(failure));hint.getStyleClass().add("error");});
+    }
+    private TableColumn<JsonNode,String> historyCountColumn(String title,String key) {
+        var result=textColumn(title,key,96);result.setMinWidth(76);
+        result.setCellFactory(ignored->new TableCell<>(){
+            private final Label count=text("","history-count");
+            @Override protected void updateItem(String item,boolean empty){super.updateItem(item,empty);setText(null);if(empty||item==null){setGraphic(null);return;}count.setText(item);setGraphic(count);}
+        });return result;
     }
     void password(boolean required) {
         var old = new PasswordField(); var fresh = new PasswordField(); var repeat = new PasswordField(); var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);

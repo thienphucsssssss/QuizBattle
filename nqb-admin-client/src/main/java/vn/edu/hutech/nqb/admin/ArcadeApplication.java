@@ -368,7 +368,7 @@ public final class ArcadeApplication extends Application {
         else header.getChildren().add(button("Rời phòng", "quiet", this::logout));
         var roomCode = text(room.path("room_code").asText().isBlank() ? "— — —" : room.path("room_code").asText(), "room-code");
         var codeArea = column(4, text("MÃ PHÒNG", "caption"), roomCode, text(room.path("room_name").asText("Chưa có phòng"), "subtitle"));
-        var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"), text("Bộ câu hỏi: "+(room.path("question_set_id").asInt()==0?"Toàn bộ ngân hàng":room.path("question_set_name").asText()),"caption"), text("Đúng: 50–100 điểm · Trả lời càng nhanh, điểm càng cao.", "caption"));
+        var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"), text("Bộ câu hỏi: "+room.path("question_source_name").asText(room.path("question_set_id").asInt()==0?"Toàn bộ ngân hàng":room.path("question_set_name").asText()),"caption"), text("Đúng: 50–100 điểm · Trả lời càng nhanh, điểm càng cao.", "caption"));
         if (!student) {
             var configure = button(room.path("room_code").asText().isBlank() ? "Tạo phòng" : "Cấu hình phòng", "quiet", this::roomConfig); configure.setDisable(disconnected || (!room.path("room_code").asText().isBlank() && !room.path("is_owner").asBoolean()));
             configSummary.getChildren().add(row(12, configure, button("Sao chép mã", "quiet", () -> { ClipboardContent clipboard = new ClipboardContent(); clipboard.putString(room.path("room_code").asText()); Clipboard.getSystemClipboard().setContent(clipboard); notice("Đã sao chép mã phòng.", false); })));
@@ -394,7 +394,7 @@ public final class ArcadeApplication extends Application {
         } else {
             boolean owner = room.path("is_owner").asBoolean();
             var start = button("Bắt đầu ván thi   →", "ink-button", () -> call("START_GAME", object(), ignored -> { }));
-            start.setDisable(!owner || room.path("connected_player_count").asInt() < 2 || room.path("ready_count").asInt() != room.path("connected_player_count").asInt() || !room.path("phase").asText().equals("WAITING"));
+            start.setDisable(!owner || room.path("connected_player_count").asInt() < 1 || room.path("ready_count").asInt() != room.path("connected_player_count").asInt() || !room.path("phase").asText().equals("WAITING"));
             var reset = button("Reset phòng", "quiet", () -> { if (confirm("Reset phòng?", "Điểm và trạng thái sẵn sàng sẽ được xóa.")) call("ROOM_RESET", object(), value -> { room = value; lobby(); }); }); reset.setDisable(!owner || disconnected);
             var close = button("Đóng phòng", "danger", () -> { if (confirm("Đóng phòng?", "Người chơi sẽ rời phòng; giảng viên khác có thể tổ chức.")) call("ROOM_CLOSE", object(), value -> { room = value; lobby(); }); }); close.setDisable(!owner || disconnected);
             actions.getChildren().addAll(start, reset, close);
@@ -446,34 +446,61 @@ public final class ArcadeApplication extends Application {
         if (focused != null) avatarGrid.getChildren().stream().filter(n -> focused.equals(n.getId()) && !n.isDisabled()).findFirst().ifPresent(Node::requestFocus);
     }
     private void roomConfig() {
-        TextField name = new TextField(room.path("room_name").asText("Mạng máy tính"));
+        String source=room.path("history_session_id").asText();
+        if(source.isEmpty())roomConfig(null,false);
+        else {var current=workspace.getCenter();call("HISTORY_GET",object().put("session_id",source),match->{if(workspace.getCenter()==current)roomConfig(match,false);});}
+    }
+    void roomConfigFromHistory(JsonNode match) {
+        if(!match.path("reuse_available").asBoolean()){notice("Ván này chưa lưu bộ câu hỏi để dùng lại.",true);return;}
+        var current=workspace.getCenter();refreshManagedRoom(()->{
+            if(workspace.getCenter()!=current)return;
+            if(!List.of("WAITING","FINISHED").contains(room.path("phase").asText())){notice("Hãy kết thúc ván đang thi trước khi dùng lại bộ câu hỏi.",true);return;}
+            if(!room.path("room_code").asText().isEmpty()&&!room.path("is_owner").asBoolean()){notice("Phòng đang do giảng viên khác tổ chức.",true);return;}
+            roomConfig(match,true);
+        });
+    }
+    private void roomConfig(JsonNode historical,boolean fromHistory) {
+        boolean hasHistory=historical!=null&&historical.path("reuse_available").asBoolean();
+        JsonNode defaults=fromHistory?historical:room;
+        TextField name = new TextField(defaults.path("room_name").asText("Mạng máy tính"));
         name.setId("room-name");name.setPromptText("Nhập tên phòng thi");
-        Spinner<Integer> count = new Spinner<>(1, 20, room.path("question_count").asInt(3)); Spinner<Integer> seconds = new Spinner<>(5, 120, room.path("duration_seconds").asInt(15));
+        Spinner<Integer> count = new Spinner<>(1, 20, defaults.path("question_count").asInt(3)); Spinner<Integer> seconds = new Spinner<>(5, 120, defaults.path("duration_seconds").asInt(15));
         count.setId("room-question-count");seconds.setId("room-question-seconds");
         var source=new ComboBox<QuestionSets.Choice>();source.setId("room-question-set");source.setMaxWidth(Double.MAX_VALUE);source.setDisable(true);
         var pool=text("Đang tải các bộ câu hỏi của bạn…","muted");pool.setId("room-question-pool");
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); dialog.setHeaderText("Cấu hình phòng thi"); styleDialog(dialog);
         var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);
-        var form=column(12,field("Tên phòng",name),field("Bộ câu hỏi",source),pool,field("Số câu",count),field("Giây mỗi câu",seconds),error);
+        error.setId("room-config-error");
+        var reuse=new CheckBox("Dùng câu hỏi từ ván đã lưu");reuse.setId("room-reuse-history");reuse.setSelected(hasHistory);reuse.setWrapText(true);reuse.setVisible(hasHistory);reuse.setManaged(hasHistory);
+        var sourceField=field("Bộ câu hỏi",source);
+        var form=column(12,field("Tên phòng",name),reuse,sourceField,pool,field("Số câu",count),field("Giây mỗi câu",seconds),error);
         var formScroll=scroll(form);formScroll.setPrefViewportHeight(Math.min(390,Math.max(230,stage.getHeight()-250)));
         dialog.getDialogPane().setContent(formScroll);dialog.getDialogPane().setPrefWidth(540);dialog.setResizable(true);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
         ((Button)dialog.getDialogPane().lookupButton(ButtonType.CANCEL)).setText("Hủy");
         Button save = (Button)dialog.getDialogPane().lookupButton(ButtonType.OK); save.setText("Lưu cấu hình"); save.getStyleClass().add("primary");
         save.setId("room-config-save");save.setDisable(true);
-        source.setOnAction(e->{var selected=source.getValue();pool.setText(selected==null?"Chọn bộ câu hỏi.":selected.id()==0?"Lấy ngẫu nhiên các câu đang bật trong ngân hàng của bạn.":selected.active()+" câu đang bật / "+selected.total()+" câu trong bộ. Chỉ lấy câu từ bộ này.");});
+        boolean[] loaded={false},saving={false};
+        Runnable updateSource=()->{
+            boolean history=hasHistory&&reuse.isSelected();var selected=source.getValue();
+            sourceField.setVisible(!history);sourceField.setManaged(!history);source.setDisable(history||!loaded[0]||saving[0]);reuse.setDisable(saving[0]);
+            save.setDisable(saving[0]||(!history&&!loaded[0]));
+            pool.setText(history?"Dùng lại tối đa "+historical.path("saved_question_count").asInt()+" câu của “"+historical.path("room_name").asText()+"”. Nội dung và đáp án giữ theo ván đã lưu.":!loaded[0]?"Đang tải các bộ câu hỏi của bạn…":selected==null?"Chọn bộ câu hỏi.":selected.id()==0?"Lấy ngẫu nhiên các câu đang bật trong ngân hàng của bạn.":selected.active()+" câu đang bật / "+selected.total()+" câu trong bộ. Chỉ lấy câu từ bộ này.");
+        };
+        source.setOnAction(e->updateSource.run());reuse.setOnAction(e->updateSource.run());updateSource.run();
         save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> {
             e.consume();String roomName=name.getText().strip();if(roomName.isEmpty()||roomName.length()>80){showError(error,"Nhập tên phòng từ 1–80 ký tự.");name.requestFocus();return;}
-            var selected=source.getValue();if(selected==null){showError(error,"Chọn bộ câu hỏi trước khi lưu.");return;}
-            if(selected.id()>0&&selected.active()<count.getValue()){showError(error,"Bộ chỉ có "+selected.active()+" câu đang bật. Hãy giảm số câu hoặc bật thêm câu.");return;}
-            save.setDisable(true);call("ROOM_CONFIGURE",object().put("room_name",name.getText().strip()).put("question_count",count.getValue()).put("duration_seconds",seconds.getValue()).put("question_set_id",selected.id()),value->{dialog.close();room=value;lobby();},failure->{save.setDisable(false);showError(error,message(failure));});
+            boolean history=hasHistory&&reuse.isSelected();var selected=source.getValue();if(!history&&selected==null){showError(error,"Chọn bộ câu hỏi trước khi lưu.");return;}
+            if(history&&count.getValue()>historical.path("saved_question_count").asInt()){showError(error,"Ván đã lưu chỉ có "+historical.path("saved_question_count").asInt()+" câu. Hãy giảm số câu.");return;}
+            if(!history&&selected.id()>0&&selected.active()<count.getValue()){showError(error,"Bộ chỉ có "+selected.active()+" câu đang bật. Hãy giảm số câu hoặc bật thêm câu.");return;}
+            saving[0]=true;updateSource.run();
+            call("ROOM_CONFIGURE",object().put("room_name",roomName).put("question_count",count.getValue()).put("duration_seconds",seconds.getValue()).put("question_set_id",history?0:selected.id()).put("history_session_id",history?historical.path("session_id").asText():""),value->{dialog.close();room=value;lobby();},failure->{saving[0]=false;updateSource.run();showError(error,message(failure));});
         });
         dialog.show();
         QuestionSets.load(this,dialog::isShowing,sets->{
             var values=new ArrayList<QuestionSets.Choice>();values.add(QuestionSets.Choice.all());values.addAll(sets);source.setItems(FXCollections.observableArrayList(values));
-            int chosen=room.path("question_set_id").asInt();source.setValue(values.stream().filter(v->v.id()==chosen).findFirst().orElse(values.getFirst()));source.setDisable(false);save.setDisable(false);
-            if(sets.isEmpty())pool.setText("Chưa có bộ riêng. Nhập file hoặc tạo bộ trong Ngân hàng câu hỏi.");
-        },failure->{pool.setText("Không tải được danh sách bộ câu hỏi.");showError(error,message(failure));});
+            int chosen=room.path("question_set_id").asInt();source.setValue(values.stream().filter(v->v.id()==chosen).findFirst().orElse(values.getFirst()));loaded[0]=true;updateSource.run();
+        },failure->{if(!hasHistory||!reuse.isSelected()){pool.setText("Không tải được danh sách bộ câu hỏi.");showError(error,message(failure));}});
     }
     private void event(JsonNode event) {
         JsonNode p = event.path("payload");

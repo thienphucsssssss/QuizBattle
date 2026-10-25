@@ -31,7 +31,7 @@ Bộ phát hành mới: `dist/QuizBattle-Windows-20261022-084345/QuizBattle-Setu
 3. Vào **Người dùng → Thêm giảng viên**, tự đặt username/tên hiển thị và mật khẩu tạm.
 4. Đăng xuất, chọn **Giảng viên** và nhập tài khoản mới. Đổi mật khẩu tạm theo yêu cầu rồi đăng nhập lại. Ngân hàng của tài khoản mới trống; tự thêm câu hỏi và tạo phòng.
 5. Giữ cửa sổ giảng viên, mở QuizBattle thêm hai lần. Ở mỗi cửa sổ chọn **Học sinh**, nhập nickname khác nhau và mã phòng thật. Chọn avatar rồi Sẵn sàng.
-6. Quay lại cửa sổ giảng viên để bắt đầu. Cần ít nhất hai học sinh; tất cả thao tác dùng socket TLS thật dù cùng máy.
+6. Quay lại cửa sổ giảng viên để bắt đầu. Cần ít nhất một học sinh và tất cả sẵn sàng; tất cả thao tác dùng socket TLS thật dù cùng máy.
 
 Giới hạn một phiên đăng nhập quản lý cho mỗi tài khoản vẫn áp dụng. Muốn mở nhiều cửa sổ quản lý cùng lúc, dùng các tài khoản khác nhau. Admin có ngân hàng riêng; giảng viên có ngân hàng riêng, không tự thấy câu hỏi của Admin.
 

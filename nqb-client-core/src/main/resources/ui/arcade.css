@@ -221,3 +221,49 @@
 .medal-ring { -fx-stroke: #202146; -fx-stroke-width: 1; -fx-opacity: .4; }
 .medal-ribbon { -fx-fill: #ee6c83; }
 .game .medal-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+
+/* History keeps the management table and dialog workflow, using existing arcade tokens. */
+.history-table { -fx-background-color: white; -fx-background-radius: 15; -fx-border-color: -line; -fx-border-radius: 15; -fx-padding: 8; }
+.history-table .column-header-background { -fx-background-color: #edf1fb; -fx-background-radius: 9; }
+.history-table .column-header { -fx-size: 44; }
+.history-table .column-header .label { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; }
+.history-table .table-row-cell:filled { -fx-background-color: white; -fx-border-color: transparent transparent #edf0f8 transparent; }
+.history-table .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
+.history-table .table-row-cell:filled:hover { -fx-background-color: #f4f6ff; }
+.history-table .table-row-cell:filled:selected { -fx-background-color: #3049d5, #edf2ff; -fx-background-insets: 4 0, 4 0 4 3; -fx-background-radius: 10, 8; -fx-border-color: transparent; }
+.history-table .table-cell { -fx-font-size: 13px; -fx-padding: 10 12; }
+.history-table .history-room-cell { -fx-padding: 10 14; }
+.history-room-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: -ink; }
+.history-room-meta { -fx-font-size: 12px; -fx-text-fill: -muted; }
+.history-table .history-room-name .text, .history-table .history-count .text { -fx-fill: -ink; }
+.history-table .history-room-meta .text { -fx-fill: -muted; }
+.history-count { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 14px; -fx-background-color: #eef2fc; -fx-background-radius: 8; -fx-padding: 5 12; }
+.history-total { -fx-font-size: 12px; -fx-text-fill: #344b92; -fx-background-color: #e9eefc; -fx-background-radius: 9; -fx-padding: 8 12; }
+.history-footer .button { -fx-font-size: 13px; -fx-padding: 8 12; }
+.history-footer .error { -fx-text-fill: #9c3026; }
+.history-dialog { -fx-background-color: -cream; -fx-padding: 0; }
+.history-dialog > .header-panel { -fx-background-color: #2438aa; -fx-padding: 18 24; }
+.history-dialog > .header-panel .label { -fx-text-fill: white; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 19px; }
+.history-dialog > .content { -fx-padding: 0; }
+.history-dialog > .button-bar { -fx-padding: 12 20; -fx-background-color: white; }
+#history-results-scroll { -fx-padding: 0; }
+.history-results { -fx-padding: 12 20 20 20; }
+.history-section { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 18; }
+.history-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+.history-chip { -fx-font-size: 12px; -fx-text-fill: -muted; -fx-background-color: #e9edf8; -fx-background-radius: 8; -fx-padding: 7 12; }
+.history-saved { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; -fx-text-fill: #344a20; -fx-background-color: -mint; -fx-background-radius: 8; -fx-padding: 6 12; }
+.history-winners { -fx-background-color: #edf2ff; -fx-border-color: #dfe6fb; -fx-padding: 14 18; }
+.history-results .victory-podium { -fx-hgap: 12; -fx-vgap: 20; -fx-padding: 8 0 0 0; }
+.history-results .winner-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: -ink; -fx-text-alignment: center; }
+.history-results .winner-score { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 22px; -fx-text-fill: #3049d5; }
+.history-results .podium-place { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 36px; -fx-text-fill: -ink; }
+.history-results .podium-caption { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: -ink; }
+.history-results .medal-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+.history-results .ranking-row { -fx-background-color: #f7f9fe; -fx-background-radius: 12; -fx-padding: 8 14; }
+.history-results .ranking-row.rank-top { -fx-background-color: #eaf0ff; }
+.history-results .rank-number { -fx-font-size: 23px; -fx-text-fill: #3049d5; }
+.history-results .ranking-row .subtitle { -fx-font-size: 15px; }
+.history-results .rank-score { -fx-font-size: 23px; }
+.rank-detail { -fx-font-size: 12px; -fx-text-fill: -muted; }
+.game .ranking-row .rank-detail { -fx-text-fill: -muted; }
+.rank-own-badge, .game .ranking-row .rank-own-badge { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: white; -fx-background-color: #3049d5; -fx-background-radius: 6; -fx-padding: 3 7; }

@@ -295,6 +295,29 @@ class ServerIntegrationTest {
         String code=room(host,1);var a=guest(code,"Import guest 1");var b=guest(code,"Import guest 2");error(a,"FORBIDDEN","QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Not allowed")));
         String token=host.request("QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Waiting only"))).path("import_id").asText();a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());error(host,"INVALID_STATE","QUESTION_IMPORT_COMMIT",commit(token,false,0));error(host,"INVALID_STATE","QUESTION_IMPORT_PREVIEW",preview(null,0,true,importRow("Not while playing")));
     }
+    @Test void oneReadyStudentCanFinishGameAndSaveHistory()throws Exception {
+        var host=admin();String code=room(host,1);
+        error(host,"NOT_READY","START_GAME",obj());
+        var student=guest(code,"Thi một mình");
+        error(host,"NOT_READY","START_GAME",obj());
+        student.request("READY_SET",obj().put("ready",true));
+        assertDoesNotThrow(()->host.request("START_GAME",obj()),"One ready student must be able to start");
+        assertFalse(student.event("GAME_START").path("session_id").asText().isBlank());
+        var question=student.event("QUESTION");
+        var correct=host.request("QUESTION_GET",obj().put("question_id",question.path("question_id").asInt())).path("correct_answer").asText();
+        assertTrue(student.request("ANSWER",obj().put("session_id",question.path("session_id").asText()).put("question_id",question.path("question_id").asInt()).put("answer",correct)).path("accepted").asBoolean());
+        assertTrue(student.event("QUESTION_RESULT").path("correct").asBoolean());
+        var ranking=student.event("ROUND_RANKING").path("ranking");
+        assertEquals(1,ranking.size());assertEquals(1,ranking.get(0).path("rank").asInt());
+        var end=student.event("GAME_OVER");assertTrue(end.path("result_saved").asBoolean());assertEquals(1,end.path("correct_count").asInt());
+        assertEquals(end.path("ranking"),host.request("HISTORY_GET",obj().put("session_id",question.path("session_id").asText())).path("ranking"));
+    }
+    @Test void startStillRequiresEveryJoinedStudentToBeReady()throws Exception {
+        var host=admin();String code=room(host,1);var ready=guest(code,"Sẵn sàng");guest(code,"Đang chờ");
+        ready.request("READY_SET",obj().put("ready",true));
+        error(host,"NOT_READY","START_GAME",obj());
+        assertEquals("WAITING",host.request("ROOM_STATE",obj()).path("phase").asText());
+    }
     @Test void threeRealPlayersFinishRankingAndPersistAfterRestart()throws Exception {
         var host=admin();String code=room(host,2);Client a=guest(code,"Minh Ánh"),b=guest(code,"Quốc Bảo"),c=guest(code,"Thu Hà");
         for(var player:List.of(a,b,c))player.request("READY_SET",obj().put("ready",true));
@@ -401,6 +424,38 @@ class ServerIntegrationTest {
         assertEquals(0,wrong.event("GAME_OVER").path("score").asInt());assertEquals(0,missing.event("GAME_OVER").path("score").asInt());
         assertEquals(end.path("ranking"),host.request("HISTORY_GET",obj().put("session_id",q.path("session_id").asText())).path("ranking"));
         host.request("ROOM_RESET",obj());for(var player:host.request("ROOM_STATE",obj()).path("players")){assertEquals(0,player.path("score").asInt());assertEquals(0,player.path("correct_count").asInt());}
+    }
+    @Test void historyQuestionsCanBeReusedAfterTheBankQuestionIsDeleted()throws Exception {
+        var host=admin();String originalCode=room(host,1);var player=guest(originalCode,"Thi lại");player.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+        var question=player.event("QUESTION");var original=host.request("QUESTION_GET",obj().put("question_id",question.path("question_id").asInt()));
+        assertTrue(player.event("GAME_OVER").path("result_saved").asBoolean());String savedSession=question.path("session_id").asText();
+        var saved=host.request("HISTORY_GET",obj().put("session_id",savedSession));
+        assertTrue(saved.path("reuse_available").asBoolean(),"A completed match must retain its question source");
+        assertEquals(1,saved.path("saved_question_count").asInt());assertEquals(5,saved.path("duration_seconds").asInt());
+        assertFalse(saved.has("questions"));assertFalse(saved.toString().contains("correct_answer"));
+        host.request("ROOM_CLOSE",obj());host.request("QUESTION_DELETE",obj().put("question_id",question.path("question_id").asInt()));
+        var other=new Client();other.request("REGISTER",obj().put("username","history.other").put("display_name","Giảng viên khác").put("password","History-other-only-1"));other.request("LOGIN",obj().put("username","history.other").put("password","History-other-only-1"));
+        error(other,"NOT_FOUND","ROOM_CONFIGURE",obj().put("room_name","Không thuộc quyền").put("question_count",1).put("history_session_id",savedSession));
+        error(host,"NOT_ENOUGH_QUESTIONS","ROOM_CONFIGURE",obj().put("room_name","Quá số câu").put("question_count",2).put("history_session_id",savedSession));
+        error(host,"INVALID_INPUT","ROOM_CONFIGURE",obj().put("room_name","Hai nguồn").put("question_count",1).put("history_session_id",savedSession).put("question_set_id",1));
+        assertEquals("",host.request("ROOM_STATE",obj()).path("room_code").asText());
+        var next=host.request("ROOM_CONFIGURE",obj().put("room_name","Thi lại từ lịch sử").put("question_count",1).put("duration_seconds",5).put("history_session_id",savedSession).put("question_set_id",0));
+        assertEquals(savedSession,next.path("history_session_id").asText());assertEquals("WAITING",next.path("phase").asText());
+        assertEquals(savedSession,host.request("ROOM_CONFIGURE",obj().put("room_name","Thi lại từ lịch sử").put("question_count",1).put("duration_seconds",5)).path("history_session_id").asText());
+        var replay=guest(next.path("room_code").asText(),"Ván mới");replay.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());var repeated=replay.event("QUESTION");
+        error(host,"INVALID_STATE","ROOM_CONFIGURE",obj().put("room_name","Không đổi khi thi").put("question_count",1).put("history_session_id",savedSession));
+        error(replay,"FORBIDDEN","ROOM_CONFIGURE",obj().put("room_name","Không cấp quyền").put("question_count",1).put("history_session_id",savedSession));
+        for(String key:List.of("question_id","content","option_a","option_b","option_c","option_d"))assertEquals(original.path(key),repeated.path(key),"Changed historical question: "+key);
+        assertFalse(repeated.has("correct_answer"));
+        replay.request("ANSWER",obj().put("session_id",repeated.path("session_id").asText()).put("question_id",repeated.path("question_id").asInt()).put("answer",original.path("correct_answer").asText()));
+        assertTrue(replay.event("QUESTION_RESULT").path("correct").asBoolean());assertTrue(replay.event("GAME_OVER").path("result_saved").asBoolean());
+        error(host,"NOT_ENOUGH_QUESTIONS","ROOM_CONFIGURE",obj().put("room_name","Không reset nếu lỗi").put("question_count",2).put("history_session_id",savedSession));
+        assertEquals("FINISHED",host.request("ROOM_STATE",obj()).path("phase").asText());
+        var fresh=host.request("ROOM_CONFIGURE",obj().put("room_name","Tiếp tục ôn tập").put("question_count",1).put("duration_seconds",5).put("history_session_id",savedSession).put("question_set_id",0));
+        assertEquals("WAITING",fresh.path("phase").asText());assertNotEquals(next.path("room_code").asText(),fresh.path("room_code").asText());
+        assertEquals(1,fresh.path("players").size());assertFalse(fresh.path("players").get(0).path("ready").asBoolean());assertEquals(0,fresh.path("players").get(0).path("score").asInt());
+        assertEquals(savedSession,host.request("ROOM_RESET",obj()).path("history_session_id").asText());
+        assertEquals("",host.request("ROOM_CONFIGURE",obj().put("room_name","Chuyển về ngân hàng").put("question_count",1).put("question_set_id",0).put("history_session_id","")).path("history_session_id").asText());
     }
     @Test void disconnectedPlayerRemainsInFinalRankingAndSavedHistory()throws Exception {
         var host=admin();String code=room(host,1);Client a=guest(code,"Rời mạng"),b=guest(code,"Còn mạng");a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());

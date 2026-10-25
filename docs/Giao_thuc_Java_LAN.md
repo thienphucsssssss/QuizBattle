@@ -111,6 +111,15 @@ Tests hiện có framing/envelope/endpoint, TLS với SSL peer localhost và UI 
 
 Kiểm thử bắt buộc khi tích hợp: hai socket đồng thời tranh cùng avatar chỉ một thành công; cập nhật khóa trên mọi Player; đổi thất bại không mất avatar cũ; rớt mạng giải phóng đúng lúc; không đổi khi ready/đang thi; thứ tự RESULT → RANKING → QUESTION/GAME_OVER trên mọi máy; đồng hạng, hủy ván và event cũ không làm UI quay ngược.
 
+## Dùng lại đề từ lịch sử
+
+- `HISTORY_LIST` và `HISTORY_GET` trả thêm `duration_seconds`, `saved_question_count`, `reuse_available`. Ván cũ thiếu đề đã lưu có `reuse_available=false`; không đoán câu từ ngân hàng hiện tại. Response không trả nội dung đề hoặc đáp án.
+- `ROOM_CONFIGURE` nhận `history_session_id` (chuỗi tối đa 80 ký tự) để chọn câu đã thi từ một ván của chính tài khoản đang đăng nhập. Gửi `question_set_id=0` khi dùng nguồn này; gửi đồng thời bộ riêng khác 0 bị từ chối. Chuỗi rỗng xóa nguồn lịch sử. Khi không gửi cả hai trường nguồn, giữ nguồn hiện tại; gửi riêng `question_set_id` chuyển về nguồn ngân hàng/bộ như các Client cũ.
+- Kiểm tra quyền và đủ câu tại cả cấu hình và bắt đầu. Lỗi `NOT_FOUND` khi kết quả không thuộc tài khoản; `HISTORY_QUESTIONS_UNAVAILABLE` khi ván chưa lưu đủ đề; `NOT_ENOUGH_QUESTIONS` khi vượt số câu đã lưu. Không lấy bù từ ngân hàng. Khi giảm số câu, lấy phần đầu theo thứ tự gốc.
+- Cấu hình nguồn lịch sử được phép trong `WAITING`, hoặc `FINISHED` của chính chủ phòng. Mọi kiểm tra phải thành công trước khi reset phòng đã kết thúc: cấp mã mới, giữ người đang kết nối, xóa ready/điểm. Các pha đang thi vẫn bị chặn. Hủy form ở Client không gửi mutation.
+- `ROOM_STATE` thêm `question_source_name`; chỉ chủ phòng nhận `history_session_id` và `history_room_name`. `ROOM_RESET` giữ nguồn, `ROOM_CLOSE` xóa nguồn. `START_GAME` cấp session mới và chỉ dùng câu đã lưu; kết quả ván mới được lưu độc lập.
+- Schema 3 có thời lượng trong `matches` và `match_questions(session_id,position,question_json)`. Đề giữ nguyên nội dung/options/correct_answer đã thi, không phụ thuộc vòng đời câu gốc và không thêm bản sao vào ngân hàng. Đề, bảng điểm và thông tin ván commit/rollback cùng nhau.
+
 ## Bộ lọc câu hỏi
 
 Ví dụ request mục tiêu, gửi dưới dạng một dòng JSON/LF sau TLS:

@@ -42,6 +42,21 @@ Server chọn ngẫu nhiên đủ số câu yêu cầu trong các câu **đang b
 
 **Toàn bộ ngân hàng** giữ cách lấy câu cũ. **Reset phòng** giữ bộ đang chọn; **Đóng phòng** xóa lựa chọn khỏi phòng. Bộ và thành viên được lưu trong database, tồn tại qua lần khởi động Server tiếp theo. Bật/tắt/sửa một câu có hiệu lực ở mọi bộ chứa câu đó.
 
+## Dùng lại câu hỏi từ lịch sử
+
+1. Vào **Lịch sử & Bảng xếp hạng**, chọn ván đã lưu và bấm **Xem bảng điểm**.
+2. Bấm **Dùng lại bộ câu hỏi**. Form điền sẵn tên phòng, số câu và thời gian mỗi câu; lựa chọn **Dùng câu hỏi từ ván đã lưu** được bật sẵn.
+3. Điều chỉnh tên, số câu hoặc thời gian rồi bấm **Lưu cấu hình**. Số câu không được vượt quá số câu đã lưu; khi giảm số câu, lấy các câu đầu theo thứ tự của ván cũ.
+4. Các thí sinh tham gia/sẵn sàng rồi bắt đầu như một ván mới. Nếu phòng hiện tại đã kết thúc, lưu cấu hình hợp lệ sẽ cấp mã mới, giữ người còn kết nối và xóa điểm/trạng thái sẵn sàng. Bấm **Hủy** không thay đổi phòng.
+
+Đề dùng lại gồm đúng các câu đã xuất hiện trong ván được chọn, giữ nguyên nội dung, bốn lựa chọn và đáp án tại thời điểm thi. Sửa, tắt hoặc xóa câu trong ngân hàng sau đó không làm thay đổi đề đã lưu. Tính năng không tạo thêm câu hay bộ trùng trong ngân hàng. Ván thi lại có kết quả lịch sử riêng.
+
+Chỉ chủ sở hữu kết quả được dùng lại đề. Không thay cấu hình khi ván đang chạy hoặc khi phòng thuộc giảng viên khác. **Reset phòng** giữ nguồn từ lịch sử; **Đóng phòng** xóa lựa chọn nguồn khỏi phòng.
+
+Các kết quả trước bản cập nhật chỉ lưu điểm, chưa lưu nội dung câu hỏi: vẫn xem được bảng điểm, nhưng nút dùng lại bị khóa và có giải thích. Chỉ các ván hoàn thành sau khi Server được cập nhật mới có đề đã lưu để dùng lại.
+
+Database nâng lên phiên bản 3 bằng migration có transaction, giữ tài khoản/ngân hàng/kết quả cũ. Câu đã thi và thời gian mỗi câu được lưu cùng kết quả trong một transaction; lỗi lưu đề không được báo là đã lưu thành công.
+
 ## Giao thức và dữ liệu
 
 - `QUESTION_SET_LIST`: chỉ bộ của tài khoản hiện tại; `page` và `page_size` (tối đa 100). Mỗi dòng có `question_set_id`, `name`, `question_count`, `active_count`.
@@ -63,6 +78,8 @@ Thông báo **“Yêu cầu không được hỗ trợ”** khi tải bộ câu 
 `run.bat` hiện kiểm tra dấu vân tay của source, cấu hình build và bản biên dịch thay vì chỉ nhìn dấu `ready` cũ. Khi source hoặc bản biên dịch thay đổi, launcher tự build lại trước khi chạy. Thông báo trên Client cũng hướng dẫn cập nhật/khởi động lại Server; form dừng trạng thái đang tải và chặn lưu khi chưa tải được bộ.
 
 ## Kiểm chứng bản cập nhật
+
+Bản dùng lại đề từ lịch sử: build/install toàn dự án đạt **134 bài kiểm thử**, không lỗi hoặc bỏ qua. Kiểm thử giao diện thật ở 1024×640 và 1366×768 xác nhận nút dùng lại, form điền đúng tên/số câu/thời lượng, Hủy không đổi phòng, chặn số câu vượt đề và thi lại bằng đúng nguồn đã lưu. Component QA xác nhận kết quả cũ vẫn đọc được và nút dùng lại bị khóa khi thiếu đề. Test persistence kiểm tra migration/rollback, đề tồn tại qua restart và không bị đổi khi sửa/xóa câu gốc. Log: `output/history-reuse-verify.log`, `output/history-reuse-final-1024.log`, `output/history-reuse-final-1366.log`, `output/history-reuse-components-final.log`.
 
 Bản nâng cấp giao diện Ngân hàng: **126 bài kiểm thử** đạt; kiểm thử giao diện 1024×640 và 1366×768 đạt các luồng xem đủ bốn đáp án thật, đánh dấu đáp án đúng, chuyển nhanh câu đang xem, xóa chi tiết khi lọc rỗng, tick qua nhiều trang và tạo bộ. Đã xem ảnh câu/đáp án tiếng Việt dài và các thao tác trong vùng cuộn. Log: `tmp/bank-polish-final-build.log`, `tmp/bank-polish-final-1024.log`, `tmp/bank-polish-final-1366.log`; ảnh: `output/bank-polish-final/`.
 

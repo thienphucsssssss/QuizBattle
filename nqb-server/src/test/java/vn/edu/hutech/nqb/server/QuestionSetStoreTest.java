@@ -15,10 +15,11 @@ class QuestionSetStoreTest {
         int owner=store.bootstrap("admin","Admin cũ","Set-store-test-1".toCharArray());
         for(int i=1;i<=4;i++)store.saveQuestion(owner,obj().put("content","Câu bộ đề "+i).put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","Mạng"),false);
         var ranking=array();ranking.add(obj().put("player_id","p1").put("nickname","Học sinh cũ").put("avatar_id","quizling-1").put("score",123).put("correct_count",2).put("rank",1).put("connected",true));
-        store.saveMatch("old-session",owner,"Phòng cũ",2,"2026-10-24T00:00:00Z",ranking);return owner;
+        store.saveMatch("old-session",owner,"Phòng cũ",2,"2026-10-24T00:00:00Z",ranking,15,store.gameQuestions(owner,2));return owner;
     }
     private void downgrade(boolean collision)throws Exception {
         try(var db=DriverManager.getConnection("jdbc:sqlite:"+database());var sql=db.createStatement()){
+            sql.execute("DROP TABLE match_questions");sql.execute("ALTER TABLE matches DROP COLUMN duration_seconds");
             sql.execute("DROP TABLE question_set_items");sql.execute("DROP TABLE question_sets");sql.execute("PRAGMA user_version=1");
             if(collision)sql.execute("CREATE TABLE question_set_items(legacy_marker TEXT)");
         }
@@ -34,7 +35,7 @@ class QuestionSetStoreTest {
             assertEquals(123,store.historyDetail(owner,"old-session").path("ranking").get(0).path("score").asInt());
             var p=obj().put("name","Bộ được lưu");p.putArray("question_ids").add(1).add(2);store.createQuestionSet(owner,p);
         }
-        assertEquals(2,version());
+        assertEquals(3,version());
         try(var store=new QuizStore(database())){assertEquals(1,store.questionSets(owner,obj()).path("total").asInt());assertEquals(2,store.questionSets(owner,obj()).path("items").get(0).path("question_count").asInt());}
     }
     @Test void failedMigrationRollsBackNewTablesAndVersion()throws Exception {

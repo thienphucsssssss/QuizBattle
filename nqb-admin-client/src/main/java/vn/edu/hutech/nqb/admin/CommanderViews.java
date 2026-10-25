@@ -61,7 +61,7 @@ final class CommanderViews {
         stats.add(column(6, text("THÍ SINH TRONG PHÒNG", "caption"), submitted),2,0);
         var actions = new FlowPane(12,12, button("Quản lý phòng thi", "ink-button", app::roomView), button("Mở ngân hàng", "quiet", app::bankView), button("Theo dõi ván thi", "quiet", () -> open("Giám sát thi đấu")), button("Xem lịch sử & bảng điểm", "quiet", app::historyView));
         var body = column(24, stats, text("Phòng thi hiện tại", "subtitle"), summary, actions,
-            text("Bắt đầu một buổi thi", "subtitle"), text("1. Chuẩn bị câu hỏi trong ngân hàng của bạn.\n2. Tạo phòng và gửi mã cho học sinh trong cùng mạng LAN.\n3. Chờ ít nhất hai thí sinh sẵn sàng rồi bắt đầu.", "muted"));
+            text("Bắt đầu một buổi thi", "subtitle"), text("1. Chuẩn bị câu hỏi trong ngân hàng của bạn.\n2. Tạo phòng và gửi mã cho học sinh trong cùng mạng LAN.\n3. Cần ít nhất một thí sinh; chờ tất cả sẵn sàng rồi bắt đầu.", "muted"));
         layout.setCenter(scroll(body));
     }
     private void monitor() {
@@ -117,7 +117,7 @@ final class CommanderViews {
             submitted.setText(state.equals("WAITING") ? ready + "/" + online + " sẵn sàng" : room.path("answered_count").asInt() + "/" + online + " đã nộp");
             summary.setText(room.path("room_code").asText().isBlank() ? "Chưa mở phòng. Mở Phòng thi để tạo phòng mới." : "Câu " + room.path("question_number").asInt() + "/" + room.path("question_count").asInt() + " · " + (room.path("is_owner").asBoolean() ? "Bạn đang điều khiển phòng." : "Chỉ theo dõi · phòng do giảng viên khác tổ chức."));
             boolean owner = room.path("is_owner").asBoolean() && app.managementConnected();
-            start.setDisable(!owner || !state.equals("WAITING") || online < 2 || ready != online || online != room.path("players").size());
+            start.setDisable(!owner || !state.equals("WAITING") || online < 1 || ready != online || online != room.path("players").size());
             abort.setDisable(!owner || !running(state)); projection.setDisable(!owner);
             tick(); updatePlayers();
         } else if (page.equals("Đấu trường thí sinh")) updatePlayers();
