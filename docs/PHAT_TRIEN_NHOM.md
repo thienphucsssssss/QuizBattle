@@ -24,7 +24,9 @@ Nhấn đúp `run.bat` tại thư mục gốc để mở menu. File tự tìm Ma
 
 Ở menu chỉ bấm một phím số, không cần Enter. Khi nhập mật khẩu, chữ và số được che bằng dấu `*`; nhập xong nhấn Enter. Nếu vô tình Enter rỗng hoặc mật khẩu quá ngắn, script yêu cầu nhập lại ngay trước khi chạy Java.
 
-Sau khi sửa mã nguồn, chọn **1** để build lại. Có thể chạy trực tiếp `run.bat build`, `run.bat setup`, `run.bat server`, `run.bat admin` hoặc `run.bat player` từ terminal. `setup` tạo chứng chỉ cho `127.0.0.1`; để chạy nhiều máy LAN, làm theo mục 3 với IP Server thật. Client trên máy khác cần nhận truststore và cấu hình từ Server theo mục đó.
+Sau lần chuẩn bị thành công, các lần chọn **3**, **4**, **5** dùng lại bản đã build và thư viện trên máy, chạy offline. Launcher không tự build lại khi source, POM hoặc script thay đổi. Nếu thiếu JAR/classes hoặc chưa có dấu hoàn tất chuẩn bị, launcher mới tự build.
+
+Sau khi sửa mã nguồn, chọn **1** hoặc chạy `run.bat build` để áp dụng thay đổi; sau đó tắt và mở lại Server/Client. Có thể chạy trực tiếp `run.bat build`, `run.bat setup`, `run.bat server`, `run.bat admin` hoặc `run.bat player` từ terminal. `setup` tạo chứng chỉ cho `127.0.0.1`; để chạy nhiều máy LAN, làm theo mục 3 với IP Server thật. Client trên máy khác cần nhận truststore và cấu hình từ Server theo mục đó.
 
 ## 2. Chạy thử hoàn toàn trên một máy
 

@@ -26,13 +26,13 @@ class CommanderModelTest {
         assertEquals(0, CommanderModel.counts(object()).progress(false));
     }
 
-    @Test void pendingFilterChangesFromReadinessToSubmissionAndSearchDoesNotMutateRoster() {
+    @Test void monitorFiltersFollowReadinessAndSubmissionWithoutMutatingRoster() {
         var room = room("QUESTION_ACTIVE");
-        assertEquals(List.of("b", "d"), CommanderModel.players(room, CommanderModel.Filter.PENDING, "", false).stream().map(p -> p.path("player_id").asText()).toList());
+        assertEquals(List.of("b", "d"), CommanderModel.players(room, CommanderModel.Filter.PENDING).stream().map(p -> p.path("player_id").asText()).toList());
         room.put("phase", "WAITING");
-        assertEquals(List.of("b", "c", "d"), CommanderModel.players(room, CommanderModel.Filter.PENDING, "", false).stream().map(p -> p.path("player_id").asText()).toList());
-        assertEquals("b", CommanderModel.players(room, CommanderModel.Filter.ALL, "quoc bao", false).getFirst().path("player_id").asText());
-        assertEquals("d", CommanderModel.players(room, CommanderModel.Filter.OFFLINE, "dang", false).getFirst().path("player_id").asText());
+        assertEquals(List.of("b", "c", "d"), CommanderModel.players(room, CommanderModel.Filter.PENDING).stream().map(p -> p.path("player_id").asText()).toList());
+        assertEquals(List.of("c", "d"), CommanderModel.players(room, CommanderModel.Filter.OFFLINE).stream().map(p -> p.path("player_id").asText()).toList());
+        assertEquals(4, CommanderModel.players(room, CommanderModel.Filter.ALL).size());
         assertEquals(4, room.path("players").size());
     }
 
@@ -63,19 +63,4 @@ class CommanderModelTest {
         assertEquals("Đã nộp bài", CommanderModel.status(room, room.path("players").get(0), true));
     }
 
-    @Test void leadersAndTableUseEveryAuthoritativeTieWithoutInferringRankFromScore() {
-        var room = room("SHOW_RANKING");
-        var ranking = room.putArray("ranking");
-        ranking.addObject().put("player_id", "b").put("rank", 1).put("score", 100);
-        ranking.addObject().put("player_id", "a").put("rank", 1).put("score", 100);
-        ranking.addObject().put("player_id", "c").put("rank", 3).put("score", 90);
-        ranking.addObject().put("player_id", "d").put("rank", 4).put("score", 999);
-        assertEquals(List.of(1, 1, 3), CommanderModel.leaders(room).stream().map(p -> p.path("rank").asInt()).toList());
-        assertEquals(4, CommanderModel.rank(room, room.path("players").get(3)));
-        assertEquals("d", CommanderModel.players(room, CommanderModel.Filter.OFFLINE, "", true).getLast().path("player_id").asText());
-        for (int i=0;i<7;i++) ranking.addObject().put("player_id", "tied-"+i).put("rank", 1).put("score", 100);
-        assertEquals(10, CommanderModel.leaders(room).size());
-        room.put("phase", "WAITING"); assertTrue(CommanderModel.leaders(room).isEmpty());
-        room.put("phase", "QUESTION_ACTIVE").put("question_number", 1); assertTrue(CommanderModel.leaders(room).isEmpty());
-    }
 }

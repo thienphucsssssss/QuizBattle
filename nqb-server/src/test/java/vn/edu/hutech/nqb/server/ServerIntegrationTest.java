@@ -68,6 +68,78 @@ class ServerIntegrationTest {
     Client guest(String code,String name)throws Exception{var c=new Client("127.0.0."+nextStudentIp++);c.request("JOIN",obj().put("room_code",code).put("nickname",name));return c;}
     void error(Client c,String code,String type,ObjectNode p){var ex=assertThrows(ExecutionException.class,()->c.request(type,p));assertEquals(code,assertInstanceOf(GatewayException.class,ex.getCause()).code());}
     private ObjectNode importRow(String content){return obj().put("content",content).put("option_a","TCP").put("option_b","UDP").put("option_c","IP").put("option_d","ARP").put("correct_answer","A").put("category","Mạng LAN");}
+    private ObjectNode rangeOptions(){
+        return obj().put("survey_id",UUID.randomUUID().toString()).put("survey_name","Đo thật").put("route","Tầng 2")
+            .put("topology","DEDICATED_AP").put("distance_basis","CORRIDOR_ROUTE").put("distance_m",0).put("duration_seconds",30);
+    }
+    @Test void roomTopologyUsesActualPortAndConfiguredCapacityWithoutInventingDistances()throws Exception {
+        var host=admin();String code=room(host,1);var player=new Client();
+        player.request("JOIN",obj().put("room_code",code).put("nickname","Client topology"));
+        var snapshot=host.request("ROOM_STATE",obj());
+        assertEquals(port,snapshot.path("server_port").asInt());
+        assertEquals(10,snapshot.path("max_players").asInt());
+        var node=snapshot.path("players").get(0);
+        assertFalse(node.has("wifi_rtt_measurement"));assertFalse(node.has("distance_m"));
+        assertEquals("127.0.0.1",node.path("ip_address").asText());
+    }
+    @Test void lanRangeClientCompletesThirtyRealTlsSamplesOnOneIp()throws Exception {
+        var manager=admin();var done=new CountDownLatch(1);
+        Path report=data.resolve("client-reports");
+        try(var range=new LanRangeClient(manager.gateway,report,s->{if(s.path("saved").asBoolean()&&!s.path("active").asBoolean())done.countDown();})){
+            manager.gateway.onEvent(range::onEvent);
+            range.start(vn.edu.hutech.nqb.shared.LanRangeProtocol.parseOptions(rangeOptions())).get(5,TimeUnit.SECONDS);
+            assertTrue(done.await(40,TimeUnit.SECONDS),"Real 30-second TLS run did not finish");
+            var result=range.snapshot();
+            assertEquals("COMPLETED",result.path("end_reason").asText(),result.toPrettyString());
+            assertEquals(30,result.path("client_summary").path("confirmed").asInt());
+            assertEquals(30,result.path("server_summary").path("confirmed").asInt());
+            assertTrue(result.path("server_summary_received").asBoolean());
+            assertTrue(result.path("loopback").asBoolean());assertTrue(result.path("saved").asBoolean());
+            assertEquals(1,LanRangeReport.load(report).size());
+            assertTrue(LanRangeReport.farthestPassing(LanRangeReport.load(report),result.path("survey_id").asText()).isEmpty());
+        }
+    }
+    @Test void lanRangeAuthenticatesUsesRealSocketAndKeepsServerJournal()throws Exception {
+        var anonymous=new Client();error(anonymous,"AUTH_REQUIRED","LAN_RANGE_START",rangeOptions());
+        var manager=admin();var started=manager.request("LAN_RANGE_START",rangeOptions().put("client_ip","fake").put("server_ip","fake"));
+        String run=started.path("run_id").asText();
+        assertEquals("127.0.0.1",started.path("client_ip_observed").asText());
+        assertEquals("127.0.0.1",started.path("server_ip").asText());assertTrue(started.path("loopback").asBoolean());
+        error(manager,"LAN_RANGE_BUSY","LAN_RANGE_START",rangeOptions());
+        manager.request("LAN_RANGE_READY",obj().put("run_id",run));
+        assertEquals(1,manager.request("LAN_RANGE_PROBE",obj().put("run_id",run).put("sequence",1)).path("sequence").asInt());
+        assertEquals("ON_TIME",manager.event("LAN_RANGE_SERVER_SAMPLE").path("status").asText());
+        manager.request("LAN_RANGE_STOP",obj().put("run_id",run));
+        var ended=manager.event("LAN_RANGE_FINISHED");
+        assertEquals("STOPPED",ended.path("end_reason").asText());assertTrue(ended.path("server_journal_healthy").asBoolean());
+        assertTrue(Files.readString(data.resolve("lan-range/server-"+run+".jsonl")).contains("RUN_FINISHED"));
+        manager.request("LAN_RANGE_STOP",obj().put("run_id",run));
+    }
+    @Test void lanRangeStudentIsInterruptedWhenTheGameStarts()throws Exception {
+        var host=admin();String code=room(host,1);var player=new Client();
+        player.request("JOIN",obj().put("room_code",code).put("nickname","Đo trên một máy"));
+        player.request("READY_SET",obj().put("ready",true));
+        String run=player.request("LAN_RANGE_START",rangeOptions()).path("run_id").asText();
+        player.request("LAN_RANGE_READY",obj().put("run_id",run));
+        host.request("START_GAME",obj());
+        assertEquals("GAME_STARTED",player.event("LAN_RANGE_FINISHED").path("end_reason").asText());
+        error(host,"INVALID_STATE","LAN_RANGE_START",rangeOptions());
+    }
+    @Test void lanRangeServerStorageFailureDoesNotPretendToStart()throws Exception {
+        Files.writeString(data.resolve("lan-range"),"This path is a file, not a directory");
+        var manager=admin();error(manager,"STORAGE_ERROR","LAN_RANGE_START",rangeOptions());
+        manager.request("PING",obj());
+    }
+    @Test void lanRangeIsBoundedAndCannotBeStoppedByAnotherConnection()throws Exception {
+        var managers=new ArrayList<Client>();var runs=new ArrayList<String>();
+        for(int i=0;i<5;i++){
+            var c=new Client();c.request("REGISTER",obj().put("username","range.teacher"+i).put("display_name","Giảng viên "+i).put("password","Range-test-only-1"));
+            c.request("LOGIN",obj().put("username","range.teacher"+i).put("password","Range-test-only-1"));managers.add(c);
+            if(i<4)runs.add(c.request("LAN_RANGE_START",rangeOptions()).path("run_id").asText());
+        }
+        error(managers.get(4),"LAN_RANGE_BUSY","LAN_RANGE_START",rangeOptions());
+        error(managers.get(1),"LAN_RANGE_NOT_FOUND","LAN_RANGE_STOP",obj().put("run_id",runs.getFirst()));
+    }
     @Test void sameIpCannotJoinFromAnotherApplicationOrSpoofedIdentity()throws Exception {
         var host=admin();String code=room(host,1);var first=new Client();
         var joined=first.request("JOIN",obj().put("room_code",code).put("nickname","Học sinh đầu"));

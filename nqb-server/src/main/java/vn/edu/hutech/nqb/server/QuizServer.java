@@ -7,6 +7,8 @@ import javax.net.ssl.*;
 import java.net.*;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.Clock;
+import static vn.edu.hutech.nqb.shared.LanRangeProtocol.EndReason;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
@@ -73,6 +75,7 @@ public final class QuizServer implements AutoCloseable {
         volatile long lastSeen=connected; volatile boolean handshaken,closeAfterWrite;
         int userId,credentialVersion; String role="",playerId=""; boolean mustChange,authBusy; long rateStart; int rateCount;
         QuestionImportSession questionImport;
+        LanRangeSession range; boolean rangePrepared;
         Peer(SSLSocket socket){this.socket=socket;}
         void send(ObjectNode data){
             if(gone.get()||closeAfterWrite)return;
@@ -113,6 +116,7 @@ public final class QuizServer implements AutoCloseable {
             if(p.userId==0&&p.playerId.isEmpty())throw fail("AUTH_REQUIRED","Hãy đăng nhập hoặc tham gia phòng.");
             if(type.equals("PASSWORD_CHANGE")){manager(p);changePassword(p,id,payload);return;}
             if(p.mustChange)throw fail("PASSWORD_CHANGE_REQUIRED","Hãy đổi mật khẩu tạm trước khi tiếp tục.");
+            if(type.startsWith("LAN_RANGE_")){range(p,id,type,payload);return;}
             if(type.equals("ROOM_STATE")){p.send(envelope("ROOM_STATE_OK",id,state(p,true)));return;}
             if(type.startsWith("USER_")){admin(p);users(p,id,type,payload);return;}
             if(type.startsWith("QUESTION_")){
@@ -164,7 +168,7 @@ public final class QuizServer implements AutoCloseable {
                     player.avatar=avatars.snapshot().get(player.id);p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
                 case "READY_SET"->{Player player=student(p);waiting();player.ready=bool(payload,"ready",false);p.send(envelope(type+"_OK",id,state(p,false)));broadcastState();}
                 case "START_GAME"->{host(p);waiting();if(players.isEmpty()||players.values().stream().anyMatch(v->!v.ready||v.peer==null||v.peer.gone.get()))throw fail("NOT_READY","Cần ít nhất một thí sinh và tất cả sẵn sàng.");
-                    questions=historySessionId.isEmpty()?store.gameQuestions(owner,questionCount,questionSetId):store.historyQuestions(owner,historySessionId,questionCount);session=UUID.randomUUID().toString();started=Instant.now().toString();questionIndex=0;resultSaved=false;aborted=false;
+                    questions=historySessionId.isEmpty()?store.gameQuestions(owner,questionCount,questionSetId):store.historyQuestions(owner,historySessionId,questionCount);finishRanges(EndReason.GAME_STARTED);session=UUID.randomUUID().toString();started=Instant.now().toString();questionIndex=0;resultSaved=false;aborted=false;
                     players.values().forEach(v->{v.score=0;v.correct=0;v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;});phase=GamePhase.COUNTDOWN;deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(config.countdownMillis());
                     p.send(envelope("START_GAME_OK",id,obj()));emitAll("GAME_START",obj().put("session_id",session).put("remaining_ms",remaining()));broadcastState();}
                 case "ANSWER"->answer(p,id,request);
@@ -177,6 +181,50 @@ public final class QuizServer implements AutoCloseable {
         }catch(Failure error){p.send(envelope("ERROR",id,error.payload()));}
         catch(Exception error){System.err.println("Request failed: "+type+" / "+error.getClass().getSimpleName());p.send(envelope("ERROR",id,fail("SERVER_ERROR","Máy chủ chưa hoàn tất yêu cầu. Hãy thử lại.").payload()));}
     }
+    private void range(Peer p,String id,String type,JsonNode payload)throws Exception{
+        if(type.equals("LAN_RANGE_START")){
+            if(running())throw fail("INVALID_STATE","Không đo tầm kết nối trong lúc thi đấu.");
+            if((p.range!=null&&!p.range.finished())||peers.stream().filter(v->v.range!=null&&!v.range.finished()).count()>=LanRangeProtocol.MAX_ACTIVE_RUNS)
+                throw fail("LAN_RANGE_BUSY","Đang có lượt đo. Hãy dừng lượt cũ hoặc chờ lượt khác kết thúc.");
+            LanRangeProtocol.Options options;
+            try{options=LanRangeProtocol.parseOptions(payload);}catch(IllegalArgumentException invalid){throw fail("INVALID_INPUT",invalid.getMessage());}
+            String run=UUID.randomUUID().toString();
+            var data=LanRangeProtocol.optionsPayload(options).put("run_id",run).put("client_ip_observed",p.socket.getInetAddress().getHostAddress())
+                .put("server_ip",p.socket.getLocalAddress().getHostAddress()).put("server_port",p.socket.getLocalPort())
+                .put("loopback",p.socket.getInetAddress().isLoopbackAddress()||NetworkInterface.getByInetAddress(p.socket.getInetAddress())!=null)
+                .put("started_at",Instant.now().toString());
+            var journal=new LanRangeJournal(config.database().toAbsolutePath().getParent().resolve("lan-range"),"server",run);
+            var measuring=new LanRangeSession(run,options,p::send,journal,System::nanoTime,Clock.systemUTC());
+            p.range=measuring;p.rangePrepared=false;
+            journal.append(data.deepCopy().put("record_type","RUN_STARTED")).whenComplete((v,error)->{
+                try{worker.execute(()->{
+                    if(p.gone.get()||p.closeAfterWrite||p.range!=measuring||measuring.finished()){measuring.finish(EndReason.DISCONNECTED);return;}
+                    if(error!=null){measuring.finish(EndReason.STORAGE_ERROR);p.send(envelope("ERROR",id,fail("STORAGE_ERROR","Server không lưu được nhật ký đo.").payload()));return;}
+                    if(running()){measuring.finish(EndReason.GAME_STARTED);p.send(envelope("ERROR",id,fail("INVALID_STATE","Ván thi đã bắt đầu.").payload()));return;}
+                    p.rangePrepared=true;p.send(envelope("LAN_RANGE_START_OK",id,data));
+                });}catch(RejectedExecutionException stopped){measuring.finish(EndReason.APP_CLOSED);}
+            });
+            return;
+        }
+        var measuring=p.range;
+        if(measuring==null||!measuring.runId().equals(payload.path("run_id").asText()))
+            throw fail("LAN_RANGE_NOT_FOUND","Lượt đo không thuộc kết nối hiện tại.");
+        if(type.equals("LAN_RANGE_STOP")){p.send(envelope(type+"_OK",id,obj().put("run_id",measuring.runId())));measuring.finish(EndReason.STOPPED);return;}
+        if(type.equals("LAN_RANGE_CHALLENGE_REPLY")){
+            if(payload.path("sequence").isIntegralNumber())measuring.challengeReply(id,payload.path("sequence").asInt());return;
+        }
+        if(!p.rangePrepared||measuring.finished())throw fail("INVALID_STATE","Lượt đo chưa sẵn sàng hoặc đã kết thúc.");
+        switch(type){
+            case "LAN_RANGE_READY"->{p.send(envelope(type+"_OK",id,obj().put("run_id",measuring.runId())));measuring.start();}
+            case "LAN_RANGE_PROBE"->{
+                try{p.send(envelope(type+"_OK",id,measuring.clientProbe(integer(payload,"sequence",0,1,60))));}
+                catch(IllegalArgumentException invalid){throw fail("INVALID_INPUT",invalid.getMessage());}
+            }
+            case "LAN_RANGE_COMPLETE"->{p.send(envelope(type+"_OK",id,obj().put("run_id",measuring.runId())));measuring.clientComplete();}
+            default->throw fail("UNKNOWN_TYPE","Yêu cầu đo không được hỗ trợ.");
+        }
+    }
+    private void finishRanges(EndReason reason){for(var p:peers)if(p.range!=null)p.range.finish(reason);}
     private ObjectNode publicDirectory()throws SQLException{
         var data=obj().put("server_id",serverId).put("server_name","Quiz Battle · "+serverId.substring(0,4).toUpperCase(Locale.ROOT));var rooms=array();
         if(owner!=0){
@@ -300,6 +348,7 @@ public final class QuizServer implements AutoCloseable {
         var state=obj().put("phase",phase.name()).put("room_code",roomCode).put("room_name",roomName).put("session_id",session).put("is_owner",owner!=0&&owner==viewer.userId)
             .put("question_count",questionCount).put("duration_seconds",questionSeconds).put("question_set_id",questionSetId).put("question_set_name",questionSetName).put("connected_player_count",connected).put("ready_count",ready).put("answered_count",answered).put("remaining_ms",remaining());state.set("players",list);
         state.put("question_source_name",historySessionId.isEmpty()?(questionSetId==0?"Toàn bộ ngân hàng":questionSetName):"Từ lịch sử: "+historyRoomName);
+        state.put("max_players",config.maxPlayers()).put("server_port",port());
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
         state.put("question_number",questions.isEmpty()||phase==GamePhase.COUNTDOWN?0:questionIndex+1);
         if(viewer.userId!=0)state.set("ranking",phase==GamePhase.WAITING?array():ranking());
@@ -328,6 +377,7 @@ public final class QuizServer implements AutoCloseable {
         LOG.info("NQB_STUDENT_TRACKING "+entry);
     }
     private void detach(Peer p,String event){
+        if(p.range!=null)p.range.finish(event.equals("DISCONNECTED")?EndReason.DISCONNECTED:EndReason.STOPPED);
         var v=players.get(p.playerId);if(v==null||v.peer!=p)return;v.peer=null;v.ready=false;
         track(event,v,false);
         if(!running()){players.remove(v.id);avatars.leave(v.id);}p.playerId="";
@@ -335,6 +385,7 @@ public final class QuizServer implements AutoCloseable {
     }
     private void tick()throws SQLException{
         long now=System.nanoTime();boolean changed=false;
+        for(var p:peers)if(p.range!=null){if(p.gone.get())p.range.finish(EndReason.DISCONNECTED);else p.range.tick();}
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;
         for(var p:peers){if(now-p.lastSeen>TimeUnit.SECONDS.toNanos(20)||(p.userId==0&&p.playerId.isEmpty()&&now-p.connected>TimeUnit.SECONDS.toNanos(10)))p.close();if(p.gone.get()){detach(p,"DISCONNECTED");peers.remove(p);changed=true;}}
         if(changed)broadcastState();
@@ -360,6 +411,7 @@ public final class QuizServer implements AutoCloseable {
     private void openQuestion(){phase=GamePhase.QUESTION_ACTIVE;players.values().forEach(v->{v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;});questionOpenedAtNanos=System.nanoTime();deadline=questionOpenedAtNanos+TimeUnit.SECONDS.toNanos(questionSeconds);emitAll("QUESTION",publicQuestion());broadcastState();}
     private void abort(){phase=GamePhase.FINISHED;aborted=true;resultSaved=false;emitAll("GAME_ABORTED",obj().put("session_id",session).put("message","Ván thi đã hủy."));broadcastState();}
     private void resetRoom(){
+        finishRanges(EndReason.ROOM_CHANGED);
         // Remove closed sockets before assigning the next room code.
         players.values().removeIf(v->{
             if(v.peer!=null&&!v.peer.gone.get()&&!v.peer.closeAfterWrite)return false;
@@ -370,12 +422,16 @@ public final class QuizServer implements AutoCloseable {
         players.values().forEach(v->{v.ready=false;v.score=0;v.correct=0;v.answer="";v.answerElapsedNanos=-1;v.roundPoints=0;track("ROOM_RESET",v,!v.peer.gone.get());});
     }
     private void closeRoom(){
+        finishRanges(EndReason.ROOM_CHANGED);
         for(var v:players.values())track("ROOM_CLOSED",v,false);
         for(var v:players.values())if(v.peer!=null){v.peer.send(envelope("ROOM_CLOSED",null,obj().put("message","Giảng viên đã đóng phòng.")));v.peer.closeAfterWrite=true;}
         players.clear();avatars.clear();owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";historySessionId="";historyRoomName="";
     }
     @Override public void close(){
-        if(!closed.compareAndSet(false,true))return;discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();
+        if(!closed.compareAndSet(false,true))return;finishRanges(EndReason.APP_CLOSED);
+        var rangeFlushes=peers.stream().filter(p->p.range!=null).map(p->p.range.completion()).toArray(CompletableFuture[]::new);
+        discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();
         worker.shutdown();try{if(!worker.awaitTermination(5,TimeUnit.SECONDS))worker.shutdownNow();store.close();}catch(Exception ignored){}
+        try{CompletableFuture.allOf(rangeFlushes).get(3,TimeUnit.SECONDS);}catch(Exception ignored){}
     }
 }

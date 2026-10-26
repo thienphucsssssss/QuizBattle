@@ -48,6 +48,40 @@ class TlsQuizGatewayTest {
         var context = SSLContext.getInstance("TLS"); context.init(factory.getKeyManagers(), null, null); return context;
     }
     @FunctionalInterface private interface Handler { void run(SSLSocket socket) throws Exception; }
+    @Test void serverProbeIsAnsweredWithoutEventListenerOrAnRpcFuture() throws Exception {
+        String run=UUID.randomUUID().toString();
+        try(var peer=new Peer(valid,socket->{
+            var input=new BufferedReader(new InputStreamReader(socket.getInputStream(),StandardCharsets.UTF_8));
+            var start=JsonMessages.parse(input.readLine());
+            reply(socket,start,"LAN_RANGE_START_OK",object().put("run_id",run).put("duration_seconds",30));
+            var challenge=object().put("protocol_version",1).put("type","LAN_RANGE_CHALLENGE").put("request_id","range:"+run+":1");
+            challenge.set("payload",object().put("run_id",run).put("sequence",1));
+            socket.getOutputStream().write(JsonMessages.encode(challenge));socket.getOutputStream().flush();
+            var first=JsonMessages.parse(input.readLine());
+            var second=JsonMessages.parse(input.readLine());
+            var response=first.path("type").asText().equals("LAN_RANGE_CHALLENGE_REPLY")?first:second;
+            assertEquals("LAN_RANGE_CHALLENGE_REPLY",response.path("type").asText());
+            assertEquals("range:"+run+":1",response.path("request_id").asText());
+            assertEquals(run,response.path("payload").path("run_id").asText());
+            // A challenge must never steal this ordinary RPC's pending future.
+            var ordinary=first.path("type").asText().equals("PING")?first:second;
+            challenge.put("request_id",ordinary.path("request_id").asText());
+            socket.getOutputStream().write(JsonMessages.encode(challenge));socket.getOutputStream().flush();
+            reply(socket,ordinary,"PONG",object().put("real_reply",true));
+        });var gateway=TlsQuizGateway.connect(new Endpoint("localhost",peer.port()),trust(valid),password)){
+            assertEquals(run,gateway.request("LAN_RANGE_START",object()).get(3,TimeUnit.SECONDS).path("run_id").asText());
+            assertTrue(gateway.request("PING",object()).get(3,TimeUnit.SECONDS).path("real_reply").asBoolean());
+            peer.served.get(4,TimeUnit.SECONDS);
+        }
+    }
+    @Test void rangeProbeTimesOutWithinItsOwnDeadline() throws Exception {
+        var release=new CountDownLatch(1);
+        try(var peer=new Peer(valid,socket->{read(socket);release.await(4,TimeUnit.SECONDS);});
+            var gateway=TlsQuizGateway.connect(new Endpoint("localhost",peer.port()),trust(valid),password)){
+            var failure=assertThrows(ExecutionException.class,()->gateway.request("LAN_RANGE_PROBE",object()).get(2500,TimeUnit.MILLISECONDS));
+            assertEquals("TIMEOUT",assertInstanceOf(GatewayException.class,failure.getCause()).code());
+        }finally{release.countDown();}
+    }
     private static final class Peer implements AutoCloseable {
         final SSLServerSocket server; final CompletableFuture<Void> served;
         Peer(Path certificate, Handler handler) throws Exception {
@@ -56,7 +90,7 @@ class TlsQuizGatewayTest {
             served = new CompletableFuture<>();
             Thread.ofVirtual().start(() -> {
                 try (var socket = (SSLSocket)server.accept()) { socket.setSoTimeout(5000); socket.startHandshake(); handler.run(socket); served.complete(null); }
-                catch (Exception error) { served.completeExceptionally(error); }
+                catch (Throwable error) { served.completeExceptionally(error); }
             });
         }
         int port() { return server.getLocalPort(); }

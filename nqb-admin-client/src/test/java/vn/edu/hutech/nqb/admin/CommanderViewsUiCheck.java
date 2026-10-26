@@ -28,17 +28,33 @@ public final class CommanderViewsUiCheck {
                     set(app,"gateway",new FixtureGateway()); set(app,"user",object().put("display_name","Giảng viên kiểm thử")); set(app,"role","ADMIN");
                     call(app,"shell"); views = (CommanderViews)get(app,"commander");
                 });
+                fx(() -> checkManagementNavigation(app));
                 for (int width : new int[]{1366,1024}) {
                     int height = width == 1366 ? 768 : 640;
                     resize(app,width,height);
-                    monitor(app,width); arena(app,width);
+                    monitor(app,width);
                 }
-                System.out.println("COMMANDER_COMPONENT_UI_PASS: 1366/1024, filters, disconnected denominator, phase refresh, selected details, missing IP permissions, all ties, long names, reachable controls");
+                System.out.println("COMMANDER_COMPONENT_UI_PASS: 1366/1024, arena removed for both roles, rejected route, filters, disconnected denominator, phase refresh, long names, reachable controls");
             } catch(Throwable error) { ArcadeApplication.qaFailed(error); error.printStackTrace(); }
             finally { Platform.runLater(Platform::exit); }
         });
         try { ArcadeApplication.launchFor("MANAGE", new String[]{"--width=1366","--height=768"}); }
         finally { ArcadeApplication.qaDriver = null; }
+    }
+    private static void checkManagementNavigation(ArcadeApplication app) {
+        for (String role : new String[]{"ADMIN", "TEACHER"}) {
+            var sidebar = new ManagementSidebar(role, "Giảng viên kiểm thử", route -> { });
+            var scene = new javafx.scene.Scene(sidebar);
+            scene.getRoot().applyCss(); scene.getRoot().layout();
+            var labels = sidebar.lookupAll(".button").stream().map(node -> ((Button)node).getText()).toList();
+            check(!labels.contains("Đấu trường thí sinh"), role + " still exposes the removed contestant arena");
+            check(labels.containsAll(java.util.List.of("Tổng quan", "Ngân hàng câu hỏi", "Phòng thi", "Giám sát thi đấu", "Lịch sử & Bảng xếp hạng", "Cài đặt", "Đổi mật khẩu", "Đăng xuất")), role + " lost a remaining navigation action");
+            check(labels.contains("Người dùng") == role.equals("ADMIN"), "User management role restriction changed");
+        }
+        try {
+            views.open("Đấu trường thí sinh");
+            throw new AssertionError("Removed contestant arena route still opens");
+        } catch (IllegalArgumentException expected) { }
     }
     private static void monitor(ArcadeApplication app,int width)throws Exception {
         fx(() -> { publish(app,fixture("QUESTION_ACTIVE")); views.open("Giám sát thi đấu"); });
@@ -66,40 +82,6 @@ public final class CommanderViewsUiCheck {
             snapshot(app,"monitor-viewer-"+width);set(app,"role","ADMIN");
         });
     }
-    private static void arena(ArcadeApplication app,int width)throws Exception {
-        fx(() -> {publish(app,fixture("SHOW_RANKING"));views.open("Đấu trường thí sinh");});
-        fx(() -> {
-            layout(app); var table=table(app);
-            check(app.qaScene().getRoot().lookupAll(".commander-leader").size()==3,"Server's 1/1/3 leaders were dropped or invented");
-            table.getSelectionModel().select(0);
-            check(((Label)app.qaScene().lookup("#arena-player-details")).getText().contains("192.168.1.21"),"Selected player lacks Server-provided IP");
-            var search=(TextField)app.qaScene().lookup("#arena-search");search.setText("quoc");
-            check(table.getItems().size()==1,"Unaccented Vietnamese search failed");
-            check(table.getSelectionModel().getSelectedItem()==null,"Hidden selection still retained another player's details");
-            table.getSelectionModel().select(0);
-            check(((Label)app.qaScene().lookup("#arena-player-details")).getText().contains("192.168.1.22"),"Filtered row details use another player's IP");
-            publish(app,snapshot.deepCopy().put("phase","FINISHED"));
-            check(((Label)app.qaScene().lookup("#arena-player-details")).getText().contains("Đã kết thúc"),"Phase-only update left stale selected-player status");
-            search.clear();
-            snapshot(app,"arena-ranked-"+width);bounds(app,"#arena-players");bounds(app,"#arena-player-details");
-            check(table.getHeight()>=168,"Compact arena must fit two complete participant rows: "+table.getHeight());
-            snapshot.put("is_owner",false);for(var player:snapshot.path("players"))((ObjectNode)player).remove("ip_address");
-            set(app,"role","TEACHER");publish(app,snapshot);
-            check(!((Label)app.qaScene().lookup("#arena-player-details")).getText().contains("192.168"),"Role-restricted IP leaked from old selected row");
-            snapshot(app,"arena-viewer-"+width);
-            var many=fixture("SHOW_RANKING").put("connected_player_count",12);many.withArray("players").removeAll();many.withArray("ranking").removeAll();
-            for(int i=0;i<12;i++) {
-                var player=object().put("player_id","tie-"+i).put("nickname","Thí sinh đồng hạng có tên dài "+i).put("avatar_id","quizling-"+(i+1)).put("connected",true).put("score",300).put("correct_count",3);
-                many.withArray("players").add(player);many.withArray("ranking").add(player.deepCopy().put("rank",1));
-            }
-            publish(app,many);layout(app);
-            check(app.qaScene().getRoot().lookupAll(".commander-leader").size()==12,"Many tied leaders truncated");
-            bounds(app,"#arena-players");bounds(app,"#arena-player-details");snapshot(app,"arena-many-ties-"+width);
-            publish(app,object().put("phase","WAITING"));
-            check(table(app).getItems().isEmpty(),"Closed room retained players");snapshot(app,"arena-empty-"+width);
-            set(app,"role","ADMIN");
-        });
-    }
     private static ObjectNode fixture(String phase) {
         var room=object().put("phase",phase).put("room_code","TEST42").put("room_name","Lớp Lập trình mạng · Kiểm thử giao diện").put("is_owner",true)
             .put("question_number",2).put("question_count",10).put("remaining_ms",12000).put("connected_player_count",3).put("ready_count",2).put("answered_count",2);
@@ -113,7 +95,7 @@ public final class CommanderViewsUiCheck {
         return room;
     }
     private static void publish(ArcadeApplication app,ObjectNode next) {snapshot=next;set(app,"room",next);views.update(next);}
-    private static TableView<?> table(ArcadeApplication app) {return (TableView<?>)app.qaScene().lookup("#monitor-players")!=null?(TableView<?>)app.qaScene().lookup("#monitor-players"):(TableView<?>)app.qaScene().lookup("#arena-players");}
+    private static TableView<?> table(ArcadeApplication app) {return (TableView<?>)app.qaScene().lookup("#monitor-players");}
     private static void bounds(ArcadeApplication app,String selector) {
         layout(app);Node node=app.qaScene().lookup(selector);var b=node.localToScene(node.getBoundsInLocal());
         check(b.getMinX()>=0&&b.getMaxX()<=app.qaScene().getWidth()+1&&b.getMinY()>=0&&b.getMaxY()<=app.qaScene().getHeight()+1,"Clipped "+selector+": "+b);

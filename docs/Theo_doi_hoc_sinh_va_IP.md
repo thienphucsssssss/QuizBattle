@@ -19,7 +19,7 @@ Sau khi build mã nguồn mới, khởi động lại Server bằng bản vừa 
 1. Build bản mới bằng `mvn -B -ntp install` hoặc chọn **1** trong `run.bat`.
 2. Khởi động lại Server và Client quản lý bằng bản vừa build.
 3. Đăng nhập **Admin** hoặc tài khoản **giảng viên chủ phòng**.
-4. Mở **Giám sát thi đấu** hoặc **Đấu trường thí sinh**. Phía trên bảng hiển thị tên/mã phòng; cột **Địa chỉ IP** hiển thị IP của từng học sinh bên cạnh biệt danh và trạng thái.
+4. Mở **Giám sát thi đấu**. Phía trên bảng hiển thị tên/mã phòng; cột **Địa chỉ IP** hiển thị IP của từng học sinh bên cạnh biệt danh và trạng thái.
 
 Giảng viên không sở hữu phòng vẫn xem theo quyền giám sát hiện có, nhưng cột IP hiển thị `—`. Học sinh, danh sách phòng LAN, màn trình chiếu và bảng xếp hạng công khai không nhận địa chỉ IP. Client quản lý mới kết nối Server cũ cũng hiển thị `—`; cần nâng cấp/khởi động lại Server để nhận dữ liệu.
 

@@ -6,7 +6,6 @@ import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import java.util.*;
@@ -21,28 +20,21 @@ final class CommanderViews {
     private String page = "";
     private Label phase, roomInfo, summary, submitted, questionCount, matches, timer;
     private TableView<JsonNode> players;
-    private TextField search;
-    private ComboBox<String> filter;
     private Button start, abort, projection;
-    private Label progressCaption, connections, round, actionHint, visibleCount, detailName, detailMeta, detailStats;
+    private Label progressCaption, connections, round, actionHint, visibleCount;
     private ProgressBar completion;
-    private FlowPane leaders;
-    private VBox leaderArea;
-    private ScrollPane leaderScroll;
-    private HBox detailIdentity;
     private final Map<CommanderModel.Filter, ToggleButton> quickButtons = new EnumMap<>(CommanderModel.Filter.class);
     private CommanderModel.Filter quickFilter = CommanderModel.Filter.ALL;
-    private String leadersKey = "";
-    private boolean updatingPlayers;
     private long deadline;
 
     CommanderViews(ArcadeApplication app) { this.app = app; }
 
     void open(String page) {
-        this.page = page; players = null; search = null; filter = null; start = abort = projection = null;
-        completion = null; leaders = null; detailIdentity = null; quickButtons.clear(); quickFilter = CommanderModel.Filter.ALL; leadersKey = "";
+        if (!List.of("Tổng quan", "Giám sát thi đấu", "Cài đặt").contains(page)) throw new IllegalArgumentException("Unknown management page");
+        this.page = page; players = null; start = abort = projection = null;
+        completion = null; quickButtons.clear(); quickFilter = CommanderModel.Filter.ALL;
         layout = new BorderPane(); layout.setId("commander-workspace");
-        if (page.equals("Giám sát thi đấu") || page.equals("Đấu trường thí sinh")) layout.getStyleClass().add("commander-live");
+        if (page.equals("Giám sát thi đấu")) layout.getStyleClass().add("commander-live");
         phase = text("Đang tải phòng…", "status"); roomInfo = text("", "muted"); summary = text("", "muted");
         submitted = text("", "subtitle"); timer = text("—", "subtitle");
         var refresh = button("Làm mới", "quiet", this::load);
@@ -53,7 +45,6 @@ final class CommanderViews {
         switch (page) {
             case "Tổng quan" -> overview();
             case "Giám sát thi đấu" -> monitor();
-            case "Đấu trường thí sinh" -> arena();
             case "Cài đặt" -> settings();
             default -> throw new IllegalArgumentException("Unknown management page");
         }
@@ -63,7 +54,6 @@ final class CommanderViews {
         return switch (page) {
             case "Tổng quan" -> "Ngân hàng của bạn và tình hình phòng thi trong mạng LAN.";
             case "Giám sát thi đấu" -> "Theo dõi kết nối, tiến độ nộp bài và điều khiển ván thi.";
-            case "Đấu trường thí sinh" -> "Danh sách thí sinh, trạng thái tham gia và bảng điểm của phòng hiện tại.";
             default -> "Quản lý tài khoản và tùy chọn trải nghiệm trên máy này.";
         };
     }
@@ -81,7 +71,7 @@ final class CommanderViews {
     }
     private void monitor() {
         players = table("monitor-players");
-        players.getColumns().addAll(List.of(identityColumn(true), badgeColumn("Kết nối", p -> !app.managementConnected() ? "Chưa xác định" : p.path("connected").asBoolean() ? "Đang kết nối" : "Mất kết nối", 135),
+        players.getColumns().addAll(List.of(identityColumn(), badgeColumn("Kết nối", p -> !app.managementConnected() ? "Chưa xác định" : p.path("connected").asBoolean() ? "Đang kết nối" : "Mất kết nối", 135),
             badgeColumn("Tiến độ", this::playerStatus, 160), numberColumn("Điểm", p -> p.path("score").asText("—"), 80)));
         submitted.setId("monitor-submitted");
         submitted.getStyleClass().add("commander-value");
@@ -115,36 +105,6 @@ final class CommanderViews {
         var primaryActions = new FlowPane(8,8,start,projection,button("Mở phòng thi", "quiet", app::roomView));
         var actions = new BorderPane(primaryActions); actions.setRight(abort); BorderPane.setMargin(abort,new Insets(0,0,0,20));
         var footer = column(8, actionHint, actions); footer.getStyleClass().add("commander-footer"); layout.setBottom(footer);
-    }
-    private void arena() {
-        search = new TextField(); search.setId("arena-search"); search.setPromptText("Tìm thí sinh theo biệt danh…"); search.setAccessibleText("Tìm thí sinh");
-        filter = new ComboBox<>(FXCollections.observableArrayList("Tất cả thí sinh","Đang kết nối","Mất kết nối","Sẵn sàng")); filter.setValue("Tất cả thí sinh"); filter.setAccessibleText("Lọc trạng thái thí sinh");
-        summary.setId("arena-summary");
-        filter.setId("arena-filter");
-        var searchLabel = text("Tìm thí sinh", "caption"); searchLabel.setLabelFor(search);
-        var statusLabel = text("Trạng thái", "caption"); statusLabel.setLabelFor(filter);
-        var searchField = column(3, searchLabel, search); var statusField = column(3, statusLabel, filter); filter.setMaxWidth(Double.MAX_VALUE);
-        var tools = row(12,searchField,statusField); HBox.setHgrow(searchField,Priority.ALWAYS); statusField.setMinWidth(170);
-        tools.getStyleClass().add("commander-tools");
-        leaders = new FlowPane(12,8); leaders.setId("arena-leaders"); leaders.getStyleClass().add("commander-leaders");
-        leaderScroll = scroll(leaders); leaderScroll.setId("arena-leaders-scroll"); leaderScroll.setPrefHeight(64); leaderScroll.setMinHeight(0); leaderScroll.setMaxHeight(64);
-        leaderArea = column(6,text("Đang dẫn đầu", "commander-section-title"),leaderScroll); leaderArea.setVisible(false); leaderArea.setManaged(false);
-        players = table("arena-players");
-        var rankColumn = numberColumn("Hạng", this::rank, 62); rankColumn.getStyleClass().add("commander-rank-cell");
-        players.getColumns().addAll(List.of(rankColumn, identityColumn(false), badgeColumn("Trạng thái",this::playerStatus,150),
-            numberColumn("Điểm",p -> p.path("score").asText("—"),85),numberColumn("Câu đúng",p -> p.path("correct_count").asText("—"),85)));
-        players.getSelectionModel().selectedItemProperty().addListener((o,before,after) -> { if (!updatingPlayers) updateDetails(); });
-        var content = new BorderPane(players); content.setTop(column(8,leaderArea,tools,summary)); BorderPane.setMargin(players,new Insets(12,0,0,0));layout.setCenter(content);
-        detailName = text("Chọn thí sinh để xem chi tiết", "commander-player-name");
-        detailName.setWrapText(false); detailName.setMaxWidth(Double.MAX_VALUE);
-        detailMeta = text("Địa chỉ IP và kết nối được cung cấp theo quyền xem phòng.", "muted"); detailMeta.setId("arena-player-details");
-        detailStats = text("", "muted"); detailStats.setId("arena-player-stats");
-        var detailText = column(3, detailName, detailMeta); HBox.setHgrow(detailText, Priority.ALWAYS);
-        detailStats.setMaxWidth(220); detailStats.setAlignment(Pos.CENTER_RIGHT);
-        detailIdentity = row(16, detailText, detailStats); detailIdentity.getStyleClass().add("commander-player-detail");
-        var note = text("Điểm và hạng cập nhật sau mỗi câu được chấm. Bộ lọc chỉ thay đổi danh sách đang xem.","muted");
-        var footer = column(8, detailIdentity, note); footer.getStyleClass().add("commander-footer");layout.setBottom(footer);
-        search.textProperty().addListener((o,before,after) -> updatePlayers()); filter.setOnAction(e -> updatePlayers());
     }
     private void settings() {
         var form = column(18, text(app.displayName(),"subtitle"),text(app.accountRole().equals("ADMIN") ? "Quản trị viên" : "Giảng viên","muted"),new Separator(),
@@ -190,7 +150,7 @@ final class CommanderViews {
             quickButtons.get(CommanderModel.Filter.OFFLINE).setText("Mất kết nối · " + (connected ? Integer.toString(counts.offline()) : "—"));
             quickButtons.forEach((kind, toggle) -> toggle.setDisable(kind != CommanderModel.Filter.ALL && (!connected || !hasRoom || state.equals("COUNTDOWN"))));
             tick(); updatePlayers();
-        } else if (page.equals("Đấu trường thí sinh")) { updateLeaders(room); updatePlayers(); }
+        }
     }
     void tick() {
         if(layout==null || layout.getScene()==null || !page.equals("Giám sát thi đấu"))return;
@@ -203,64 +163,22 @@ final class CommanderViews {
     private void updatePlayers() {
         if (players == null || layout.getScene() == null) return;
         JsonNode room = app.roomSnapshot();
-        var selectedFilter = filter == null ? quickFilter : switch (filter.getValue()) {
-            case "Đang kết nối" -> CommanderModel.Filter.ONLINE;
-            case "Mất kết nối" -> CommanderModel.Filter.OFFLINE;
-            case "Sẵn sàng" -> CommanderModel.Filter.READY;
-            default -> CommanderModel.Filter.ALL;
-        };
-        var values = CommanderModel.players(room, selectedFilter, search == null ? "" : search.getText(), page.equals("Đấu trường thí sinh"));
+        var values = CommanderModel.players(room, quickFilter);
         String selectedId=players.getSelectionModel().getSelectedItem()==null?"":players.getSelectionModel().getSelectedItem().path("player_id").asText();
-        updatingPlayers = true;
         if (!players.getItems().equals(values)) players.setItems(FXCollections.observableArrayList(values));
         // Phase and connection state can change while a player's JSON stays equal.
         // Recompute visible cell values that depend on the surrounding room state.
         players.refresh();
         values.stream().filter(p->p.path("player_id").asText().equals(selectedId)).findFirst().ifPresent(p->players.getSelectionModel().select(p));
         if (!selectedId.isEmpty() && values.stream().noneMatch(p -> p.path("player_id").asText().equals(selectedId))) players.getSelectionModel().clearSelection();
-        updatingPlayers = false;
-        players.setPlaceholder(text(room.path("players").isEmpty()?"Chưa có thí sinh tham gia. Mở Phòng thi để mời thí sinh.":"Không có thí sinh phù hợp. Thử bộ lọc hoặc biệt danh khác.","muted"));
-        if(page.equals("Đấu trường thí sinh")) {
-            summary.setText(values.size()+"/"+room.path("players").size()+" thí sinh · "+(app.managementConnected()?room.path("connected_player_count").asInt()+" đang kết nối":"Mất kết nối máy chủ · dữ liệu lần cập nhật cuối"));
-            updateDetails();
-        } else visibleCount.setText(values.size() + "/" + room.path("players").size() + " thí sinh");
+        players.setPlaceholder(text(room.path("players").isEmpty()?"Chưa có thí sinh tham gia. Mở Phòng thi để mời thí sinh.":"Không có thí sinh phù hợp. Thử bộ lọc khác.","muted"));
+        visibleCount.setText(values.size() + "/" + room.path("players").size() + " thí sinh");
     }
     private String playerStatus(JsonNode player) {
         return CommanderModel.status(app.roomSnapshot(), player, app.managementConnected());
     }
-    private void updateLeaders(JsonNode room) {
-        var entries = CommanderModel.leaders(room);
-        String key = entries.toString();
-        leaderArea.setVisible(!entries.isEmpty()); leaderArea.setManaged(!entries.isEmpty());
-        leaderArea.setOpacity(app.managementConnected() ? 1 : .65);
-        if (key.equals(leadersKey)) return;
-        leadersKey = key; leaders.getChildren().clear();
-        for (var entry : entries) {
-            var name = text(entry.path("nickname").asText(), "commander-player-name"); name.setWrapText(false); name.setTooltip(new Tooltip(name.getText())); name.setMaxWidth(135);
-            var identity = column(3, name, text(entry.path("score").asText("—") + " điểm", "commander-leader-score")); HBox.setHgrow(identity, Priority.ALWAYS);
-            var place = text("#" + entry.path("rank").asInt(), "commander-leader-rank"); place.setWrapText(false); place.setMinWidth(34);
-            var item = row(8, place, QuizlingArt.avatar(entry.path("avatar_id").asText(), 42), identity);
-            item.getStyleClass().add("commander-leader"); item.setPrefWidth(212); item.setMaxWidth(212);
-            item.setAccessibleText("Hạng " + entry.path("rank").asInt() + ", " + name.getText() + ", " + entry.path("score").asText("—") + " điểm");
-            leaders.getChildren().add(item);
-        }
-        leaderScroll.setVvalue(0);
-    }
-    private void updateDetails() {
-        if (detailIdentity == null) return;
-        var player = players.getSelectionModel().getSelectedItem();
-        detailStats.setVisible(player != null); detailStats.setManaged(player != null);
-        if (player == null) {
-            detailName.setText("Chọn thí sinh để xem chi tiết"); detailMeta.setText("Địa chỉ IP và kết nối được cung cấp theo quyền xem phòng.");
-            return;
-        }
-        detailName.setText(player.path("nickname").asText()); detailName.setTooltip(new Tooltip(detailName.getText()));
-        detailMeta.setText("IP: " + player.path("ip_address").asText("không được cung cấp") + " · " + playerStatus(player));
-        detailStats.setText("Hạng " + rank(player) + " · " + player.path("score").asText("—") + " điểm · " + player.path("correct_count").asText("—") + " câu đúng" + (app.managementConnected() ? "" : " · dữ liệu lần cập nhật cuối"));
-    }
-    private String rank(JsonNode player) { int rank=CommanderModel.rank(app.roomSnapshot(), player);return rank==Integer.MAX_VALUE?"—":"#"+rank; }
-    private TableColumn<JsonNode, JsonNode> identityColumn(boolean showIp) {
-        var column = new TableColumn<JsonNode, JsonNode>(showIp ? "Thí sinh / Địa chỉ IP" : "Thí sinh");
+    private TableColumn<JsonNode, JsonNode> identityColumn() {
+        var column = new TableColumn<JsonNode, JsonNode>("Thí sinh / Địa chỉ IP");
         column.setCellValueFactory(c -> new ReadOnlyObjectWrapper<>(c.getValue())); column.setPrefWidth(260); column.setMinWidth(180); column.setSortable(false);
         column.setCellFactory(c -> new TableCell<>() {
             @Override protected void updateItem(JsonNode player, boolean empty) {
@@ -268,9 +186,9 @@ final class CommanderViews {
                 if (empty || player == null) return;
                 var name = text(player.path("nickname").asText(), "commander-player-name"); name.setWrapText(false); name.setMaxWidth(Double.MAX_VALUE);
                 var identity = column(3, name); HBox.setHgrow(identity, Priority.ALWAYS);
-                if (showIp) identity.getChildren().add(text(player.path("ip_address").asText("IP không được cung cấp"), "commander-ip"));
+                identity.getChildren().add(text(player.path("ip_address").asText("IP không được cung cấp"), "commander-ip"));
                 var avatar = QuizlingArt.avatar(player.path("avatar_id").asText(), 40);
-                setGraphic(row(10, avatar, identity)); setTooltip(new Tooltip(name.getText() + (showIp ? "\n" + player.path("ip_address").asText("IP không được cung cấp") : "")));
+                setGraphic(row(10, avatar, identity)); setTooltip(new Tooltip(name.getText() + "\n" + player.path("ip_address").asText("IP không được cung cấp")));
             }
         });
         return column;

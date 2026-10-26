@@ -23,7 +23,7 @@ final class ManagementSidebar extends VBox {
         add(menu, "Ngân hàng", "Ngân hàng câu hỏi", "M6 3H17V15H6Z M3 6V18H14 M9 7H14 M9 11H13", navigate);
         add(menu, "Phòng thi", "Phòng thi", "M3 17H17 M5 17V3H15V17 M8 6H12 M8 9H12 M8 12H12", navigate);
         add(menu, "Giám sát thi đấu", "Giám sát thi đấu", "M3 17V12 M8 17V9 M13 17V6 M18 17V2 M3 8L8 5L12 7L18 2", navigate);
-        add(menu, "Đấu trường thí sinh", "Đấu trường thí sinh", "M5 5H15L18 14Q18 17 15 15L12 12H8L5 15Q2 17 2 14Z M5 8V12 M3 10H7 M13 8H14 M15 11H16", navigate);
+        add(menu, "Đo tầm kết nối LAN", "Đo tầm kết nối LAN", "M2 7H18V14H2Z M5 7V10 M8 7V12 M11 7V10 M14 7V12", navigate);
         add(menu, "Lịch sử", "Lịch sử & Bảng xếp hạng", "M3 17V10H7V17Z M8 17V3H12V17Z M13 17V7H17V17Z", navigate);
         if (role.equals("ADMIN")) add(menu, "Người dùng", "Người dùng", "M13 6A3 3 0 1 1 7 6A3 3 0 1 1 13 6 M4 17V15Q4 11 10 11Q16 11 16 15V17", navigate);
         add(menu, "Cài đặt", "Cài đặt", "M3 5H17 M3 10H17 M3 15H17 M7 3V7 M13 8V12 M8 13V17", navigate);

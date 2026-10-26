@@ -75,7 +75,7 @@ Khởi động lại cả Server và Client từ bản source vừa build để 
 
 Thông báo **“Yêu cầu không được hỗ trợ”** khi tải bộ câu hỏi nghĩa là Server đang kết nối chưa có API này. Build xong không thay mã đang nằm trong tiến trình Java đã chạy: cần tắt cửa sổ Server cũ, mở lại Server từ cùng thư mục dự án/bộ cài với Client, đợi `NQB_SERVER_READY`, rồi mở và đăng nhập lại Client. Không cần xóa database, tạo lại tài khoản hay nhập lại câu hỏi.
 
-`run.bat` hiện kiểm tra dấu vân tay của source, cấu hình build và bản biên dịch thay vì chỉ nhìn dấu `ready` cũ. Khi source hoặc bản biên dịch thay đổi, launcher tự build lại trước khi chạy. Thông báo trên Client cũng hướng dẫn cập nhật/khởi động lại Server; form dừng trạng thái đang tải và chặn lưu khi chưa tải được bộ.
+`run.bat` chỉ tự build khi chưa chuẩn bị thành công hoặc thiếu JAR/classes. Các lần mở sau dùng lại bản đã build, kể cả khi source thay đổi. Sau khi cập nhật source, chọn **1** hoặc chạy `run.bat build`, rồi khởi động lại cả Server và Client để áp dụng. Thông báo trên Client cũng hướng dẫn cập nhật/khởi động lại Server; form dừng trạng thái đang tải và chặn lưu khi chưa tải được bộ.
 
 ## Kiểm chứng bản cập nhật
 

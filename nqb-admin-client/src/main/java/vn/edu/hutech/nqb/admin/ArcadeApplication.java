@@ -36,6 +36,8 @@ public final class ArcadeApplication extends Application {
     private final MusicSlots music = new MusicSlots();
     private final Preferences prefs = Preferences.userNodeForPackage(ArcadeApplication.class);
     private QuizGateway gateway;
+    private LanRangeClient lanRangeClient;
+    private LanRangeView lanRangeView;
     private LanEntryPane lanEntry;
     private record OpenedConnection(LanEntryPane.Target target,TlsQuizGateway gateway) { }
     private JsonNode user = object(), room = object(), question = object(), result = object();
@@ -105,7 +107,7 @@ public final class ArcadeApplication extends Application {
         if (qaDriver != null) qaDriver.accept(this);
     }
     @Override public void stop() { if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); }
-    private void closeGateway() { music.stop(); connectionGeneration++; if(connectionPulse!=null)connectionPulse.stop(); pingPending=false; sidebar=null; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
+    private void closeGateway() { music.stop(); connectionGeneration++; if(lanRangeView!=null){lanRangeView.close();lanRangeView=null;} if(lanRangeClient!=null){lanRangeClient.close();lanRangeClient=null;} if(connectionPulse!=null)connectionPulse.stop(); pingPending=false; sidebar=null; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
     private void welcome() {
         if (pulse != null) pulse.stop();
         if (projection != null) projection.close();
@@ -226,7 +228,15 @@ public final class ArcadeApplication extends Application {
     private static void authFieldError(Label label, String message) { label.setText(message); label.setVisible(!message.isEmpty()); label.setManaged(!message.isEmpty()); }
     private void attachEvents() {
         int token = connectionGeneration;
-        gateway.onEvent(event -> Platform.runLater(() -> { if (token == connectionGeneration) event(event); }));
+        if(lanRangeClient!=null)lanRangeClient.close();
+        var range=new LanRangeClient(gateway,LanRangeReport.defaultDirectory(),snapshot->Platform.runLater(()->{
+            if(token==connectionGeneration&&lanRangeView!=null)lanRangeView.update(snapshot);
+        }));
+        lanRangeClient=range;
+        gateway.onEvent(event -> {
+            range.onEvent(event);
+            Platform.runLater(() -> { if (token == connectionGeneration) event(event); });
+        });
     }
     private void shell() {
         if (gateway == null || user.isEmpty()) { welcome(); return; }
@@ -252,6 +262,7 @@ public final class ArcadeApplication extends Application {
     }
     private void openManagement(String page) {
         switch(page) {
+            case "Đo tầm kết nối LAN" -> openLanRange();
             case "Phòng thi" -> roomView();case "Ngân hàng" -> bankView();case "Lịch sử" -> historyView();case "Người dùng" -> usersView();
             case "Mật khẩu" -> passwordChange(false);case "Đăng xuất" -> logout();default -> commander.open(page);
         }
@@ -334,6 +345,12 @@ public final class ArcadeApplication extends Application {
         });
     }
     void openSettings() { settings(); }
+    void openLanRange() {
+        if(lanRangeView==null)lanRangeView=new LanRangeView(stage,()->lanRangeClient,LanRangeReport.defaultDirectory(),
+            ()->gateway!=null&&!disconnected&&!user.isEmpty()&&!passwordRequired&&!isRunning(),this::roomView);
+        if(role.equals("STUDENT"))lanRangeView.show();
+        else { showManagement("Đo tầm kết nối LAN",lanRangeView.content());lanRangeView.activate(); }
+    }
     void openProjection() { showProjection(); }
     void startManagedGame() { call("START_GAME",object(),ignored->{}); }
     void abortManagedGame() { if(confirm("Hủy ván thi?","Ván bị hủy không tạo kết quả hoàn thành."))call("ABORT_GAME",object(),ignored->{}); }
@@ -366,7 +383,7 @@ public final class ArcadeApplication extends Application {
         var header = row(12, text(student ? "Phòng chờ" : "Phòng thi", "title"), space());
         if (!student) header.getChildren().add(button("Trình chiếu ↗", "quiet", this::showProjection));
         else header.getChildren().add(button("Rời phòng", "quiet", this::logout));
-        var roomCode = text(room.path("room_code").asText().isBlank() ? "— — —" : room.path("room_code").asText(), "room-code");
+        var roomCode = text(room.path("room_code").asText().isBlank() ? "— — —" : room.path("room_code").asText(), "room-code");roomCode.setId("lobby-room-code");
         var codeArea = column(4, text("MÃ PHÒNG", "caption"), roomCode, text(room.path("room_name").asText("Chưa có phòng"), "subtitle"));
         var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"), text("Bộ câu hỏi: "+room.path("question_source_name").asText(room.path("question_set_id").asInt()==0?"Toàn bộ ngân hàng":room.path("question_set_name").asText()),"caption"), text("Đúng: 50–100 điểm · Trả lời càng nhanh, điểm càng cao.", "caption"));
         if (!student) {
@@ -374,12 +391,13 @@ public final class ArcadeApplication extends Application {
             configSummary.getChildren().add(row(12, configure, button("Sao chép mã", "quiet", () -> { ClipboardContent clipboard = new ClipboardContent(); clipboard.putString(room.path("room_code").asText()); Clipboard.getSystemClipboard().setContent(clipboard); notice("Đã sao chép mã phòng.", false); })));
         }
         var board = new GridPane(); board.setHgap(40); board.add(codeArea, 0, 0); board.add(configSummary, 1, 0); GridPane.setHgrow(configSummary, Priority.ALWAYS); board.getStyleClass().add("room-banner");
-        var people = column(10, text("NGƯỜI CHƠI  ·  " + room.path("ready_count").asInt() + "/" + room.path("connected_player_count").asInt() + " sẵn sàng", "caption"));
-        var tiles = new FlowPane(12, 12);
-        for (JsonNode player : room.path("players")) {
-            String n = player.path("nickname").asText();
-            var entry = column(4, QuizlingArt.avatar(player.path("avatar_id").asText(), 108), text(n, "subtitle"), text(player.path("ready").asBoolean() ? "✓ Sẵn sàng" : "Đang chuẩn bị", "muted"));
-            entry.setAlignment(Pos.CENTER); entry.setPrefWidth(185); entry.getStyleClass().add("player-seat"); tiles.getChildren().add(entry);
+        var people=column(10,text("NGƯỜI CHƠI  ·  "+room.path("ready_count").asInt()+"/"+room.path("connected_player_count").asInt()+" sẵn sàng","caption"));
+        var tiles=new FlowPane(12,12);tiles.setId("room-players");
+        for(JsonNode player:room.path("players")){
+            String playerState=disconnected?"Chưa xác nhận":!player.path("connected").asBoolean()?"Mất kết nối":player.path("ready").asBoolean()?"✓ Sẵn sàng":"Đang chuẩn bị";
+            var status=text(playerState,"muted","room-player-state");
+            var entry=column(4,QuizlingArt.avatar(player.path("avatar_id").asText(),108),text(player.path("nickname").asText(),"subtitle"),status);
+            entry.setAlignment(Pos.CENTER);entry.setPrefWidth(185);entry.getStyleClass().add("player-seat");tiles.getChildren().add(entry);
         }
         people.getChildren().add(tiles);
         var body = column(24, header, board, people); body.setPadding(new Insets(0, 0, 16, 0));
@@ -394,6 +412,7 @@ public final class ArcadeApplication extends Application {
         } else {
             boolean owner = room.path("is_owner").asBoolean();
             var start = button("Bắt đầu ván thi   →", "ink-button", () -> call("START_GAME", object(), ignored -> { }));
+            start.setId("room-start-game");
             start.setDisable(!owner || room.path("connected_player_count").asInt() < 1 || room.path("ready_count").asInt() != room.path("connected_player_count").asInt() || !room.path("phase").asText().equals("WAITING"));
             var reset = button("Reset phòng", "quiet", () -> { if (confirm("Reset phòng?", "Điểm và trạng thái sẵn sàng sẽ được xóa.")) call("ROOM_RESET", object(), value -> { room = value; lobby(); }); }); reset.setDisable(!owner || disconnected);
             var close = button("Đóng phòng", "danger", () -> { if (confirm("Đóng phòng?", "Người chơi sẽ rời phòng; giảng viên khác có thể tổ chức.")) call("ROOM_CLOSE", object(), value -> { room = value; lobby(); }); }); close.setDisable(!owner || disconnected);
@@ -508,6 +527,8 @@ public final class ArcadeApplication extends Application {
             case "DISCONNECTED":
                 music.stop();
                 disconnected = true; if (pulse != null) pulse.stop(); answerButtons.forEach(b -> b.setDisable(true));
+                if(lanRangeView!=null)lanRangeView.connectionChanged();
+                root.lookupAll(".room-player-state").forEach(node->{if(node instanceof Label label)label.setText("Chưa xác nhận");});
                 if (avatarDialog != null) avatarDialog.close();
                 connectionLabel.setText("Mất kết nối"); feedback.setText(role.equals("STUDENT") ? "Mất kết nối. Bạn có thể tham gia lại ở ván sau." : "Mất kết nối. Đăng nhập lại để tiếp tục quản lý phòng."); feedback.setManaged(true); feedback.setVisible(true); sfx.play(SfxSlots.Cue.CONNECTION_DOWN);
                 if(connectionPulse!=null)connectionPulse.stop();if(sidebar!=null)sidebar.connection(false,null);
@@ -713,6 +734,10 @@ public final class ArcadeApplication extends Application {
         var musicStatus = text(music.status(), "muted"); musicStatus.setId("music-status");
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));
         var content = column(16, reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
+        if(role.equals("STUDENT")){
+            var rangeButton=button("Đo tầm kết nối LAN","quiet",this::openLanRange);rangeButton.setId("options-lan-range-open");
+            content.getChildren().addAll(new Separator(),text("Mạng LAN","subtitle"),rangeButton);
+        }
         var scroller = scroll(content); scroller.setPrefViewportWidth(460); scroller.setPrefViewportHeight(Math.min(410, Math.max(240, stage.getHeight() - 240)));
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); styleDialog(dialog); dialog.setHeaderText("Tùy chọn"); dialog.setResizable(true);
         dialog.getDialogPane().setContent(scroller);

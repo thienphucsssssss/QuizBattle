@@ -36,12 +36,15 @@ class SourceLauncherTest {
         Files.writeString(bin.resolve("javac.cmd"),"@echo off\r\nexit /b 0\r\n");
         Files.writeString(bin.resolve("mvn.cmd"),"""
             @echo off
+            if exist tmp\\fail-launcher-cache for %%A in (%*) do if "%%~A"=="exec:help" exit /b 1
             for %%A in (%*) do if "%%~A"=="install" goto build
             echo NQB_ADMIN_PRESENT
             exit /b 0
             :build
+            if exist tmp\\fail-build exit /b 1
             echo built>tmp\\maven-build-ran
             for %%M in (nqb-shared nqb-server nqb-client-core nqb-admin-client nqb-player-client) do (
+                if not exist %%M\\target\\classes mkdir %%M\\target\\classes
                 echo new jar>%%M\\target\\%%M-fixture.jar
                 echo new class>%%M\\target\\classes\\Main.class
             )
@@ -50,30 +53,74 @@ class SourceLauncherTest {
         return root;
     }
     private void launch(Path root) throws Exception {
-        var builder=new ProcessBuilder("cmd.exe","/d","/c","run.bat","setup").directory(root.toFile()).redirectErrorStream(true);
+        launch(root,"setup",0);
+    }
+    private void launch(Path root,String command,int expectedExit) throws Exception {
+        var builder=new ProcessBuilder("cmd.exe","/d","/c","run.bat",command).directory(root.toFile()).redirectErrorStream(true);
         builder.environment().put("PATH",root.resolve("bin")+";"+System.getenv("PATH"));
         builder.environment().remove("JAVA_HOME");
         Path log=root.resolve("tmp/launcher.log");builder.redirectOutput(log.toFile());
         var process=builder.start();
         if(!process.waitFor(45,TimeUnit.SECONDS)){process.destroyForcibly();fail("Source launcher timed out");}
-        assertEquals(0,process.exitValue(),Files.readString(log));
+        assertEquals(expectedExit,process.exitValue(),Files.readString(log));
     }
-    @Test void legacyReadyMarkerCannotSkipUpdatingTheServer() throws Exception {
+    @Test void invalidReadyMarkerCannotSkipFirstPreparation() throws Exception {
         Path root=fixture();Files.writeString(root.resolve("tmp/run-build.ok"),"ready");
         launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Legacy marker reused old Server classes");
     }
-    @Test void sourceChangesInvalidateTheBuildButUnchangedSourcesReuseIt() throws Exception {
+    @Test void firstLaunchPreparesOnceAndLaterSourceChangesReuseTheBuild() throws Exception {
         Path root=fixture();launch(root);Files.delete(root.resolve("tmp/maven-build-ran"));
         launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Unchanged build should be reused");
         Files.writeString(root.resolve("nqb-server/src/main/java/Main.java"),"new question-set API");
-        launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Changed Server source was not rebuilt");
+        launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Opening the app must reuse the prepared build after source edits");
+        assertEquals("new class",Files.readString(root.resolve("nqb-server/target/classes/Main.class")).strip());
     }
-    @Test void deletedSourceOrChangedCompiledOutputInvalidatesTheBuild() throws Exception {
+    @Test void sourceDeletionAndBuildInputEditsDoNotForceAnotherBuild() throws Exception {
         Path root=fixture();launch(root);Files.delete(root.resolve("tmp/maven-build-ran"));
         Files.delete(root.resolve("nqb-server/src/main/java/Main.java"));
-        launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Deleted source was not detected");
-        Files.delete(root.resolve("tmp/maven-build-ran"));
+        Files.writeString(root.resolve("pom.xml"),"changed parent build configuration");
+        Files.writeString(root.resolve("nqb-server/pom.xml"),"changed build configuration");
+        Files.writeString(root.resolve("run.bat"),Files.readString(root.resolve("run.bat"))+"\r\nrem launcher update\r\n");
+        launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Prepared runtime must not depend on source fingerprints");
+    }
+    @Test void externallyRecompiledRuntimeDoesNotForceAnotherBuild() throws Exception {
+        Path root=fixture();launch(root);Files.delete(root.resolve("tmp/maven-build-ran"));
         Files.writeString(root.resolve("nqb-server/target/classes/Main.class"),"different runtime class");
-        launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Changed runtime classes were not detected");
+        launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Existing runtime outputs should be reused");
+    }
+    @Test void completedFingerprintMarkerFromOlderLauncherIsReused() throws Exception {
+        Path root=fixture();
+        Files.writeString(root.resolve("tmp/run-build.ok"),"{\"version\":1,\"fingerprint\":\"previous-build\"}");
+        launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Updating the launcher must not force another build");
+    }
+    @Test void missingJarOrClassesTriggersPreparationAgain() throws Exception {
+        Path root=fixture();launch(root);Files.delete(root.resolve("tmp/maven-build-ran"));
+        Files.delete(root.resolve("nqb-server/target/nqb-server-fixture.jar"));
+        launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Missing JAR must be rebuilt");
+        Files.delete(root.resolve("tmp/maven-build-ran"));
+        Files.delete(root.resolve("nqb-server/target/classes/Main.class"));
+        Files.writeString(root.resolve("nqb-server/target/classes/resource.txt"),"a resource is not a compiled class");
+        launch(root);assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Missing compiled classes must be rebuilt");
+    }
+    @Test void explicitBuildAppliesSourceUpdatesEvenWhenAlreadyPrepared() throws Exception {
+        Path root=fixture();launch(root);Files.delete(root.resolve("tmp/maven-build-ran"));
+        Files.writeString(root.resolve("nqb-server/src/main/java/Main.java"),"updated source");
+        launch(root,"build",0);
+        assertTrue(Files.exists(root.resolve("tmp/maven-build-ran")),"Explicit Build must update compiled artifacts");
+        Files.delete(root.resolve("tmp/maven-build-ran"));
+        launch(root);assertFalse(Files.exists(root.resolve("tmp/maven-build-ran")),"Opening after an explicit build must reuse it");
+    }
+    @Test void failedBuildIsNotMarkedReadyAndCanBeRetried() throws Exception {
+        Path root=fixture();launch(root);
+        Files.writeString(root.resolve("tmp/fail-build"),"fail");
+        launch(root,"build",1);
+        assertFalse(Files.exists(root.resolve("tmp/run-build.ok")),"A failed build must clear readiness");
+        Files.delete(root.resolve("tmp/fail-build"));
+        launch(root);assertTrue(Files.exists(root.resolve("tmp/run-build.ok")),"Successful retry must restore readiness");
+    }
+    @Test void failedLauncherPluginPreparationIsNotMarkedReady() throws Exception {
+        Path root=fixture();Files.writeString(root.resolve("tmp/fail-launcher-cache"),"fail");
+        launch(root,"setup",1);
+        assertFalse(Files.exists(root.resolve("tmp/run-build.ok")),"Incomplete launcher preparation must not be marked ready");
     }
 }

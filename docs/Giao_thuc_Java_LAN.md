@@ -120,6 +120,24 @@ Kiểm thử bắt buộc khi tích hợp: hai socket đồng thời tranh cùng
 - `ROOM_STATE` thêm `question_source_name`; chỉ chủ phòng nhận `history_session_id` và `history_room_name`. `ROOM_RESET` giữ nguồn, `ROOM_CLOSE` xóa nguồn. `START_GAME` cấp session mới và chỉ dùng câu đã lưu; kết quả ván mới được lưu độc lập.
 - Schema 3 có thời lượng trong `matches` và `match_questions(session_id,position,question_json)`. Đề giữ nguyên nội dung/options/correct_answer đã thi, không phụ thuộc vòng đời câu gốc và không thêm bản sao vào ngân hàng. Đề, bảng điểm và thông tin ván commit/rollback cùng nhau.
 
+## Đo tầm kết nối LAN — 25/10/2026
+
+Sơ đồ Phòng thi dùng ROOM_STATE.players[] và bổ sung max_players, server_port từ cấu hình/socket Server. Bản hiện tại không tạo distance_m/wifi_rtt_measurement cho client; không coi dữ liệu mốc nhập tay LAN_RANGE_START là Wi-Fi RTT phần cứng. Xem [nguồn dữ liệu sơ đồ](So_do_ket_noi_phong_thi.md).
+
+Nhóm LAN_RANGE_* dùng protocol version 1, NDJSON và TLS hiện có. Chỉ sau LOGIN/JOIN, đã đổi mật khẩu bắt buộc; không chạy trong ván thi. Mỗi peer một lượt, toàn server tối đa bốn lượt. Không đưa dữ liệu đo vào discovery, ROOM_STATE hoặc kết quả thi.
+
+- LAN_RANGE_START: survey_id UUID, survey_name/route tối đa 80 ký tự, topology (SERVER_HOTSPOT/DEDICATED_AP/SHARED_WIFI), distance_basis (STRAIGHT_LINE/CORRIDOR_ROUTE), notes tối đa 500, distance_m trong 0..500 tối đa một số lẻ, duration_seconds 30 hoặc 60. START_OK trả cấu hình cùng run_id, client_ip_observed/server_ip/server_port lấy từ socket, loopback và started_at UTC. Không nhận IP tự khai.
+- Client ghi RUN_STARTED rồi gửi LAN_RANGE_READY với run_id. Server enqueue READY_OK trước challenge đầu; READY lặp không reset lịch. Quá 10 giây chưa READY => CONTROL_TIMEOUT.
+- CLIENT_TO_SERVER: LAN_RANGE_PROBE {run_id,sequence} → LAN_RANGE_PROBE_OK giữ hai trường; client tính RTT bằng monotonic riêng. RPC này timeout 1000 ms; PING vẫn 20 giây và RPC khác 10 giây.
+- SERVER_TO_CLIENT: LAN_RANGE_CHALLENGE có request_id dạng range:<run_id>:<sequence>; gateway trả LAN_RANGE_CHALLENGE_REPLY cùng request_id/run_id/sequence, không tạo RPC future. Xử lý trực tiếp trên transport reader, không chờ JavaFX.
+- LAN_RANGE_SERVER_SAMPLE: sự kiện riêng cho peer khởi tạo, gồm run_id, direction, sequence, status, rtt_ms nullable và measured_by=server. Status ON_TIME/TIMEOUT/SEND_FAILED/DISCONNECTED/CANCELLED; server chỉ tính RTT của chiều mình khởi tạo. Mẫu trễ/trùng không chốt lại.
+- Mỗi hướng N mẫu (N=30/60), cách nhau 1000 ms, deadline 1000 ms; không phát dồn khi trễ lịch. Client gửi LAN_RANGE_COMPLETE sau khi chốt hết mẫu; server trả COMPLETE_OK, đợi chiều server xong rồi phát LAN_RANGE_FINISHED sau flush journal, gồm server_summary, server_journal_healthy, end_reason và ended_at.
+- Chưa COMPLETE sau N+5 giây từ READY => CONTROL_TIMEOUT. Client chờ FINISHED tối đa N+6 giây từ READY_OK. LAN_RANGE_STOP {run_id} → STOP_OK, idempotent cho lượt cuối cùng trên cùng peer; giữ kết quả một phần.
+- End reason: COMPLETED/STOPPED/DISCONNECTED/GAME_STARTED/ROOM_CHANGED/STORAGE_ERROR/CONTROL_TIMEOUT/APP_CLOSED. START_GAME, reset/close phòng, LEAVE/LOGOUT hoặc đóng socket kết thúc lượt; công cụ không chặn bắt đầu ván.
+- Lỗi AUTH_REQUIRED/PASSWORD_CHANGE_REQUIRED/INVALID_STATE theo giao thức sẵn có; INVALID_INPUT khi sai cấu hình/mẫu; LAN_RANGE_BUSY khi đã có lượt hoặc hết slot; LAN_RANGE_NOT_FOUND khi run_id không thuộc peer; STORAGE_ERROR khi không ghi nhật ký. Server cũ UNKNOWN_TYPE không được dẫn tới Preview hoặc số liệu giả.
+
+Đánh giá đạt cần đủ bằng chứng hai hướng, mỗi hướng ít nhất 95% đúng hạn và không có lỗi gửi/ngắt/hủy/lưu. RTT là khứ hồi tầng ứng dụng, không phải thời gian một chiều hoặc khoảng cách. Cùng máy kể cả qua IP LAN được đánh dấu cục bộ và loại khỏi mốc xa nhất thực địa. Chi tiết journal/CSV và nghiệm thu: [Đo tầm kết nối LAN](Do_tam_ket_noi_LAN.md).
+
 ## Bộ lọc câu hỏi
 
 Ví dụ request mục tiêu, gửi dưới dạng một dòng JSON/LF sau TLS:

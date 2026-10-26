@@ -174,10 +174,11 @@ public final class LiveLanUiCheck {
     private static void checkCommander(ArcadeApplication app)throws Exception {
         int previousMatches=uiRequest(app,"HISTORY_LIST").path("total").asInt();
         fx(()->{
-            for(String title:List.of("Tổng quan","Ngân hàng câu hỏi","Phòng thi","Giám sát thi đấu","Đấu trường thí sinh","Lịch sử & Bảng xếp hạng","Cài đặt","Người dùng","Đổi mật khẩu","Đăng xuất")) {
+            for(String title:List.of("Tổng quan","Ngân hàng câu hỏi","Phòng thi","Giám sát thi đấu","Lịch sử & Bảng xếp hạng","Cài đặt","Người dùng","Đổi mật khẩu","Đăng xuất")) {
                 var nav=app.qaScene().getRoot().lookupAll(".sidebar .button").stream().filter(n->n instanceof javafx.scene.control.Button b&&b.getText().equals(title)).findFirst();
                 if(nav.isEmpty())throw new AssertionError("Missing functional sidebar entry: "+title);
             }
+            if(app.qaScene().getRoot().lookupAll(".sidebar .button").stream().anyMatch(n -> n instanceof javafx.scene.control.Button b && b.getText().equals("Đấu trường thí sinh")))throw new AssertionError("Removed contestant arena still appears in navigation");
             app.qaClick("Tổng quan");
         });
         await(()->app.qaScene().lookup("#overview-questions") instanceof javafx.scene.control.Label l&&l.getText().equals("20"));
@@ -194,7 +195,7 @@ public final class LiveLanUiCheck {
             fx(()->{var start=(javafx.scene.control.Button)app.qaScene().getRoot().lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button button&&button.getText().equals("Bắt đầu ván thi")).findFirst().orElseThrow();if(!start.isDisabled())throw new AssertionError("Unready student enabled monitor start");});
             request(a,"READY_SET",object().put("ready",true));await(()->app.roomSnapshot().path("ready_count").asInt()==1);
             fx(()->{var start=(javafx.scene.control.Button)app.qaScene().getRoot().lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button button&&button.getText().equals("Bắt đầu ván thi")).findFirst().orElseThrow();if(start.isDisabled())throw new AssertionError("One ready student cannot start from monitor");});
-            request(b,"JOIN",object().put("room_code",code).put("nickname","Lan Đấu trường"));
+            request(b,"JOIN",object().put("room_code",code).put("nickname","Lan Giám sát"));
             request(a,"READY_SET",object().put("ready",true));request(b,"READY_SET",object().put("ready",true));
             await(()->tableSize(app)==2);
             fx(()->{assertTableText(app,"127.0.0.2");snapshot(app,"09c-monitor-ready");app.qaClick("Bắt đầu ván thi");});
@@ -212,29 +213,25 @@ public final class LiveLanUiCheck {
                 if(tableSize(app)!=1)throw new AssertionError("Pending filter did not isolate the unanswered student");
                 ((javafx.scene.control.ToggleButton)app.qaScene().lookup("#monitor-filter-all")).fire();
                 if(tableSize(app)!=2)throw new AssertionError("Monitor filter changed the actual room roster");
-                snapshot(app,"09e-monitor-submitted");app.qaClick("Đấu trường thí sinh");
+                snapshot(app,"09e-monitor-submitted");
             });
-            await(()->app.qaScene().lookup("#arena-search")!=null&&tableSize(app)==2);
-            fx(()->{
-                var table=(javafx.scene.control.TableView<?>)app.qaScene().lookup("#arena-players");
-                table.getSelectionModel().select(0);
-                if(!(app.qaScene().lookup("#arena-player-details") instanceof javafx.scene.control.Label detail)||!detail.getText().contains("127.0.0."))throw new AssertionError("Arena selection did not expose the Server-recorded IP");
-                ((TextField)app.qaScene().lookup("#arena-search")).setText("Minh");
-            });await(()->tableSize(app)==1);
             await(()->app.qaPhase().equals("FINISHED"));
             // TableView.refresh() recreates cells on a render pulse, after the room event.
             await(()->{app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();return hasTableText(app,"Đã kết thúc");});
             fx(()->assertTableText(app,"Đã kết thúc"));
-            fx(()->{if(app.qaScene().lookup("#arena-leaders")==null)throw new AssertionError("Arena did not show authoritative leaders after grading");snapshot(app,"09f-arena-filtered-final");if(app.qaScene().lookup("#arena-search")==null||tableSize(app)!=1)throw new AssertionError("Arena search or page lost during game: rows="+tableSize(app)+", search="+app.qaScene().lookup("#arena-search"));((TextField)app.qaScene().lookup("#arena-search")).clear();});
-            await(()->tableSize(app)==2);
+            fx(()->{if(app.qaScene().lookup("#monitor-players")==null||tableSize(app)!=2)throw new AssertionError("Monitor page or roster lost after game");snapshot(app,"09f-monitor-final");});
         }
-        await(()->app.qaScene().lookup("#arena-summary") instanceof javafx.scene.control.Label l&&l.getText().contains("0 đang kết nối"));
-        fx(()->{snapshot(app,"09g-arena-disconnected");app.qaClick("Cài đặt");});
+        await(()->app.qaScene().lookup("#monitor-connections") instanceof javafx.scene.control.Label l&&l.getText().contains("0 đang kết nối"));
+        fx(()->{snapshot(app,"09g-monitor-disconnected");app.qaClick("Cài đặt");});
         await(()->app.qaScene().lookup("#management-settings")!=null);
-        fx(()->{snapshot(app,"09h-commander-settings");app.qaClick("Âm thanh & giao diện");app.qaCloseAuxiliary();});
+        fx(()->{
+            app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();
+            if(app.qaScene().getRoot().lookupAll(".nav").stream().noneMatch(n->n instanceof javafx.scene.control.Button b&&b.getText().equals("Đo tầm kết nối LAN")))throw new AssertionError("Sidebar missing LAN range tab");
+            snapshot(app,"09h-commander-settings");app.qaClick("Âm thanh & giao diện");app.qaCloseAuxiliary();
+        });
         var closed=new CompletableFuture<JsonNode>();fx(()->app.call("ROOM_CLOSE",object(),closed::complete,closed::completeExceptionally));closed.get(8,TimeUnit.SECONDS);
         fx(()->app.qaClick("Tổng quan"));await(()->app.qaScene().lookup("#overview-matches") instanceof javafx.scene.control.Label l&&l.getText().equals(Integer.toString(previousMatches+1)));
-        System.out.println("COMMANDER_UI_PASS: real overview, all sidebar routes, monitor submissions, arena search, retained routes, disconnects, settings");
+        System.out.println("COMMANDER_UI_PASS: real overview, all sidebar routes, monitor submissions, arena removed, retained routes, disconnects, settings");
     }
     private static void assertTableText(ArcadeApplication app,String expected) {
         app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();

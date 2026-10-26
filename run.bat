@@ -34,7 +34,7 @@ if "%NQB_DIRECT%"=="1" goto direct
 :menu
 echo.
 echo =============== QUIZ BATTLE ===============
-echo 1. Build / cap nhat project
+echo 1. Build / cap nhat sau khi sua code
 echo 2. Thiet lap Server lan dau tren may nay
 echo 3. Chay Server
 echo 4. Mo Client Admin / Giang vien
@@ -42,6 +42,7 @@ echo 5. Mo Client Hoc sinh
 echo 0. Thoat
 echo.
 echo Lan dau: chon 2, sau do 3. Doi NQB_SERVER_READY roi chon 4 hoac 5.
+echo Lan sau: chon 3, 4 hoac 5 de dung ban da build. Sua code: chon 1 de cap nhat.
 choice /c 123450 /n /m "Bam mot phim [1-5,0], khong can Enter: "
 if errorlevel 6 goto finish
 if errorlevel 5 (call :player & goto menu)
@@ -64,7 +65,8 @@ exit /b %errorlevel%
 
 :build
 if exist "tmp\run-build.ok" del /q "tmp\run-build.ok"
-echo [BUILD] Tai thu vien, bien dich va chay kiem thu. Lan dau can Internet.
+echo [BUILD] Bien dich, kiem thu va luu ban chay. Chi tai thu vien con thieu neu can.
+echo Lan dau can Internet. Cac lan mo app sau se dung lai ban da build.
 call mvn -B -ntp install
 if errorlevel 1 exit /b 1
 rem Cache the launcher plugin because Run-Quiz.ps1 starts Maven offline.
@@ -80,8 +82,12 @@ exit /b 0
 
 :ensure_build
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\Source-Build.ps1" >nul 2>&1
-if errorlevel 1 goto build
-exit /b 0
+if not errorlevel 1 (
+    echo [RUN] Dang dung ban da build. Sua code: chon 1 de cap nhat.
+    exit /b 0
+)
+echo [SETUP] Chua co ban chay san sang. Chuan bi lan dau hoac khoi phuc file build bi thieu.
+goto build
 
 :setup
 call :ensure_build
@@ -153,7 +159,9 @@ goto finish
 echo Dung: run.bat [build^|setup^|server^|admin^|player]
 echo Nhan doi run.bat de mo menu.
 echo Lan dau tren cung may: setup, server, doi NQB_SERVER_READY, admin/player.
-echo Tu build lai khi ma nguon thay doi. Can JDK 21 va Maven 3.9.x.
+echo Chi tu build khi chua chuan bi hoac thieu file chay. Lan dau can Internet.
+echo Lan sau dung ban da build, chay offline. Can JDK 21 va Maven 3.9.x.
+echo Sau khi sua code: chon 1 hoac chay run.bat build de cap nhat.
 echo Sau khi cap nhat, tat Server/Client cu roi mo lai ca hai.
 echo Chay nhieu may LAN: xem docs\PHAT_TRIEN_NHOM.md, muc 3.
 goto finish

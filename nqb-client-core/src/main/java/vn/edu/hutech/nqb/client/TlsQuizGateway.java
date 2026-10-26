@@ -14,6 +14,9 @@ import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
+import java.util.BitSet;
+import vn.edu.hutech.nqb.shared.LanRangeProtocol;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -28,6 +31,10 @@ public final class TlsQuizGateway implements QuizGateway {
     });
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile Consumer<JsonNode> listener = ignored -> { };
+    private final Set<String> rangeStarts=ConcurrentHashMap.newKeySet();
+    private String rangeRun="";
+    private int rangeCount;
+    private final BitSet rangeReplies=new BitSet();
 
     public static TlsQuizGateway connect(Endpoint endpoint, Path truststore, char[] password) throws Exception {
         return connect(endpoint,truststore,password,5000);
@@ -79,17 +86,20 @@ public final class TlsQuizGateway implements QuizGateway {
         if (body.has("session_id") && !type.startsWith("HISTORY_")) message.set("session_id", body.remove("session_id"));
         message.set("payload", body);
         pending.put(id, result);
+        if(type.equals("LAN_RANGE_START"))rangeStarts.add(id);
         try {
             if (!outbound.offer(JsonMessages.encode(message))) throw new IllegalStateException("Outbound queue full");
         } catch (Exception error) {
             pending.remove(id);
+            rangeStarts.remove(id);
             result.completeExceptionally(new GatewayException("SEND_FAILED", "Không gửi được yêu cầu. Hãy thử lại.", object()));
         }
         try {
             ScheduledFuture<?> timeout = timer.schedule(() -> {
                 var waiting = pending.remove(id);
+                rangeStarts.remove(id);
                 if (waiting != null) waiting.completeExceptionally(new GatewayException("TIMEOUT", "Máy chủ chưa phản hồi. Kiểm tra kết nối trước khi thử lại.", object()));
-            }, type.equals("PING") ? 20 : 10, TimeUnit.SECONDS);
+            }, type.equals("PING") ? 20000 : type.equals("LAN_RANGE_PROBE") ? LanRangeProtocol.DEADLINE_MS : 10000, TimeUnit.MILLISECONDS);
             result.whenComplete((value, error) -> timeout.cancel(false));
         } catch (RejectedExecutionException stopped) {
             pending.remove(id); result.completeExceptionally(new GatewayException("DISCONNECTED", "Đã mất kết nối với máy chủ.", object()));
@@ -105,6 +115,8 @@ public final class TlsQuizGateway implements QuizGateway {
             while (!closed.get() && (count = socket.getInputStream().read(buffer)) != -1) {
                 for (String frame : decoder.feed(java.util.Arrays.copyOf(buffer, count))) {
                     JsonNode message = JsonMessages.parse(frame);
+                    if(handleRangeControl(message))continue;
+                    rangeStarts.remove(message.path("request_id").asText());
                     var future = pending.remove(message.path("request_id").asText());
                     JsonNode payload = message.path("payload");
                     if (payload instanceof ObjectNode body && message.has("session_id")) body.set("session_id", message.get("session_id"));
@@ -123,6 +135,26 @@ public final class TlsQuizGateway implements QuizGateway {
         } catch (Exception ignored) { /* Never log authentication payloads or credentials. */ }
         finally { fail(); }
     }
+    /** Runs on the transport reader; answering a server probe never waits for JavaFX. */
+    private synchronized boolean handleRangeControl(JsonNode message) throws Exception {
+        String type=message.path("type").asText(),id=message.path("request_id").asText();
+        var p=message.path("payload");
+        if(type.equals("LAN_RANGE_START_OK")&&pending.containsKey(id)&&rangeStarts.remove(id)){
+            String run=p.path("run_id").asText();int count=p.path("duration_seconds").asInt();
+            if(!UUID.fromString(run).toString().equals(run)||(count!=30&&count!=60))throw new IllegalArgumentException("Invalid range session");
+            rangeRun=run;rangeCount=count;rangeReplies.clear();
+        }
+        if(type.equals("LAN_RANGE_FINISHED")&&rangeRun.equals(p.path("run_id").asText())){rangeRun="";rangeReplies.clear();}
+        if(!type.equals("LAN_RANGE_CHALLENGE"))return false;
+        int seq=p.path("sequence").asInt();
+        if(closed.get()||rangeRun.isEmpty()||!rangeRun.equals(p.path("run_id").asText())||!p.path("sequence").isIntegralNumber()
+            ||seq<1||seq>rangeCount||!id.equals("range:"+rangeRun+":"+seq)||rangeReplies.get(seq))return true;
+        rangeReplies.set(seq);
+        var reply=object().put("protocol_version",Protocol.VERSION).put("type","LAN_RANGE_CHALLENGE_REPLY").put("request_id",id);
+        reply.set("payload",object().put("run_id",rangeRun).put("sequence",seq));
+        if(!outbound.offer(JsonMessages.encode(reply)))fail();
+        return true;
+    }
     private void write() {
         try {
             while (!closed.get()) {
@@ -135,6 +167,7 @@ public final class TlsQuizGateway implements QuizGateway {
         if (closed.compareAndSet(false, true)) {
             try { socket.close(); } catch (Exception ignored) { }
             timer.shutdownNow(); outbound.clear();
+            rangeStarts.clear();rangeRun="";rangeReplies.clear();
             pending.values().forEach(f -> f.completeExceptionally(new GatewayException("DISCONNECTED", "Đã mất kết nối với máy chủ.", object())));
             pending.clear();
             listener.accept(object().put("type", "DISCONNECTED").set("payload", object()));

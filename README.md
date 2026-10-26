@@ -8,9 +8,15 @@ Xem **[Hướng dẫn clone, build, chạy và làm việc theo nhánh](docs/PHA
 
 **Chạy nhanh trên Windows:** nhấn đúp [run.bat](run.bat). Lần đầu chạy trên cùng máy, chọn **2** để build và thiết lập Server, chọn **3** khởi chạy Server, đợi `NQB_SERVER_READY`, rồi chọn **4** hoặc **5** mở Client. Xem hướng dẫn trong `docs/PHAT_TRIEN_NHOM.md` nếu chạy nhiều máy LAN.
 
+Các lần mở sau dùng lại bản đã build và thư viện đã lưu trên máy, chạy offline mà không tự build khi source thay đổi. Sau khi sửa code, chọn **1** hoặc chạy `run.bat build`, rồi tắt và mở lại Server/Client để áp dụng. Nếu file build bị xóa, launcher tự chuẩn bị lại.
+
 Hỗ trợ đăng nhập Admin/giảng viên, học sinh nickname/linh vật; ngân hàng theo chủ sở hữu, lọc/trùng/import Excel–Word; chơi LAN thời gian thực, bảng hạng sau từng câu và bục vinh danh, SFX và nhạc nền offline. Tự dò Server/phòng và vào bằng mã đã có; tự thích nghi khi IP DHCP thay đổi **chưa triển khai**.
 
 ## Bản dùng chính trên máy tác giả — không có trong Git
+
+**Phòng thi — cập nhật 26/10/2026:** khôi phục mã phòng lớn và các ô linh vật/thí sinh như bố cục cũ. Trạng thái tham gia/sẵn sàng lấy từ Server; công cụ đo mạng được tách khỏi Phòng thi. Xem [bố cục phòng và phạm vi đo khoảng cách](docs/So_do_ket_noi_phong_thi.md).
+
+**Đo tầm kết nối LAN — tab riêng:** Admin/giảng viên chọn mục Đo tầm kết nối LAN trên thanh bên; học sinh mở từ Tùy chọn. Giao diện có mốc mét nhập từ thước đo, sơ đồ Server–Client minh họa, tiến trình hai chiều, RTT, mốc xa nhất đã đạt, lịch sử và CSV. Chọn 30/60 giây; kết nối và journal TLS thật giữ nguyên. Chuyển tab quản lý không làm mất lượt đang đo. Kiểm thử cùng máy không tính vào mốc xa nhất thực địa. Cần chạy cả Server và Client từ bản build mới; thay đổi mã nguồn không tự thay bộ cài trong dist. Xem [hướng dẫn đo và tự test với một máy](docs/Do_tam_ket_noi_LAN.md).
 
 Từ 22/10/2026, dùng duy nhất `dist/QuizBattle/`: chạy [Server/start.bat](dist/QuizBattle/Server/start.bat), gửi [Client/QuizBattle-Setup.exe](dist/QuizBattle/Client/QuizBattle-Setup.exe) cho máy khác. Xem [hướng dẫn ngắn](dist/QuizBattle/HUONG_DAN.txt). Bộ cài Client 0.3.7 đi cùng Server đã cấu hình, có chứng chỉ khớp và database cũ; không tạo Server mới khi chỉ nâng cấp Client. Các đường dẫn timestamp trong báo cáo trước đây là lịch sử.
 
