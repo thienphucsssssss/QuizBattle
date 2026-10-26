@@ -131,9 +131,9 @@ public final class LiveLanUiCheck {
                 });
                 await(() -> app.qaPhase().equals("SHOW_RANKING")); Thread.sleep(1400); fx(() -> { assertMusic(app, MusicSlots.Track.GAME); app.qaAssertRanksSettled(); snapshot(app, "05-ranking-" + number); });
             }
-            await(() -> app.qaPhase().equals("FINISHED"));Thread.sleep(950); fx(() -> { assertMusic(app, MusicSlots.Track.VICTORY); if (!app.qaResult().path("result_saved").asBoolean() || app.qaResult().path("ranking").size() != 3 || app.qaScene().getRoot().lookupAll(".victory-column").size()!=3) throw new AssertionError("UI final result/podium missing persistence/ranking"); snapshot(app, "06-live-final"); });
+            await(() -> app.qaPhase().equals("FINISHED"));Thread.sleep(950); fx(() -> { assertMusic(app, MusicSlots.Track.NONE); if (!app.qaResult().path("result_saved").asBoolean() || app.qaResult().path("ranking").size() != 3 || app.qaScene().getRoot().lookupAll(".victory-column").size()!=3) throw new AssertionError("UI final result/podium missing persistence/ranking"); snapshot(app, "06-live-final"); });
             request(host, "ROOM_RESET", object()); await(() -> app.qaPhase().equals("WAITING")); fx(() -> { assertMusic(app, MusicSlots.Track.NONE); snapshot(app, "07-reset-lobby"); });
-            request(host, "ROOM_CLOSE", object()); await(() -> !app.qaConnected());
+            request(host, "ROOM_CLOSE", object()); await(() -> !app.qaConnected()); fx(() -> assertMusic(app, MusicSlots.Track.NONE));
         }
         fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
         await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app) == 10); fx(() -> snapshot(app, "08-live-bank"));
@@ -218,7 +218,7 @@ public final class LiveLanUiCheck {
             await(()->app.qaPhase().equals("FINISHED"));
             // TableView.refresh() recreates cells on a render pulse, after the room event.
             await(()->{app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();return hasTableText(app,"Đã kết thúc");});
-            fx(()->assertTableText(app,"Đã kết thúc"));
+            fx(()->{assertTableText(app,"Đã kết thúc");assertMusic(app,MusicSlots.Track.NONE);});
             fx(()->{if(app.qaScene().lookup("#monitor-players")==null||tableSize(app)!=2)throw new AssertionError("Monitor page or roster lost after game");snapshot(app,"09f-monitor-final");});
         }
         await(()->app.qaScene().lookup("#monitor-connections") instanceof javafx.scene.control.Label l&&l.getText().contains("0 đang kết nối"));

@@ -71,7 +71,6 @@ final class MusicSlots implements AutoCloseable {
     synchronized void update(String session, String phase, boolean aborted) {
         Track track = session == null || session.isBlank() || aborted ? Track.NONE : switch (phase) {
             case "COUNTDOWN", "QUESTION_ACTIVE", "SHOW_RESULT", "SHOW_RANKING" -> Track.GAME;
-            case "FINISHED" -> Track.VICTORY;
             default -> Track.NONE;
         };
         Playback next = track == Track.NONE ? SILENCE : new Playback(session, track);

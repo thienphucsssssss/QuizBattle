@@ -107,7 +107,7 @@ public final class ArcadeApplication extends Application {
         if (qaDriver != null) qaDriver.accept(this);
     }
     @Override public void stop() { if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); }
-    private void closeGateway() { music.stop(); connectionGeneration++; if(lanRangeView!=null){lanRangeView.close();lanRangeView=null;} if(lanRangeClient!=null){lanRangeClient.close();lanRangeClient=null;} if(connectionPulse!=null)connectionPulse.stop(); pingPending=false; sidebar=null; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
+    private void closeGateway() { music.stop(); sfx.reset(); connectionGeneration++; if(lanRangeView!=null){lanRangeView.close();lanRangeView=null;} if(lanRangeClient!=null){lanRangeClient.close();lanRangeClient=null;} if(connectionPulse!=null)connectionPulse.stop(); pingPending=false; sidebar=null; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
     private void welcome() {
         if (pulse != null) pulse.stop();
         if (projection != null) projection.close();
@@ -414,8 +414,8 @@ public final class ArcadeApplication extends Application {
             var start = button("Bắt đầu ván thi   →", "ink-button", () -> call("START_GAME", object(), ignored -> { }));
             start.setId("room-start-game");
             start.setDisable(!owner || room.path("connected_player_count").asInt() < 1 || room.path("ready_count").asInt() != room.path("connected_player_count").asInt() || !room.path("phase").asText().equals("WAITING"));
-            var reset = button("Reset phòng", "quiet", () -> { if (confirm("Reset phòng?", "Điểm và trạng thái sẵn sàng sẽ được xóa.")) call("ROOM_RESET", object(), value -> { room = value; lobby(); }); }); reset.setDisable(!owner || disconnected);
-            var close = button("Đóng phòng", "danger", () -> { if (confirm("Đóng phòng?", "Người chơi sẽ rời phòng; giảng viên khác có thể tổ chức.")) call("ROOM_CLOSE", object(), value -> { room = value; lobby(); }); }); close.setDisable(!owner || disconnected);
+            var reset = button("Reset phòng", "quiet", () -> { if (confirm("Reset phòng?", "Điểm và trạng thái sẵn sàng sẽ được xóa.")) call("ROOM_RESET", object(), value -> { sfx.reset(); room = value; lobby(); }); }); reset.setDisable(!owner || disconnected);
+            var close = button("Đóng phòng", "danger", () -> { if (confirm("Đóng phòng?", "Người chơi sẽ rời phòng; giảng viên khác có thể tổ chức.")) call("ROOM_CLOSE", object(), value -> { sfx.reset(); room = value; lobby(); }); }); close.setDisable(!owner || disconnected);
             actions.getChildren().addAll(start, reset, close);
             if (!owner || room.path("ready_count").asInt() < room.path("connected_player_count").asInt()) body.getChildren().add(text(!owner ? "Phòng đang do giảng viên khác tổ chức." : "Chờ mọi người sẵn sàng.", "muted"));
         }
@@ -525,7 +525,7 @@ public final class ArcadeApplication extends Application {
         JsonNode p = event.path("payload");
         switch (event.path("type").asText()) {
             case "DISCONNECTED":
-                music.stop();
+                music.stop(); sfx.stopPlaying();
                 disconnected = true; if (pulse != null) pulse.stop(); answerButtons.forEach(b -> b.setDisable(true));
                 if(lanRangeView!=null)lanRangeView.connectionChanged();
                 root.lookupAll(".room-player-state").forEach(node->{if(node instanceof Label label)label.setText("Chưa xác nhận");});
@@ -541,8 +541,12 @@ public final class ArcadeApplication extends Application {
                     if (p.path("players").size() > room.path("players").size()) sfx.play(SfxSlots.Cue.PLAYER_JOIN);
                     else if (p.path("ready_count").asInt() > room.path("ready_count").asInt()) sfx.play(SfxSlots.Cue.PLAYER_READY);
                 }
+                String previousPhase = room.path("phase").asText();
                 room = p;
-                if(room.path("phase").asText().equals("WAITING")){answer=null;question=object();result=object();session="";}
+                if(room.path("phase").asText().equals("WAITING")){
+                    if(!previousPhase.equals("WAITING"))sfx.reset();
+                    answer=null;question=object();result=object();session="";
+                }
                 if (avatarDialog != null && avatarDialog.isShowing()) { if (!room.path("phase").asText().equals("WAITING")) avatarDialog.close(); else refreshAvatars(); }
                 if ((route.equals("Phòng thi") || route.equals("GAME")) && room.path("phase").asText().equals("WAITING")) { if (pulse != null) pulse.stop(); answer = null; question = object(); result = object(); session = ""; lobby(); }
                 else if (progressLabel != null) progressLabel.setText(p.path("answered_count").asInt() + "/" + p.path("connected_player_count").asInt() + " đã nộp");
@@ -570,10 +574,10 @@ public final class ArcadeApplication extends Application {
                 presentMatch(); startPulse(); break;
             case "GAME_OVER":
                 if (!p.path("session_id").asText(session).equals(session)) return;
-                result = p; room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); presentMatch(); if (!music.enabled()) sfx.event(SfxSlots.Cue.MATCH_FINISH, session, 0); break;
+                result = p; room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); presentMatch(); sfx.event(SfxSlots.Cue.MATCH_FINISH, session, 0); break;
             case "GAME_ABORTED":
                 if (!p.path("session_id").asText(session).equals(session)) return;
-                result = object().put("aborted", true); room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); presentMatch(); break;
+                result = object().put("aborted", true); room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); presentMatch(); break;
             default: break;
         }
         if(!role.equals("STUDENT"))commander.update(room);
@@ -695,7 +699,7 @@ public final class ArcadeApplication extends Application {
             }
             if (!publicView) {
                 if (!result.path("result_saved").asBoolean() && !result.path("aborted").asBoolean()) body.getChildren().add(text("Chưa lưu được kết quả. Hãy báo giảng viên.", "feedback", "error"));
-                if (!role.equals("STUDENT")) body.getChildren().add(row(12, button("Chơi ván mới", "primary", () -> call("ROOM_RESET", object(), value -> { room = value; lobby(); })), button("Đóng phòng", "quiet", () -> call("ROOM_CLOSE", object(), value -> { room = value; lobby(); }))));
+                if (!role.equals("STUDENT")) body.getChildren().add(row(12, button("Chơi ván mới", "primary", () -> call("ROOM_RESET", object(), value -> { sfx.reset(); room = value; lobby(); })), button("Đóng phòng", "quiet", () -> call("ROOM_CLOSE", object(), value -> { sfx.reset(); room = value; lobby(); }))));
                 else body.getChildren().add(button("Rời phòng", "primary", this::logout));
             }
             if(!result.path("aborted").asBoolean())body.getChildren().addAll(text("Bảng xếp hạng chung cuộc","subtitle"),ranking(result.path("ranking"),publicView));
@@ -729,7 +733,7 @@ public final class ArcadeApplication extends Application {
         var audioStatus = text(sfx.status(), "muted");
         sound.setOnAction(e -> sfx.mute(!sound.isSelected())); volume.valueProperty().addListener((o, before, after) -> sfx.volume(after.doubleValue() / 100));
         var testSound = button("Nghe thử", "quiet", () -> { sfx.play(SfxSlots.Cue.UI_SELECT); audioStatus.setText(sfx.status()); }); testSound.disableProperty().bind(sound.selectedProperty().not());
-        var background = new CheckBox("Nhạc nền ván đấu và chung cuộc"); background.setId("music-enabled"); background.setDisable(!music.assetsAvailable()); background.setSelected(!music.muted());
+        var background = new CheckBox("Nhạc nền ván đấu"); background.setId("music-enabled"); background.setDisable(!music.assetsAvailable()); background.setSelected(!music.muted());
         var musicVolume = new Slider(0, 100, music.volume() * 100); musicVolume.setId("music-volume"); musicVolume.setAccessibleText("Âm lượng nhạc nền"); musicVolume.setShowTickLabels(true); musicVolume.setMajorTickUnit(25); musicVolume.setBlockIncrement(5); musicVolume.disableProperty().bind(background.selectedProperty().not());
         var musicStatus = text(music.status(), "muted"); musicStatus.setId("music-status");
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));

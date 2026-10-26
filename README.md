@@ -26,7 +26,7 @@ Cập nhật mạng 4G: Server bind/fallback Client `10.122.30.170`, TCP 5050, d
 
 ## Tình trạng hiện tại
 
-**Bản 0.3.6 — nhạc nền:** hai WAV người dùng cung cấp được đóng gói nguyên bản vào Client. BGM lặp từ đếm ngược đến hết các câu/bảng hạng; khi chung cuộc chuyển sang High Score Glory phát một lần, không chồng hai bản nhạc. Hủy ván/rời phòng/mất kết nối/reset/đóng ứng dụng dừng nhạc. Tùy chọn có bật/tắt và âm lượng nhạc riêng với SFX, lưu theo vai trò; mặc định giảng viên/Admin bật 20%, học sinh tắt để tránh nhiều loa cùng phát. Không thay Server hoặc dữ liệu. Xem `docs/Nhac_nen_0_3_6.md`.
+**Nhạc nền — sửa lỗi 26/10/2026:** BGM lặp từ đếm ngược đến hết các câu/bảng hạng, dừng khi chung cuộc; chỉ còn hiệu ứng kết thúc ngắn nếu bật SFX. Hủy ván/rời phòng/mất kết nối/reset/đóng ứng dụng dừng nhạc và hủy hiệu ứng đang nạp hoặc chờ phát. Hai WAV gốc vẫn được giữ nguyên trong Client. Tùy chọn có bật/tắt và âm lượng nhạc riêng với SFX, lưu theo vai trò; mặc định giảng viên/Admin bật 20%, học sinh tắt để tránh nhiều loa cùng phát. Không thay Server hoặc dữ liệu. Xem `docs/Nhac_nen_0_3_6.md`.
 
 **Bản 0.3.5 — bục vinh danh chung cuộc:** cột cao thấp theo hạng, khung linh vật và huy chương vector vàng/bạc/đồng cho các hạng 1–3. Giữ nguyên hạng Server (đồng hạng nhận cùng loại huy chương, không lấy ba dòng đầu rồi loại người đồng hạng); bảng đầy đủ ở bên dưới. Có hiệu ứng xuất hiện ngắn, hỗ trợ giảm chuyển động, màn hình nhỏ và trình chiếu. Đây là bục theo thứ hạng, không phải biểu đồ có trục điểm tỷ lệ. Chỉ thay Client; không đổi giao thức, Server hoặc database.
 

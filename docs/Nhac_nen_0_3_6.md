@@ -2,16 +2,18 @@
 
 ## Sử dụng
 
-Mở QuizBattle → Tùy chọn → **Nhạc nền ván đấu và chung cuộc**. Âm lượng nhạc nền độc lập với âm thanh giao diện. Lựa chọn được lưu trên máy theo vai trò học sinh/giảng viên (Admin dùng cấu hình giảng viên). Mặc định giảng viên bật ở 20%; học sinh tắt, có thể tự bật. Máy trình chiếu dùng cùng Client và không nhân đôi âm thanh.
+Mở QuizBattle → Tùy chọn → **Nhạc nền ván đấu**. Âm lượng nhạc nền độc lập với âm thanh giao diện. Lựa chọn được lưu trên máy theo vai trò học sinh/giảng viên (Admin dùng cấu hình giảng viên). Mặc định giảng viên bật ở 20%; học sinh tắt, có thể tự bật. Máy trình chiếu dùng cùng Client và không nhân đôi âm thanh.
+
+Cập nhật 26/10/2026: nhạc nền dừng ngay khi hết ván, không tự phát bản chung cuộc dài khoảng 63 giây. Chỉ còn hiệu ứng kết thúc ngắn khoảng 2 giây nếu bật âm thanh giao diện. Rời/đóng/reset phòng, hủy ván hoặc mất kết nối hủy cả hiệu ứng đang nạp và đang chờ phát.
 
 | Trạng thái | Nhạc |
 | --- | --- |
 | Đăng nhập, phòng chờ, chưa tham gia ván | Không phát |
 | Đếm ngược → câu hỏi → đáp án → bảng hạng từng câu | Network Quiz Battle BGM, lặp liên tục, không khởi động lại giữa các câu |
-| Hoàn thành đủ câu → bục vinh danh | Dừng BGM, chuyển High Score Glory, phát một lần khoảng 63 giây |
+| Hoàn thành đủ câu → bục vinh danh | Dừng nhạc nền; hiệu ứng kết thúc ngắn nếu bật SFX |
 | Hủy ván, reset, đóng/rời phòng, đăng xuất, mất kết nối, đóng Client | Dừng nhạc và giải phóng thiết bị |
 
-Khi tắt/bật lại nhạc giữa ván, bản nhạc hiện tại phát lại từ đầu. High Score Glory đã phát hết không tự phát lại vì cập nhật trạng thái, chỉnh âm lượng hoặc mở lại màn kết quả trong cùng phiên đăng nhập. Khi nhạc chung cuộc bật, không chồng hiệu ứng MATCH_FINISH cũ; khi nhạc tắt, hiệu ứng kết thúc cũ vẫn có nếu SFX đang bật.
+Khi tắt/bật lại nhạc giữa ván, bản nhạc hiện tại phát lại từ đầu. Cập nhật trạng thái, chỉnh âm lượng hoặc bật lại nhạc sau khi hết ván không khởi động nhạc. Tài nguyên High Score Glory vẫn được giữ nguyên trong Client nhưng không tự phát khi chung cuộc.
 
 ## Tài nguyên và kiến trúc
 
@@ -26,10 +28,11 @@ Cả hai là PCM signed 44.1 kHz, 16-bit, stereo. Metadata/SHA256 nằm trong `/
 
 ## Kiểm thử
 
-- `MusicSlotsTest`: vòng lặp/đổi giai đoạn, chung cuộc một lần, hủy/reset/rời phòng, mute/âm lượng, vai trò và lưu tùy chọn, silent QA, nạp muộn, đóng ứng dụng, lỗi thiết bị.
+- `MusicSlotsTest`: vòng lặp/đổi giai đoạn, hết ván dừng nhạc, ván mới, hủy/reset/rời phòng, mute/âm lượng, vai trò và lưu tùy chọn, silent QA, nạp muộn, đóng ứng dụng, lỗi thiết bị.
+- `SfxSlotsTest`: hủy hiệu ứng trễ/đang nạp/đang chờ, reset dừng hiệu ứng và cho phép phát lại ở phòng mới, tắt/bật âm khi đang nạp.
 - `MusicAssetsTest`: hai asset khớp SHA256 gốc, decode đúng PCM stereo 44.1 kHz/16-bit.
 - `MusicDeviceCheck`: opt-in mở/đóng hai clip bằng thiết bị Java Sound thật, không gọi phát âm thanh.
-- `LiveLanUiCheck`: ván qua TLS Server/SQLite tạm, kiểm tra nhạc GAME ở từng chặng → VICTORY khi chung cuộc → NONE khi reset và các điều khiển Tùy chọn. Chạy im lặng để không phát nhiều bản nhạc trong QA; không đổi preference âm thanh người dùng.
+- `LiveLanUiCheck`: ván qua TLS Server/SQLite tạm, kiểm tra nhạc GAME ở từng chặng → NONE khi chung cuộc/reset/đóng phòng và các điều khiển Tùy chọn. Chạy im lặng để không phát nhiều bản nhạc trong QA; không đổi preference âm thanh người dùng.
 
 Việc kiểm thử tự động không thay thế nghe thử cảm nhận về âm lượng và điểm nối loop trong phòng học.
 

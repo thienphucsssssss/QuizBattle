@@ -39,14 +39,17 @@ class MusicSlotsTest {
         music.volume(.13); await(() -> clip.volume == .13);
         assertEquals(1, opened.size()); assertFalse(clip.closed); assertEquals(MusicSlots.Track.GAME, music.desiredTrack());
     }
-    @Test void victoryReplacesGameAndPlaysOnlyOnceDespiteRepeatedStateAndVolumeChanges() throws Exception {
+    @Test void finishedMatchStopsMusicAndRepeatedStateOrSettingsCannotRestartIt() throws Exception {
         var game = startGame(); music.update("one", "FINISHED", false);
-        await(() -> opened.size() == 2 && opened.getLast().started);
-        var victory = opened.getLast(); assertTrue(game.closed); assertFalse(victory.loop); assertEquals(MusicSlots.Track.VICTORY, victory.track);
-        music.update("one", "FINISHED", false); music.volume(.15); await(() -> victory.volume == .15);
-        assertEquals(2, opened.size()); victory.finished.run(); await(() -> victory.closed);
+        await(() -> game.closed);
+        assertEquals(MusicSlots.Track.NONE, music.desiredTrack());
         music.update("one", "FINISHED", false); music.volume(.17); music.mute(true); music.mute(false);
-        music.update("two", "COUNTDOWN", false); await(() -> opened.size() == 3 && opened.getLast().started);
+        music.close(); assertEquals(1, opened.size());
+    }
+    @Test void newMatchCanPlayAfterPreviousMatchFinished() throws Exception {
+        var game = startGame(); music.update("one", "FINISHED", false); await(() -> game.closed);
+        music.update("two", "COUNTDOWN", false); await(() -> opened.size() >= 2 && opened.getLast().track == MusicSlots.Track.GAME && opened.getLast().started);
+        assertEquals(2, opened.size());
         assertEquals(MusicSlots.Track.GAME, opened.getLast().track);
     }
     @Test void abortDoesNotPlayVictoryAndWaitingStopsMusic() throws Exception {
@@ -84,6 +87,13 @@ class MusicSlotsTest {
         music = new MusicSlots(prefs, (track, finished) -> { loading.countDown(); assertTrue(release.await(3, TimeUnit.SECONDS)); var clip = new FakePlayer(track, finished); opened.add(clip); return clip; });
         music.configure("TEACHER", false); music.update("one", "COUNTDOWN", false); assertTrue(loading.await(3, TimeUnit.SECONDS));
         music.stop(); release.countDown(); await(() -> opened.size() == 1 && opened.getFirst().closed);
+        assertFalse(opened.getFirst().started);
+    }
+    @Test void staleLoadCannotStartAfterMatchFinished() throws Exception {
+        music.close(); var loading = new CountDownLatch(1); var release = new CountDownLatch(1);
+        music = new MusicSlots(prefs, (track, finished) -> { loading.countDown(); assertTrue(release.await(3, TimeUnit.SECONDS)); var clip = new FakePlayer(track, finished); opened.add(clip); return clip; });
+        music.configure("TEACHER", false); music.update("one", "COUNTDOWN", false); assertTrue(loading.await(3, TimeUnit.SECONDS));
+        music.update("one", "FINISHED", false); release.countDown(); await(() -> opened.size() == 1 && opened.getFirst().closed);
         assertFalse(opened.getFirst().started);
     }
     @Test void closeReleasesActiveMusicAndIgnoresLaterEvents() throws Exception {
