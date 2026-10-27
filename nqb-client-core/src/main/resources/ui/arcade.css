@@ -15,9 +15,6 @@
 .lan-range-page .range-heading .title { -fx-font-size: 27px; }
 .lan-range-page .range-card { -fx-background-color: -surface; -fx-background-radius: 12; -fx-border-color: -line; -fx-border-radius: 12; -fx-padding: 16; }
 .lan-range-page .range-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 14px; }
-.lan-range-page .range-guide { -fx-background-color: #f4f6fc; -fx-background-radius: 8; -fx-padding: 12; }
-.lan-range-page .range-preparation > .title { -fx-background-color: #e9edff; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-padding: 12 16; }
-.lan-range-page .range-preparation > .content { -fx-padding: 16; -fx-background-color: -surface; -fx-border-color: -line; }
 .lan-range-page #lan-range-peers > .title, .lan-range-page #lan-range-history-section > .title { -fx-background-color: -cream; -fx-font-size: 12px; }
 .lan-range-page #lan-range-peers > .content { -fx-padding: 8 12; -fx-background-color: -surface; -fx-border-color: -line; }
 .lan-range-page #lan-range-run-scope { -fx-background-color: #f3f5ff; -fx-background-radius: 6; -fx-padding: 10 12; }

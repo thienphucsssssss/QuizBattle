@@ -28,6 +28,14 @@ class LanRangeTest {
         assertThrows(IllegalArgumentException.class,()->parseOptions(options().put("route","")));
         assertEquals(60,parseOptions(options().put("distance_m",0).put("duration_seconds",60)).durationSeconds());
     }
+    @Test void metreOnlyMeasurementDoesNotInventNetworkTopologyOrDistanceGeometry(){
+        var parsed=parseOptions(options().put("topology","UNSPECIFIED").put("distance_basis","UNSPECIFIED"));
+        var wire=optionsPayload(parsed);
+        assertEquals("UNSPECIFIED",wire.path("topology").asText());
+        assertEquals("UNSPECIFIED",wire.path("distance_basis").asText());
+        assertEquals("31.5",parsed.distanceMeters().toPlainString());
+        assertThrows(IllegalArgumentException.class,()->parseOptions(options().put("topology","AUTO_AP")));
+    }
     @Test void thresholdsUsePlannedSamplesAndNeverPassAnInterruptedRun() {
         var values=new ArrayList<Sample>();
         for(int i=1;i<=30;i++)values.add(new Sample(Direction.CLIENT_TO_SERVER,i,i==30?Status.TIMEOUT:Status.ON_TIME,i==30?null:10_000_000L));

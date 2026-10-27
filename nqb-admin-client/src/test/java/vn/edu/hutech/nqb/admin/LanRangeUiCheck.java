@@ -71,15 +71,24 @@ public final class LanRangeUiCheck {
                     await(()->((ComboBox<?>)pane().lookup("#lan-range-target")).getItems().size()==1);
                     fx(()->{
                         @SuppressWarnings("unchecked") var targets=(ComboBox<JsonNode>)pane().lookup("#lan-range-target");targets.getSelectionModel().selectFirst();
-                        ((TextField)pane().lookup("#lan-range-survey")).setText("Kiểm thử cục bộ");
-                        ((TextField)pane().lookup("#lan-range-route")).setText("Một máy · cùng IP");
                         ((TextField)pane().lookup("#lan-range-distance")).setText("-1");
                         button("#lan-range-start").fire();check(button("#lan-range-stop").isDisabled(),"Invalid distance started a run");
                         ((TextField)pane().lookup("#lan-range-distance")).setText("0");snapshot("ready-1366");button("#lan-range-start").fire();
                     });
                     await(()->((Label)pane().lookup("#lan-range-client-stats")).getText().contains("Đã có kết quả: 2")
                         &&((Label)pane().lookup("#lan-range-server-stats")).getText().contains("Đã có kết quả: 2"));
-                    fx(()->{check(((LanRangeClient)get(app,"lanRangeClient")).snapshot().path("player_id").asText().equals(measuredPlayer),"UI is measuring the manager instead of the chosen client");check(measuredRange.snapshot().path("active").asBoolean(),"Chosen client did not receive the measure command");check(((ComboBox<?>)pane().lookup("#lan-range-target")).isDisabled(),"Target can change during measurement");check(((Label)pane().lookup("#lan-range-evidence")).getText().contains("Kiểm thử cục bộ"),"Same-host test labelled as physical range");check(!((TitledPane)pane().lookup("#lan-range-setup")).isExpanded(),"Preparation obscures results while measuring");bounds("#lan-range-stop");((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(0);snapshot("active-1366");app.qaClick("Cài đặt");});
+                    fx(()->{
+                        var measured=((LanRangeClient)get(app,"lanRangeClient")).snapshot();
+                        check(measured.path("player_id").asText().equals(measuredPlayer),"UI is measuring the manager instead of the chosen client");
+                        check(measured.path("duration_seconds").asInt()==30,"Metre-only UI did not use the 30-second measurement");
+                        check(measured.path("topology").asText().equals("UNSPECIFIED")&&measured.path("distance_basis").asText().equals("UNSPECIFIED"),"Removed settings were replaced with invented field conditions");
+                        check(!measured.path("survey_name").asText().isBlank()&&!measured.path("route").asText().isBlank(),"Automatic report metadata is missing");
+                        check(measuredRange.snapshot().path("active").asBoolean(),"Chosen client did not receive the measure command");
+                        check(((ComboBox<?>)pane().lookup("#lan-range-target")).isDisabled(),"Target can change during measurement");
+                        check(((TextField)pane().lookup("#lan-range-distance")).isDisabled(),"Measured marker can change during an active run");
+                        check(((Label)pane().lookup("#lan-range-evidence")).getText().contains("Kiểm thử cục bộ"),"Same-host test labelled as physical range");
+                        bounds("#lan-range-stop");((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(0);snapshot("active-1366");app.qaClick("Cài đặt");
+                    });
                     fx(()->app.qaClick("Đo tầm kết nối LAN"));
                     fx(()->{check(button("#lan-range-start").isDisabled(),"Tab switch lost the active run");check(((TextField)pane().lookup("#lan-range-distance")).getText().equals("0"),"Tab switch changed measured marker");button("#lan-range-stop").fire();});
                     await(()->!button("#lan-range-start").isDisabled());

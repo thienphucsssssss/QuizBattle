@@ -6,6 +6,8 @@ Cập nhật 22/10/2026 theo yêu cầu người dùng: màn khởi động là 
 
 ## Định hướng
 
+Cập nhật 27/10/2026 — theo yêu cầu rút gọn mới nhất: đưa ô Mốc đã đo bằng thước vào khoảng trống dưới thông tin Server ở cột trái. Bỏ hẳn khối Chuẩn bị lượt đo, tên đợt/tuyến/thời lượng/bố trí Wi-Fi/cách đo/ghi chú. Người dùng chỉ chọn client bên phải, nhập mét bên trái và bắt đầu. Hiện dòng thời lượng cố định 30 giây, khóa mét/client khi chạy. Đợt báo cáo tự tạo theo client/phòng/Server; điều kiện mạng không khai báo lưu UNSPECIFIED, không tự suy ra hành lang/AP. Phần kết quả đổi số thứ tự thành 2; giữ lịch sử và footer. Kiểm tra tại 1366×768, 1024×640 và dialog học sinh.
+
 Cập nhật 27/10/2026 — tránh nhầm IP lịch sử với client đang kết nối: mở công cụ không tự chọn nhật ký cũ. Kết quả/IP chỉ hiện khi có lượt đo trong phiên hiện tại hoặc người dùng chủ động chọn lịch sử. Lịch sử có nhãn nổi bật “không phải trạng thái kết nối hiện tại”, địa chỉ ghi “IP đã lưu” và nút đóng kết quả lịch sử; đóng không xóa file. Đổi tab vẫn giữ lượt đang chạy/kết quả vừa đo và lựa chọn lịch sử chủ động.
 
 Cập nhật 27/10/2026 — theo sửa đổi mới nhất: bỏ khối “Client · laptop này” và IP máy quản lý, đặt danh sách Client trong phòng ở bên phải Server. Chủ phòng chọn tên/IP thật trong ComboBox native rồi bắt đầu/dừng đo từ máy quản lý. Không có client/chưa chọn/không có quyền thì khóa đo; khi chạy khóa lựa chọn, client rời không tự chuyển sang client khác. Lệnh và kết quả gắn player_id/control_id/run_id; lịch sử/CSV ghi client mục tiêu. Phía học sinh chỉ có danh tính của mình. Kết quả Server do Server đo; không gắn kết quả máy quản lý vào học sinh. Các ghi chú “Client laptop này” trước đây bên dưới thuộc bố cục đã được thay thế.

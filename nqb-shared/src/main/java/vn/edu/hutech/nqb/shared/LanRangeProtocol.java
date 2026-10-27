@@ -11,8 +11,8 @@ public final class LanRangeProtocol {
     public enum Direction { CLIENT_TO_SERVER, SERVER_TO_CLIENT }
     public enum Status { ON_TIME, TIMEOUT, SEND_FAILED, DISCONNECTED, CANCELLED }
     public enum EndReason { COMPLETED, STOPPED, DISCONNECTED, GAME_STARTED, ROOM_CHANGED, STORAGE_ERROR, CONTROL_TIMEOUT, APP_CLOSED }
-    public enum Topology { SERVER_HOTSPOT, DEDICATED_AP, SHARED_WIFI }
-    public enum DistanceBasis { STRAIGHT_LINE, CORRIDOR_ROUTE }
+    public enum Topology { SERVER_HOTSPOT, DEDICATED_AP, SHARED_WIFI, UNSPECIFIED }
+    public enum DistanceBasis { STRAIGHT_LINE, CORRIDOR_ROUTE, UNSPECIFIED }
     public record Options(BigDecimal distanceMeters,int durationSeconds,String surveyId,String surveyName,String route,
                           Topology topology,DistanceBasis distanceBasis,String notes) {
         public Options {
