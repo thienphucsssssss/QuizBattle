@@ -18,10 +18,12 @@ public final class LanRangeClient implements AutoCloseable {
     private final ScheduledExecutorService loop=Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("lan-range-client").factory());
     private volatile JsonNode latest=object().put("active",false).put("phase","IDLE");
     private Run current;
+    private RemoteRun remote;
     private volatile boolean closed;
     private static final long SECOND=1_000_000_000L;
     private static final class Run {
         final Options options;
+        final String controlId;
         final CompletableFuture<JsonNode> started=new CompletableFuture<>();
         final CompletableFuture<Void> complete=new CompletableFuture<>();
         final Map<Integer,Sample> client=new LinkedHashMap<>(),server=new LinkedHashMap<>();
@@ -33,7 +35,7 @@ public final class LanRangeClient implements AutoCloseable {
         boolean measuring,finishing,finished,clientDone,serverReceived,serverHealthy,clientHealthy=true,saved,missed;
         EndReason reason;
         String error="";
-        Run(Options options){this.options=options;metadata=optionsPayload(options);}
+        Run(Options options,String controlId){this.options=options;this.controlId=controlId;metadata=optionsPayload(options);if(!controlId.isBlank())metadata.put("control_id",controlId);}
         String id(){return metadata.path("run_id").asText();}
     }
     public LanRangeClient(QuizGateway gateway,Path journalDirectory,Consumer<JsonNode> onSnapshot){
@@ -42,19 +44,22 @@ public final class LanRangeClient implements AutoCloseable {
     public JsonNode snapshot(){return latest.deepCopy();}
     private void execute(Runnable action){try{loop.execute(action);}catch(RejectedExecutionException ignored){/* A closed connection cannot revive a run. */}}
     public CompletableFuture<JsonNode> start(Options options){
+        return startLocal(options,"");
+    }
+    private CompletableFuture<JsonNode> startLocal(Options options,String controlId){
         if(closed||loop.isShutdown())return CompletableFuture.failedFuture(new IllegalStateException("Kết nối đo đã đóng."));
         var result=new CompletableFuture<JsonNode>();
         execute(()->{
-            if(closed||(current!=null&&!current.finished)){
+            if(closed||(current!=null&&!current.finished)||(remote!=null&&!remote.finished)){
                 result.completeExceptionally(new IllegalStateException("Lượt đo chưa kết thúc hoặc kết nối đã đóng."));return;
             }
-            var run=new Run(options);current=run;run.started.whenComplete((v,e)->{if(e!=null)result.completeExceptionally(e);else result.complete(v);});
+            var run=new Run(options,controlId);current=run;remote=null;run.started.whenComplete((v,e)->{if(e!=null)result.completeExceptionally(e);else result.complete(v);});
             publish(run);
             try{
                 Files.createDirectories(directory);
                 Path probe=Files.createTempFile(directory,"write-check-",".tmp");Files.delete(probe);
             }catch(Exception error){startFailed(run,new GatewayException("STORAGE_ERROR","Không ghi được thư mục nhật ký: "+directory,object()));return;}
-            gateway.request("LAN_RANGE_START",optionsPayload(options)).whenComplete((data,error)->execute(()->{
+            gateway.request("LAN_RANGE_START",run.metadata.deepCopy()).whenComplete((data,error)->execute(()->{
                 if(run.finished){if(data!=null)gateway.request("LAN_RANGE_STOP",object().put("run_id",data.path("run_id").asText()));return;}
                 if(error!=null){startFailed(run,unwrap(error));return;}
                 run.metadata=((ObjectNode)data).deepCopy();
@@ -129,9 +134,25 @@ public final class LanRangeClient implements AutoCloseable {
     }
     public void onEvent(JsonNode event){
         JsonNode copy=event.deepCopy();
+        if(copy.path("type").asText().equals("LAN_RANGE_REMOTE_REQUEST")){
+            var request=copy.path("payload");String control=request.path("control_id").asText();
+            try{startLocal(parseOptions(request),control).whenComplete((v,error)->{if(error!=null)gateway.request("LAN_RANGE_REMOTE_REPORT",object().put("control_id",control).set("snapshot",object().put("error",unwrap(error).getMessage())));});}
+            catch(IllegalArgumentException invalid){gateway.request("LAN_RANGE_REMOTE_REPORT",object().put("control_id",control).set("snapshot",object().put("error",invalid.getMessage())));}return;
+        }
         execute(()->{
+            String remoteType=copy.path("type").asText();var remotePayload=copy.path("payload");
+            if(remote!=null&&!remote.finished){
+                var watched=remote;
+                if(remoteType.equals("DISCONNECTED")){endRemote(watched,EndReason.DISCONNECTED,"Mất kết nối với Server.");return;}
+                if(watched.id.equals(remotePayload.path("control_id").asText())){
+                    if(remoteType.equals("LAN_RANGE_REMOTE_STATE"))receiveRemote(watched,(ObjectNode)remotePayload.path("snapshot"));
+                    else if(remoteType.equals("LAN_RANGE_REMOTE_FAILED"))endRemote(watched,EndReason.CONTROL_TIMEOUT,remotePayload.path("error").asText());
+                    return;
+                }
+            }
             var run=current;if(run==null||run.finished||run.finishing)return;
             String type=copy.path("type").asText();var p=copy.path("payload");
+            if(type.equals("LAN_RANGE_REMOTE_CANCEL")&&run.controlId.equals(p.path("control_id").asText())){EndReason why;try{why=EndReason.valueOf(p.path("end_reason").asText());}catch(IllegalArgumentException invalid){why=EndReason.STOPPED;}stop(why);return;}
             if(type.equals("DISCONNECTED")){finish(run,EndReason.DISCONNECTED);return;}
             if(type.equals("GAME_START")){finish(run,EndReason.GAME_STARTED);return;}
             if(type.equals("ROOM_CLOSED")){finish(run,EndReason.ROOM_CHANGED);return;}
@@ -153,6 +174,11 @@ public final class LanRangeClient implements AutoCloseable {
         var result=new CompletableFuture<Void>();
         if(loop.isShutdown())return CompletableFuture.completedFuture(null);
         execute(()->{
+            if(remote!=null&&!remote.finished){var watched=remote;
+                gateway.request("LAN_RANGE_REMOTE_STOP",object().put("control_id",watched.id));
+                loop.schedule(()->{if(!watched.finished&&!watched.finishing)endRemote(watched,reason,"Chưa nhận được tổng kết Client.");},3,TimeUnit.SECONDS);
+                watched.complete.whenComplete((v,e)->{if(e!=null)result.completeExceptionally(e);else result.complete(null);});return;
+            }
             var run=current;
             if(run==null){result.complete(null);return;}
             if(!run.finishing&&!run.finished){
@@ -200,7 +226,58 @@ public final class LanRangeClient implements AutoCloseable {
     private void publish(Run run){
         latest=build(run,false);
         try{observer.accept(latest.deepCopy());}catch(RuntimeException ignored){/* UI observers do not own the network run. */}
+        if(!run.controlId.isBlank()&&(latest.has("run_id")||!run.error.isBlank()))gateway.request("LAN_RANGE_REMOTE_REPORT",object().put("control_id",run.controlId).set("snapshot",latest.deepCopy()));
     }
+    private static final class RemoteRun {
+        final String id=UUID.randomUUID().toString();final CompletableFuture<Void> complete=new CompletableFuture<>();
+        final Set<String> recorded=new HashSet<>();ObjectNode state;LanRangeJournal journal;boolean finishing,finished,healthy=true;
+        RemoteRun(String player,Options options){state=optionsPayload(options).put("control_id",id).put("player_id",player).put("active",true).put("phase","PREPARING").put("saved",false);}
+    }
+    /** Controls a real student socket; probes never originate on the manager connection. */
+    public CompletableFuture<JsonNode> startFor(String playerId,Options options){
+        if(closed||loop.isShutdown())return CompletableFuture.failedFuture(new IllegalStateException("Kết nối đo đã đóng."));
+        var result=new CompletableFuture<JsonNode>();execute(()->{
+            if(closed||(current!=null&&!current.finished)||(remote!=null&&!remote.finished)){result.completeExceptionally(new IllegalStateException("Hãy chờ lượt đang đo kết thúc."));return;}
+            if(playerId==null||playerId.isBlank()){result.completeExceptionally(new IllegalArgumentException("Chọn client cần đo."));return;}
+            var watched=new RemoteRun(playerId,options);remote=watched;publishRemote(watched);
+            gateway.request("LAN_RANGE_REMOTE_START",watched.state.deepCopy()).whenComplete((reply,error)->execute(()->{
+                if(error!=null){endRemote(watched,EndReason.CONTROL_TIMEOUT,unwrap(error).getMessage());result.completeExceptionally(unwrap(error));return;}
+                if(!watched.finishing&&!watched.finished&&!watched.state.has("run_id")){watched.state.setAll((ObjectNode)reply);publishRemote(watched);}
+                result.complete(reply);
+            }));
+        });return result;
+    }
+    private void publishRemote(RemoteRun watched){if(remote!=watched)return;latest=watched.state.deepCopy();try{observer.accept(latest.deepCopy());}catch(RuntimeException ignored){}}
+    private void endRemote(RemoteRun watched,EndReason reason,String error){
+        if(watched.finishing||watched.finished)return;
+        receiveRemote(watched,watched.state.deepCopy().put("active",false).put("saved",false).put("phase","FINISHED").put("passed",false)
+            .put("server_summary_received",false).put("end_reason",reason.name()).put("error",error==null?"Lượt đo không hoàn tất.":error));
+    }
+    private void receiveRemote(RemoteRun watched,ObjectNode snapshot){
+        if(watched.finishing||watched.finished||remote!=watched)return;
+        watched.state=snapshot.deepCopy().put("control_id",watched.id);
+        try{
+            if(snapshot.has("run_id")){
+                if(watched.journal==null){watched.journal=new LanRangeJournal(directory.resolve("controlled"),"client",snapshot.path("run_id").asText());remoteRecord(watched,snapshot.deepCopy().put("record_type","RUN_STARTED"));}
+                for(var sample:snapshot.path("samples")){var parsed=parseSample(sample);if(watched.recorded.add(parsed.direction()+":"+parsed.sequence()))remoteRecord(watched,samplePayload(parsed).put("record_type","SAMPLE"));}
+            }
+        }catch(RuntimeException failure){watched.healthy=false;watched.state.put("active",false).put("passed",false).put("end_reason","STORAGE_ERROR").put("error","Không lưu được nhật ký máy quản lý.");gateway.request("LAN_RANGE_REMOTE_STOP",object().put("control_id",watched.id));}
+        if(watched.state.path("active").asBoolean()){watched.state.put("saved",false);publishRemote(watched);return;}
+        boolean reportedPass=watched.state.path("passed").asBoolean();
+        watched.finishing=true;watched.state.put("active",true).put("phase","SAVING").put("saved",false).put("passed",false);publishRemote(watched);
+        var finishing=snapshot.deepCopy().put("record_type","RUN_FINISHED");
+        if(watched.journal==null){watched.state.put("active",false).put("phase","FINISHED");watched.finished=true;watched.finishing=false;publishRemote(watched);watched.complete.complete(null);return;}
+        remoteRecord(watched,finishing);
+        watched.journal.closeAsync().whenComplete((v,error)->execute(()->{
+            watched.finished=true;watched.finishing=false;watched.state.put("active",false).put("phase","FINISHED").put("saved",error==null&&watched.healthy).put("passed",reportedPass&&error==null&&watched.healthy);
+            if(error!=null||!watched.healthy)watched.state.put("passed",false).put("end_reason","STORAGE_ERROR").put("error","Không lưu đủ nhật ký máy quản lý.");
+            publishRemote(watched);watched.complete.complete(null);
+        }));
+    }
+    private void remoteRecord(RemoteRun watched,ObjectNode record){watched.journal.append(record).whenComplete((v,error)->{if(error!=null)execute(()->{
+        watched.healthy=false;watched.state.put("passed",false).put("error","Không lưu đủ nhật ký máy quản lý.");
+        if(!watched.finished&&!watched.finishing){gateway.request("LAN_RANGE_REMOTE_STOP",object().put("control_id",watched.id));endRemote(watched,EndReason.STORAGE_ERROR,"Không lưu đủ nhật ký máy quản lý.");}
+    });});}
     private static Throwable unwrap(Throwable e){while((e instanceof CompletionException||e instanceof ExecutionException)&&e.getCause()!=null)e=e.getCause();return e;}
     @Override public void close(){
         closed=true;stop(EndReason.APP_CLOSED).whenComplete((v,e)->loop.shutdown());

@@ -76,6 +76,7 @@ public final class QuizServer implements AutoCloseable {
         int userId,credentialVersion; String role="",playerId=""; boolean mustChange,authBusy; long rateStart; int rateCount;
         QuestionImportSession questionImport;
         LanRangeSession range; boolean rangePrepared;
+        RemoteRange remoteIncoming,remoteOutgoing;
         Peer(SSLSocket socket){this.socket=socket;}
         void send(ObjectNode data){
             if(gone.get()||closeAfterWrite)return;
@@ -182,17 +183,23 @@ public final class QuizServer implements AutoCloseable {
         catch(Exception error){System.err.println("Request failed: "+type+" / "+error.getClass().getSimpleName());p.send(envelope("ERROR",id,fail("SERVER_ERROR","Máy chủ chưa hoàn tất yêu cầu. Hãy thử lại.").payload()));}
     }
     private void range(Peer p,String id,String type,JsonNode payload)throws Exception{
+        if(type.startsWith("LAN_RANGE_REMOTE_")){remoteRange(p,id,type,payload);return;}
         if(type.equals("LAN_RANGE_START")){
             if(running())throw fail("INVALID_STATE","Không đo tầm kết nối trong lúc thi đấu.");
-            if((p.range!=null&&!p.range.finished())||peers.stream().filter(v->v.range!=null&&!v.range.finished()).count()>=LanRangeProtocol.MAX_ACTIVE_RUNS)
+            if((p.range!=null&&!p.range.finished())||activeRangeCount(p)>=LanRangeProtocol.MAX_ACTIVE_RUNS||p.remoteOutgoing!=null)
                 throw fail("LAN_RANGE_BUSY","Đang có lượt đo. Hãy dừng lượt cũ hoặc chờ lượt khác kết thúc.");
+            if(p.remoteIncoming!=null&&!p.remoteIncoming.id.equals(payload.path("control_id").asText()))throw fail("LAN_RANGE_BUSY","Client đã được chọn cho một lượt đo từ phòng.");
+            if(p.remoteIncoming!=null&&p.remoteIncoming.metadata.has("run_id"))throw fail("LAN_RANGE_BUSY","Lệnh đo này đã được dùng.");
+            if(payload.has("control_id")&&(p.remoteIncoming==null||!p.remoteIncoming.id.equals(payload.path("control_id").asText())))throw fail("FORBIDDEN","Lệnh đo đã hết hiệu lực.");
             LanRangeProtocol.Options options;
             try{options=LanRangeProtocol.parseOptions(payload);}catch(IllegalArgumentException invalid){throw fail("INVALID_INPUT",invalid.getMessage());}
+            if(p.remoteIncoming!=null&&!options.equals(p.remoteIncoming.options))throw fail("INVALID_INPUT","Cấu hình không khớp lệnh của giảng viên.");
             String run=UUID.randomUUID().toString();
             var data=LanRangeProtocol.optionsPayload(options).put("run_id",run).put("client_ip_observed",p.socket.getInetAddress().getHostAddress())
                 .put("server_ip",p.socket.getLocalAddress().getHostAddress()).put("server_port",p.socket.getLocalPort())
                 .put("loopback",p.socket.getInetAddress().isLoopbackAddress()||NetworkInterface.getByInetAddress(p.socket.getInetAddress())!=null)
                 .put("started_at",Instant.now().toString());
+            if(p.remoteIncoming!=null){var remote=p.remoteIncoming;data.put("control_id",remote.id).put("player_id",p.playerId).put("nickname",remote.name);remote.metadata=data.deepCopy();}
             var journal=new LanRangeJournal(config.database().toAbsolutePath().getParent().resolve("lan-range"),"server",run);
             var measuring=new LanRangeSession(run,options,p::send,journal,System::nanoTime,Clock.systemUTC());
             p.range=measuring;p.rangePrepared=false;
@@ -224,7 +231,84 @@ public final class QuizServer implements AutoCloseable {
             default->throw fail("UNKNOWN_TYPE","Yêu cầu đo không được hỗ trợ.");
         }
     }
-    private void finishRanges(EndReason reason){for(var p:peers)if(p.range!=null)p.range.finish(reason);}
+    private void finishRanges(EndReason reason){for(var p:peers){if(p.range!=null)p.range.finish(reason);if(p.remoteOutgoing!=null)finishRemote(p.remoteOutgoing,reason);}}
+    private long activeRangeCount(Peer excluded){return peers.stream().filter(v->v!=excluded&&!v.gone.get()&&(v.remoteIncoming!=null||(v.range!=null&&!v.range.finished()))).count();}
+    private final class RemoteRange {
+        final String id,name;final Peer controller,target;final LanRangeProtocol.Options options;
+        ObjectNode metadata,last=obj();final Map<Integer,LanRangeProtocol.Sample> clientSamples=new LinkedHashMap<>();
+        long updated=System.nanoTime();boolean stopping;
+        RemoteRange(String id,Peer controller,Player player,LanRangeProtocol.Options options){
+            this.id=id;this.controller=controller;target=player.peer;name=player.nickname;this.options=options;
+            metadata=LanRangeProtocol.optionsPayload(options).put("control_id",id).put("player_id",player.id).put("nickname",name)
+                .put("client_ip_observed",target.socket.getInetAddress().getHostAddress()).put("server_ip",target.socket.getLocalAddress().getHostAddress()).put("server_port",target.socket.getLocalPort());
+        }
+    }
+    private void remoteRange(Peer p,String requestId,String type,JsonNode payload)throws Exception{
+        String control=payload.path("control_id").asText();
+        if(type.equals("LAN_RANGE_REMOTE_START")){
+            host(p);if(running())throw fail("INVALID_STATE","Không đo trong lúc thi đấu.");
+            if(p.remoteOutgoing!=null||(p.range!=null&&!p.range.finished()))throw fail("LAN_RANGE_BUSY","Hãy dừng lượt đang đo trước.");
+            var player=players.get(payload.path("player_id").asText());
+            if(player==null||player.peer==null||player.peer.gone.get()||player.peer.closeAfterWrite)throw fail("CLIENT_OFFLINE","Client đã rời phòng hoặc mất kết nối.");
+            if(player.peer.remoteIncoming!=null||(player.peer.range!=null&&!player.peer.range.finished())||activeRangeCount(null)>=LanRangeProtocol.MAX_ACTIVE_RUNS)throw fail("LAN_RANGE_BUSY","Client hoặc Server đang bận đo.");
+            LanRangeProtocol.Options options;
+            try{if(!UUID.fromString(control).toString().equals(control))throw new IllegalArgumentException();options=LanRangeProtocol.parseOptions(payload);}catch(IllegalArgumentException invalid){throw fail("INVALID_INPUT","Thông tin lượt đo không hợp lệ.");}
+            var remote=new RemoteRange(control,p,player,options);p.remoteOutgoing=remote;player.peer.remoteIncoming=remote;
+            p.send(envelope(type+"_OK",requestId,remote.metadata.deepCopy()));remote.target.send(envelope("LAN_RANGE_REMOTE_REQUEST",null,remote.metadata.deepCopy()));return;
+        }
+        if(type.equals("LAN_RANGE_REMOTE_REPORT")){
+            var remote=p.remoteIncoming;if(remote==null||!remote.id.equals(control))throw fail("FORBIDDEN","Kết quả không thuộc client được chọn.");
+            var snapshot=payload.path("snapshot");
+            if(!remote.metadata.has("run_id")){
+                if(snapshot.path("error").asText().isBlank())throw fail("INVALID_INPUT","Lượt đo chưa bắt đầu.");
+                p.send(envelope(type+"_OK",requestId,obj()));failRemote(remote,snapshot.path("error").asText());return;
+            }
+            if(!remote.metadata.path("run_id").asText().equals(snapshot.path("run_id").asText()))throw fail("FORBIDDEN","Sai lượt đo.");
+            if(!snapshot.path("samples").isArray()||snapshot.path("samples").size()>120)throw fail("INVALID_INPUT","Mẫu đo không hợp lệ.");
+            try{for(var value:snapshot.path("samples")){
+                var sample=LanRangeProtocol.parseSample(value);if(sample.sequence()>remote.options.durationSeconds())throw new IllegalArgumentException();
+                if(sample.direction()!=LanRangeProtocol.Direction.CLIENT_TO_SERVER)continue;
+                if(sample.status()==LanRangeProtocol.Status.ON_TIME&&!p.range.sawClientProbe(sample.sequence()))throw new IllegalArgumentException();
+                var previous=remote.clientSamples.putIfAbsent(sample.sequence(),sample);if(previous!=null&&!previous.equals(sample))throw new IllegalArgumentException();
+            }}catch(IllegalArgumentException invalid){throw fail("INVALID_INPUT","Bằng chứng Client không hợp lệ.");}
+            remote.last=((ObjectNode)snapshot).deepCopy();remote.updated=System.nanoTime();
+            var state=remoteSnapshot(remote,null);p.send(envelope(type+"_OK",requestId,obj()));remote.controller.send(envelope("LAN_RANGE_REMOTE_STATE",null,obj().put("control_id",remote.id).set("snapshot",state)));
+            if(!state.path("active").asBoolean())clearRemote(remote);return;
+        }
+        if(type.equals("LAN_RANGE_REMOTE_STOP")){
+            host(p);var remote=p.remoteOutgoing;if(remote==null||!remote.id.equals(control))throw fail("FORBIDDEN","Không có quyền dừng lượt đo này.");
+            p.send(envelope(type+"_OK",requestId,obj()));finishRemote(remote,EndReason.STOPPED);return;
+        }
+        throw fail("UNKNOWN_TYPE","Lệnh điều khiển đo không hỗ trợ.");
+    }
+    private ObjectNode remoteSnapshot(RemoteRange r,EndReason forced){
+        var result=r.metadata.deepCopy();var evidence=r.target.range.evidence();
+        boolean active=forced==null&&r.last.path("active").asBoolean();
+        result.put("active",active).put("phase",active?r.last.path("phase").asText("MEASURING"):"FINISHED")
+            .put("saved",forced==null&&r.last.path("saved").asBoolean()).put("client_journal_healthy",forced==null&&r.last.path("client_journal_healthy").asBoolean())
+            .put("server_summary_received",evidence.path("server_summary_received").asBoolean()).put("server_journal_healthy",evidence.path("server_journal_healthy").asBoolean())
+            .put("error",forced==null?r.last.path("error").asText():"Chưa nhận được tổng kết Client.");
+        EndReason reason=forced;
+        if(reason==null&&!active)try{reason=EndReason.valueOf(r.last.path("end_reason").asText());}catch(IllegalArgumentException invalid){reason=EndReason.CONTROL_TIMEOUT;}
+        if(!active&&evidence.has("end_reason")&&!evidence.path("end_reason").asText().equals("COMPLETED"))reason=EndReason.valueOf(evidence.path("end_reason").asText());
+        if(reason!=null)result.put("end_reason",reason.name()).put("ended_at",Instant.now().toString());else result.putNull("end_reason");
+        result.set("client_summary",LanRangeStatistics.summarize(LanRangeProtocol.Direction.CLIENT_TO_SERVER,r.options.durationSeconds(),r.clientSamples.values()));result.set("server_summary",evidence.path("server_summary"));
+        var list=result.putArray("samples");r.clientSamples.values().forEach(s->list.add(LanRangeProtocol.samplePayload(s)));evidence.path("samples").forEach(list::add);
+        result.put("passed",!active&&result.path("saved").asBoolean()&&result.path("server_summary_received").asBoolean()&&result.path("server_journal_healthy").asBoolean()
+            &&LanRangeStatistics.passes(result.path("client_summary"),result.path("server_summary"),reason,result.path("client_journal_healthy").asBoolean()));return result;
+    }
+    private void clearRemote(RemoteRange r){if(r.controller.remoteOutgoing==r)r.controller.remoteOutgoing=null;if(r.target.remoteIncoming==r)r.target.remoteIncoming=null;}
+    private void failRemote(RemoteRange r,String message){r.controller.send(envelope("LAN_RANGE_REMOTE_FAILED",null,obj().put("control_id",r.id).put("error",message.length()>500?message.substring(0,500):message)));clearRemote(r);}
+    private void finishRemote(RemoteRange r,EndReason reason){
+        if(r.stopping)return;r.stopping=true;
+        r.target.send(envelope("LAN_RANGE_REMOTE_CANCEL",null,obj().put("control_id",r.id).put("end_reason",reason.name())));
+        if(!r.metadata.has("run_id")){failRemote(r,"Client không bắt đầu được lượt đo hoặc lệnh đã dừng.");return;}
+        r.target.range.finish(reason);
+        clock.schedule(()->{try{worker.execute(()->{
+            if(r.controller.remoteOutgoing!=r)return;
+            r.controller.send(envelope("LAN_RANGE_REMOTE_STATE",null,obj().put("control_id",r.id).set("snapshot",remoteSnapshot(r,reason))));clearRemote(r);
+        });}catch(RejectedExecutionException ignored){}},2,TimeUnit.SECONDS);
+    }
     private ObjectNode publicDirectory()throws SQLException{
         var data=obj().put("server_id",serverId).put("server_name","Quiz Battle · "+serverId.substring(0,4).toUpperCase(Locale.ROOT));var rooms=array();
         if(owner!=0){
@@ -349,6 +433,9 @@ public final class QuizServer implements AutoCloseable {
             .put("question_count",questionCount).put("duration_seconds",questionSeconds).put("question_set_id",questionSetId).put("question_set_name",questionSetName).put("connected_player_count",connected).put("ready_count",ready).put("answered_count",answered).put("remaining_ms",remaining());state.set("players",list);
         state.put("question_source_name",historySessionId.isEmpty()?(questionSetId==0?"Toàn bộ ngân hàng":questionSetName):"Từ lịch sử: "+historyRoomName);
         state.put("max_players",config.maxPlayers()).put("server_port",port());
+        state.set("connection_info",obj().put("server_ip",viewer.socket.getLocalAddress().getHostAddress())
+            .put("server_port",viewer.socket.getLocalPort()).put("client_ip_observed",viewer.socket.getInetAddress().getHostAddress())
+            .put("player_id",viewer.playerId));
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
         state.put("question_number",questions.isEmpty()||phase==GamePhase.COUNTDOWN?0:questionIndex+1);
         if(viewer.userId!=0)state.set("ranking",phase==GamePhase.WAITING?array():ranking());
@@ -377,6 +464,8 @@ public final class QuizServer implements AutoCloseable {
         LOG.info("NQB_STUDENT_TRACKING "+entry);
     }
     private void detach(Peer p,String event){
+        if(p.remoteOutgoing!=null)finishRemote(p.remoteOutgoing,EndReason.DISCONNECTED);
+        if(p.remoteIncoming!=null)finishRemote(p.remoteIncoming,EndReason.DISCONNECTED);
         if(p.range!=null)p.range.finish(event.equals("DISCONNECTED")?EndReason.DISCONNECTED:EndReason.STOPPED);
         var v=players.get(p.playerId);if(v==null||v.peer!=p)return;v.peer=null;v.ready=false;
         track(event,v,false);
@@ -384,6 +473,10 @@ public final class QuizServer implements AutoCloseable {
         if(running()&&players.values().stream().noneMatch(player->player.peer!=null&&!player.peer.gone.get()))abort();else broadcastState();
     }
     private void tick()throws SQLException{
+        for(var p:peers)if(p.remoteOutgoing!=null){var r=p.remoteOutgoing;long quiet=System.nanoTime()-r.updated;
+            if(!r.metadata.has("run_id")&&quiet>TimeUnit.SECONDS.toNanos(10))finishRemote(r,EndReason.CONTROL_TIMEOUT);
+            else if(r.metadata.has("run_id")&&r.target.range.finished()&&quiet>TimeUnit.SECONDS.toNanos(3))finishRemote(r,EndReason.CONTROL_TIMEOUT);
+        }
         long now=System.nanoTime();boolean changed=false;
         for(var p:peers)if(p.range!=null){if(p.gone.get())p.range.finish(EndReason.DISCONNECTED);else p.range.tick();}
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;

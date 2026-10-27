@@ -337,6 +337,7 @@ public final class ArcadeApplication extends Application {
     void refreshManagedRoom(Runnable refreshed) {
         call("ROOM_STATE",object(),value->{
             room=value;session=room.path("session_id").asText();
+            if(lanRangeView!=null)lanRangeView.updateConnections(room,!disconnected);
             if(room.has("question"))question=room.path("question");
             if(room.has("result"))result=room.path("result");
             if(room.path("phase").asText().equals("WAITING")){question=object();result=object();}
@@ -350,6 +351,8 @@ public final class ArcadeApplication extends Application {
             ()->gateway!=null&&!disconnected&&!user.isEmpty()&&!passwordRequired&&!isRunning(),this::roomView);
         if(role.equals("STUDENT"))lanRangeView.show();
         else { showManagement("Đo tầm kết nối LAN",lanRangeView.content());lanRangeView.activate(); }
+        lanRangeView.updateConnections(room,!disconnected);
+        if(!disconnected)refreshManagedRoom(()->{});
     }
     void openProjection() { showProjection(); }
     void startManagedGame() { call("START_GAME",object(),ignored->{}); }
@@ -527,7 +530,7 @@ public final class ArcadeApplication extends Application {
             case "DISCONNECTED":
                 music.stop(); sfx.stopPlaying();
                 disconnected = true; if (pulse != null) pulse.stop(); answerButtons.forEach(b -> b.setDisable(true));
-                if(lanRangeView!=null)lanRangeView.connectionChanged();
+                if(lanRangeView!=null)lanRangeView.updateConnections(room,false);
                 root.lookupAll(".room-player-state").forEach(node->{if(node instanceof Label label)label.setText("Chưa xác nhận");});
                 if (avatarDialog != null) avatarDialog.close();
                 connectionLabel.setText("Mất kết nối"); feedback.setText(role.equals("STUDENT") ? "Mất kết nối. Bạn có thể tham gia lại ở ván sau." : "Mất kết nối. Đăng nhập lại để tiếp tục quản lý phòng."); feedback.setManaged(true); feedback.setVisible(true); sfx.play(SfxSlots.Cue.CONNECTION_DOWN);
@@ -543,6 +546,7 @@ public final class ArcadeApplication extends Application {
                 }
                 String previousPhase = room.path("phase").asText();
                 room = p;
+                if(lanRangeView!=null)lanRangeView.updateConnections(room,!disconnected);
                 if(room.path("phase").asText().equals("WAITING")){
                     if(!previousPhase.equals("WAITING"))sfx.reset();
                     answer=null;question=object();result=object();session="";

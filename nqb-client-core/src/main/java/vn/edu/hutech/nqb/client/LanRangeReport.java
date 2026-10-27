@@ -20,6 +20,12 @@ public final class LanRangeReport {
             :Path.of(local,"NetworkQuizBattle","lan-range");
     }
     public static List<JsonNode> load(Path directory)throws IOException{
+        var distinct=new LinkedHashMap<String,JsonNode>();
+        for(var row:loadFlat(directory))distinct.put(row.path("run_id").asText(),row);
+        for(var row:loadFlat(directory.resolve("controlled")))distinct.put(row.path("run_id").asText(),row);
+        return distinct.values().stream().sorted(Comparator.comparing((JsonNode r)->r.path("started_at").asText()).reversed()).toList();
+    }
+    private static List<JsonNode> loadFlat(Path directory)throws IOException{
         if(!Files.exists(directory))return List.of();
         var results=new ArrayList<JsonNode>();
         try(var files=Files.newDirectoryStream(directory,"client-*.jsonl")){
@@ -61,7 +67,7 @@ public final class LanRangeReport {
             &&!r.path("loopback").asBoolean()&&r.path("distance_m").isNumber()).map(r->r.path("distance_m").decimalValue()).max(Comparator.naturalOrder());
     }
     private static final String[] META={"run_id","survey_id","survey_name","route","topology","distance_basis","notes","distance_m","duration_seconds",
-        "client_ip_observed","server_ip","server_port","started_at","ended_at","end_reason","loopback","passed","server_summary_received"};
+        "player_id","nickname","client_ip_observed","server_ip","server_port","started_at","ended_at","end_reason","loopback","passed","server_summary_received"};
     private static final String[] STATS={"planned","confirmed","on_time","timeout","send_failed","disconnected","cancelled","unconfirmed","on_time_rate",
         "rtt_min_ms","rtt_median_ms","rtt_p95_ms","rtt_max_ms"};
     public static void exportSummary(Path target,List<JsonNode> rows)throws IOException{

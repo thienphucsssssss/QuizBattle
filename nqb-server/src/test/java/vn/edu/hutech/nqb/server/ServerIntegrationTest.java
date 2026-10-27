@@ -72,6 +72,32 @@ class ServerIntegrationTest {
         return obj().put("survey_id",UUID.randomUUID().toString()).put("survey_name","Đo thật").put("route","Tầng 2")
             .put("topology","DEDICATED_AP").put("distance_basis","CORRIDOR_ROUTE").put("distance_m",0).put("duration_seconds",30);
     }
+    @Test void remoteRangeTargetsOnlyTheSelectedStudentAndEnforcesRoomOwnership()throws Exception {
+        var host=admin();String code=room(host,1);var chosen=guest(code,"Được chọn");var other=guest(code,"Không chọn");
+        String playerId=chosen.request("ROOM_STATE",obj()).path("connection_info").path("player_id").asText();
+        String control=UUID.randomUUID().toString();
+        error(other,"FORBIDDEN","LAN_RANGE_REMOTE_START",rangeOptions().put("player_id",playerId).put("control_id",control));
+        error(host,"CLIENT_OFFLINE","LAN_RANGE_REMOTE_START",rangeOptions().put("player_id","missing").put("control_id",control));
+        var requested=host.request("LAN_RANGE_REMOTE_START",rangeOptions().put("player_id",playerId).put("control_id",control));
+        assertEquals(playerId,requested.path("player_id").asText());assertEquals("Được chọn",requested.path("nickname").asText());
+        var command=chosen.event("LAN_RANGE_REMOTE_REQUEST");assertEquals(control,command.path("control_id").asText());
+        error(host,"LAN_RANGE_BUSY","LAN_RANGE_REMOTE_START",rangeOptions().put("player_id",playerId).put("control_id",UUID.randomUUID().toString()));
+        error(other,"FORBIDDEN","LAN_RANGE_REMOTE_REPORT",obj().put("control_id",control).set("snapshot",obj()));
+        var started=chosen.request("LAN_RANGE_START",((ObjectNode)command).deepCopy());String run=started.path("run_id").asText();
+        assertEquals(playerId,started.path("player_id").asText());assertEquals(control,started.path("control_id").asText());
+        chosen.request("LAN_RANGE_READY",obj().put("run_id",run));chosen.request("LAN_RANGE_PROBE",obj().put("run_id",run).put("sequence",1));
+        chosen.event("LAN_RANGE_SERVER_SAMPLE");
+        var reported=started.deepCopy();((ObjectNode)reported).put("active",true).put("saved",false).put("phase","MEASURING").put("server_ip","fake");
+        ((ObjectNode)reported).putArray("samples").add(obj().put("direction","CLIENT_TO_SERVER").put("sequence",1).put("status","ON_TIME").put("rtt_ms",1));
+        ((ObjectNode)reported).set("server_summary",obj().put("on_time",999));
+        chosen.request("LAN_RANGE_REMOTE_REPORT",obj().put("control_id",control).set("snapshot",reported));
+        var progress=host.event("LAN_RANGE_REMOTE_STATE").path("snapshot");
+        assertEquals("127.0.0.1",progress.path("server_ip").asText());assertEquals(playerId,progress.path("player_id").asText());
+        assertEquals(1,progress.path("server_summary").path("on_time").asInt());assertFalse(progress.path("passed").asBoolean());
+        host.request("LAN_RANGE_REMOTE_STOP",obj().put("control_id",control));
+        assertEquals(control,chosen.event("LAN_RANGE_REMOTE_CANCEL").path("control_id").asText());
+        assertEquals("STOPPED",chosen.event("LAN_RANGE_FINISHED").path("end_reason").asText());
+    }
     @Test void roomTopologyUsesActualPortAndConfiguredCapacityWithoutInventingDistances()throws Exception {
         var host=admin();String code=room(host,1);var player=new Client();
         player.request("JOIN",obj().put("room_code",code).put("nickname","Client topology"));
@@ -81,6 +107,75 @@ class ServerIntegrationTest {
         var node=snapshot.path("players").get(0);
         assertFalse(node.has("wifi_rtt_measurement"));assertFalse(node.has("distance_m"));
         assertEquals("127.0.0.1",node.path("ip_address").asText());
+    }
+    @Test void hostControlsThirtySecondMeasurementOnChosenClientAndKeepsOwnReport()throws Exception {
+        var host=admin();String code=room(host,1);var chosen=new Client("127.0.0.2");var other=new Client("127.0.0.3");
+        String player=chosen.request("JOIN",obj().put("room_code",code).put("nickname","Client mục tiêu")).path("player_id").asText();
+        other.request("JOIN",obj().put("room_code",code).put("nickname","Client khác"));var done=new CountDownLatch(1);
+        Path hostReports=data.resolve("host-reports");
+        try(var local=new LanRangeClient(chosen.gateway,data.resolve("chosen-reports"),s->{});
+            var idle=new LanRangeClient(other.gateway,data.resolve("idle-reports"),s->{});
+            var monitor=new LanRangeClient(host.gateway,hostReports,s->{if(s.path("saved").asBoolean()&&!s.path("active").asBoolean())done.countDown();})){
+            chosen.gateway.onEvent(local::onEvent);other.gateway.onEvent(idle::onEvent);host.gateway.onEvent(monitor::onEvent);
+            monitor.startFor(player,vn.edu.hutech.nqb.shared.LanRangeProtocol.parseOptions(rangeOptions().put("distance_m",30))).get(5,TimeUnit.SECONDS);
+            assertTrue(done.await(40,TimeUnit.SECONDS),"Remote measurement did not finish");var result=monitor.snapshot();
+            assertEquals("COMPLETED",result.path("end_reason").asText(),result.toPrettyString());assertTrue(result.path("passed").asBoolean(),result.toPrettyString());
+            assertEquals(player,result.path("player_id").asText());assertEquals("127.0.0.2",result.path("client_ip_observed").asText());
+            assertEquals(30,result.path("client_summary").path("confirmed").asInt());assertEquals(30,result.path("server_summary").path("confirmed").asInt());
+            assertFalse(idle.snapshot().has("run_id"));assertTrue(result.path("loopback").asBoolean());
+            var restored=LanRangeReport.load(hostReports);assertEquals(1,restored.size());assertEquals(30,restored.getFirst().path("client_summary").path("on_time").asInt());
+            assertEquals(player,restored.getFirst().path("player_id").asText());
+        }
+    }
+    @Test void remoteClientDisconnectUnblocksHostAndKeepsPartialEvidence()throws Exception {
+        var host=admin();String code=room(host,1);var chosen=guest(code,"Sẽ mất kết nối");String player=chosen.request("ROOM_STATE",obj()).path("connection_info").path("player_id").asText();
+        var samples=new CountDownLatch(1);var done=new CountDownLatch(1);
+        try(var local=new LanRangeClient(chosen.gateway,data.resolve("client"),s->{});
+            var monitor=new LanRangeClient(host.gateway,data.resolve("host"),s->{if(s.path("client_summary").path("confirmed").asInt()>=2)samples.countDown();if(s.has("run_id")&&!s.path("active").asBoolean()&&s.path("saved").asBoolean())done.countDown();})){
+            chosen.gateway.onEvent(local::onEvent);host.gateway.onEvent(monitor::onEvent);
+            monitor.startFor(player,vn.edu.hutech.nqb.shared.LanRangeProtocol.parseOptions(rangeOptions())).get(5,TimeUnit.SECONDS);
+            assertTrue(samples.await(5,TimeUnit.SECONDS));chosen.close();assertTrue(done.await(7,TimeUnit.SECONDS));
+            assertEquals("DISCONNECTED",monitor.snapshot().path("end_reason").asText());assertFalse(monitor.snapshot().path("passed").asBoolean());
+            assertTrue(monitor.snapshot().path("client_summary").path("confirmed").asInt()>=2);assertEquals(1,LanRangeReport.load(data.resolve("host")).size());
+        }
+    }
+    @Test void remoteRangeStopsForOwnerDisconnectAndRejectsOldControlOnReconnect()throws Exception {
+        var host=admin();String code=room(host,1);var chosen=guest(code,"Client cũ");String player=chosen.request("ROOM_STATE",obj()).path("connection_info").path("player_id").asText();
+        String control=UUID.randomUUID().toString();host.request("LAN_RANGE_REMOTE_START",rangeOptions().put("player_id",player).put("control_id",control));
+        var command=chosen.event("LAN_RANGE_REMOTE_REQUEST");String run=chosen.request("LAN_RANGE_START",(ObjectNode)command).path("run_id").asText();
+        chosen.request("LAN_RANGE_READY",obj().put("run_id",run));host.close();
+        assertEquals("DISCONNECTED",chosen.event("LAN_RANGE_REMOTE_CANCEL").path("end_reason").asText());
+        assertEquals("DISCONNECTED",chosen.event("LAN_RANGE_FINISHED").path("end_reason").asText());
+        chosen.close();var rejoined=guest(code,"Client kết nối mới");
+        error(rejoined,"FORBIDDEN","LAN_RANGE_START",rangeOptions().put("control_id",control));
+    }
+    @Test void remoteRangeRejectsUnrelatedTeacherAndPreservesTargetWhenLocalStorageFails()throws Exception {
+        var host=admin();String code=room(host,1);var chosen=guest(code,"Client lưu lỗi");String player=chosen.request("ROOM_STATE",obj()).path("connection_info").path("player_id").asText();
+        var stranger=new Client();stranger.request("REGISTER",obj().put("username","other-teacher").put("display_name","Giảng viên khác").put("password","Teacher-test-only-1"));
+        stranger.request("LOGIN",obj().put("username","other-teacher").put("password","Teacher-test-only-1"));
+        error(stranger,"FORBIDDEN","LAN_RANGE_REMOTE_START",rangeOptions().put("player_id",player).put("control_id",UUID.randomUUID().toString()));
+        Path hostDir=data.resolve("host-write-error");Files.createDirectories(hostDir);Files.writeString(hostDir.resolve("controlled"),"not a directory");var done=new CountDownLatch(1);
+        try(var local=new LanRangeClient(chosen.gateway,data.resolve("student-good"),s->{});
+            var monitor=new LanRangeClient(host.gateway,hostDir,s->{if(!s.path("active").asBoolean()&&s.path("end_reason").asText().equals("STORAGE_ERROR"))done.countDown();})){
+            chosen.gateway.onEvent(local::onEvent);host.gateway.onEvent(monitor::onEvent);
+            monitor.startFor(player,vn.edu.hutech.nqb.shared.LanRangeProtocol.parseOptions(rangeOptions())).get(5,TimeUnit.SECONDS);
+            assertTrue(done.await(7,TimeUnit.SECONDS),"Host storage failure did not end the remote measurement");assertFalse(monitor.snapshot().path("passed").asBoolean());
+        }
+    }
+    @Test void roomStateExposesOwnSocketEndpointsBeforeMeasurementWithoutLeakingOtherClientIps()throws Exception {
+        var host=admin();
+        var initial=host.request("ROOM_STATE",obj());
+        assertEquals("127.0.0.1",initial.path("connection_info").path("server_ip").asText());
+        assertEquals(port,initial.path("connection_info").path("server_port").asInt());
+        assertEquals("127.0.0.1",initial.path("connection_info").path("client_ip_observed").asText());
+        String code=room(host,1);var student=new Client("127.0.0.2");
+        var joined=student.request("JOIN",obj().put("room_code",code).put("nickname","Client IP thật"));
+        var studentState=student.request("ROOM_STATE",obj());
+        assertEquals("127.0.0.2",studentState.path("connection_info").path("client_ip_observed").asText());
+        assertEquals(joined.path("player_id").asText(),studentState.path("connection_info").path("player_id").asText());
+        assertFalse(studentState.path("players").get(0).has("ip_address"));
+        assertEquals("127.0.0.2",host.request("ROOM_STATE",obj()).path("players").get(0).path("ip_address").asText());
+        assertFalse(initial.has("run_id"),"Socket identity must not require starting a measurement");
     }
     @Test void lanRangeClientCompletesThirtyRealTlsSamplesOnOneIp()throws Exception {
         var manager=admin();var done=new CountDownLatch(1);

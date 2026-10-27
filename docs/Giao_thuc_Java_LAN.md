@@ -8,7 +8,9 @@ LEAVE/LOGOUT, socket đã đóng hoặc heartbeat hết hạn giải phóng IP; 
 
 ## Theo dõi học sinh/phòng/IP — cập nhật 25/10/2026
 
-`ROOM_STATE` và các phản hồi chứa snapshot phòng bổ sung `players[].ip_address` chỉ khi người nhận là Admin hoặc giảng viên chủ phòng. Trường này lấy từ socket TLS tại JOIN, giữ IP cuối nếu học sinh mất mạng trong ván; `connected` xác định trạng thái hiện tại. Tên/mã phòng tiếp tục nằm ở `room_name`/`room_code` của snapshot. Học sinh, giảng viên khác, `ROOM_BROWSE`, ranking và lịch sử điểm không nhận IP. Không đổi protocol_version hoặc schema SQLite.
+`ROOM_STATE` và các phản hồi chứa snapshot phòng bổ sung `players[].ip_address` chỉ khi người nhận là Admin hoặc giảng viên chủ phòng. Trường này lấy từ socket TLS tại JOIN, giữ IP cuối nếu học sinh mất mạng trong ván; `connected` xác định trạng thái hiện tại. Tên/mã phòng tiếp tục nằm ở `room_name`/`room_code` của snapshot. Học sinh, giảng viên khác, `ROOM_BROWSE`, ranking và lịch sử điểm không nhận IP của học sinh khác. Không đổi protocol_version hoặc schema SQLite.
+
+Cập nhật 27/10/2026: snapshot phòng đã xác thực có `connection_info` của chính socket người nhận: `server_ip`, `server_port`, `client_ip_observed`, `player_id` (rỗng cho kết nối quản lý). Server lấy địa chỉ trực tiếp từ hai đầu socket, không nhận giá trị khai báo từ Client. Dữ liệu này có trước khi chạy LAN_RANGE_START, không gồm số đo và không đưa vào ROOM_BROWSE/discovery. Học sinh có thể thấy endpoint của chính kết nối mình nhưng không nhận thêm quyền xem IP bạn khác.
 
 Server ghi console log `NQB_STUDENT_TRACKING` cho JOINED/LEFT/DISCONNECTED/ROOM_UPDATED/ROOM_RESET/ROOM_CLOSED với thời gian UTC, server/player ID, nickname, tên/mã phòng, IP và trạng thái. Reset dọn cả socket đã đóng nhưng chưa được tick xử lý. Xem [cách sử dụng và giới hạn](Theo_doi_hoc_sinh_va_IP.md).
 
@@ -137,6 +139,14 @@ Nhóm LAN_RANGE_* dùng protocol version 1, NDJSON và TLS hiện có. Chỉ sau
 - Lỗi AUTH_REQUIRED/PASSWORD_CHANGE_REQUIRED/INVALID_STATE theo giao thức sẵn có; INVALID_INPUT khi sai cấu hình/mẫu; LAN_RANGE_BUSY khi đã có lượt hoặc hết slot; LAN_RANGE_NOT_FOUND khi run_id không thuộc peer; STORAGE_ERROR khi không ghi nhật ký. Server cũ UNKNOWN_TYPE không được dẫn tới Preview hoặc số liệu giả.
 
 Đánh giá đạt cần đủ bằng chứng hai hướng, mỗi hướng ít nhất 95% đúng hạn và không có lỗi gửi/ngắt/hủy/lưu. RTT là khứ hồi tầng ứng dụng, không phải thời gian một chiều hoặc khoảng cách. Cùng máy kể cả qua IP LAN được đánh dấu cục bộ và loại khỏi mốc xa nhất thực địa. Chi tiết journal/CSV và nghiệm thu: [Đo tầm kết nối LAN](Do_tam_ket_noi_LAN.md).
+
+### Điều khiển lượt đo client từ chủ phòng
+
+- `LAN_RANGE_REMOTE_START`: chủ phòng gửi `control_id` UUID mới, `player_id` đang kết nối và cấu hình mốc/thời lượng như `LAN_RANGE_START`. Server kiểm tra chủ phòng, pha, socket mục tiêu và giới hạn 4 lượt; trả ACK cùng metadata thực và gửi `LAN_RANGE_REMOTE_REQUEST` cho đúng Client. Một máy quản lý chỉ điều khiển một lượt tại một thời điểm.
+- Client mới tự nhận lệnh qua LanRangeClient, gửi `LAN_RANGE_START` kèm control_id rồi thực hiện READY/probe/complete như cũ. Không tạo probe từ máy quản lý. Metadata run_id/IP/loopback do Server quyết định.
+- `LAN_RANGE_REMOTE_REPORT`: chỉ socket mục tiêu được gửi snapshot cùng control_id/run_id. Server kiểm tra mẫu chiều Client, sequence, probe đã quan sát và không cho sửa mẫu đã ghi; tự tổng hợp chiều Server từ LanRangeSession, bỏ thống kê Server/IP/đạt do Client khai. Kết quả được gửi riêng cho chủ điều khiển qua `LAN_RANGE_REMOTE_STATE`.
+- `LAN_RANGE_REMOTE_STOP`: chỉ chủ điều khiển của control_id được dừng. Server gửi `LAN_RANGE_REMOTE_CANCEL` tới Client và chốt phiên đo. Lỗi bắt đầu/Client cũ không nhận lệnh trả `LAN_RANGE_REMOTE_FAILED`. Chuẩn bị quá 10 giây, Client/quản lý rời, đổi phòng hoặc bắt đầu thi giải phóng phiên và giữ kết quả một phần; không kết luận đạt khi thiếu tổng kết.
+- Máy quản lý lưu bản nhật ký trong `controlled/`, cùng run_id để đối chiếu hai đầu. CSV kèm player_id/biệt danh. Không công khai quyền điều khiển hoặc kết quả qua UDP/ROOM_BROWSE, không tự nối lại phiên cũ khi Client đổi socket.
 
 ## Bộ lọc câu hỏi
 

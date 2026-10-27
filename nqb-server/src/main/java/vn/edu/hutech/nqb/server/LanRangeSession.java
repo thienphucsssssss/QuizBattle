@@ -26,6 +26,7 @@ final class LanRangeSession {
     private final Map<Integer,Sample> samples=new LinkedHashMap<>();
     private final BitSet clientProbes=new BitSet();
     private final CompletableFuture<Void> completion=new CompletableFuture<>();
+    private ObjectNode terminal;
     LanRangeSession(String runId,Options options,Consumer<ObjectNode> send,LanRangeJournal journal,LongSupplier nanoClock,Clock wallClock) {
         this.runId=runId;this.options=options;this.send=send;this.journal=journal;this.nanoClock=nanoClock;this.wallClock=wallClock;
         created=nanoClock.getAsLong();
@@ -34,6 +35,13 @@ final class LanRangeSession {
     synchronized boolean ready(){return ready;}
     synchronized boolean finished(){return finished;}
     CompletableFuture<Void> completion(){return completion;}
+    synchronized boolean sawClientProbe(int sequence){return clientProbes.get(sequence);}
+    synchronized ObjectNode evidence(){
+        var result=object().put("server_summary_received",terminal!=null).put("server_journal_healthy",terminal!=null&&terminal.path("server_journal_healthy").asBoolean());
+        if(terminal!=null)result.setAll(terminal);
+        result.set("server_summary",LanRangeStatistics.summarize(Direction.SERVER_TO_CLIENT,options.durationSeconds(),samples.values()));
+        var list=result.putArray("samples");samples.values().forEach(s->list.add(samplePayload(s)));return result;
+    }
     synchronized void start(){
         if(ready||finished)return;
         ready=true;readyAt=nanoClock.getAsLong();
@@ -102,6 +110,7 @@ final class LanRangeSession {
                     boolean saved=healthy&&error==null;
                     result.put("server_journal_healthy",saved);
                     if(!saved)result.put("end_reason",EndReason.STORAGE_ERROR.name());
+                    terminal=result.deepCopy();
                     send.accept(envelope("LAN_RANGE_FINISHED",null,result));
                     completion.complete(null);
                 }

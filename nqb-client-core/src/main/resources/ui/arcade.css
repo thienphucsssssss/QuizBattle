@@ -15,6 +15,12 @@
 .lan-range-page .range-heading .title { -fx-font-size: 27px; }
 .lan-range-page .range-card { -fx-background-color: -surface; -fx-background-radius: 12; -fx-border-color: -line; -fx-border-radius: 12; -fx-padding: 16; }
 .lan-range-page .range-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 14px; }
+.lan-range-page .range-guide { -fx-background-color: #f4f6fc; -fx-background-radius: 8; -fx-padding: 12; }
+.lan-range-page .range-preparation > .title { -fx-background-color: #e9edff; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-padding: 12 16; }
+.lan-range-page .range-preparation > .content { -fx-padding: 16; -fx-background-color: -surface; -fx-border-color: -line; }
+.lan-range-page #lan-range-peers > .title, .lan-range-page #lan-range-history-section > .title { -fx-background-color: -cream; -fx-font-size: 12px; }
+.lan-range-page #lan-range-peers > .content { -fx-padding: 8 12; -fx-background-color: -surface; -fx-border-color: -line; }
+.lan-range-page #lan-range-run-scope { -fx-background-color: #f3f5ff; -fx-background-radius: 6; -fx-padding: 10 12; }
 .lan-range-page .range-hint { -fx-font-size: 12px; -fx-text-fill: -muted; }
 .lan-range-page .range-badge { -fx-background-color: #e9edff; -fx-text-fill: #3049d5; -fx-background-radius: 5; -fx-padding: 4 8; -fx-font-size: 11px; }
 .lan-range-page .range-pass { -fx-background-color: #e0f5e6; -fx-text-fill: #20633c; }
@@ -30,6 +36,7 @@
 .lan-range-page .range-reminder { -fx-padding: 0 4; }
 .lan-range-page .range-direction { -fx-background-color: #f4f6fc; -fx-background-radius: 8; -fx-padding: 12; }
 .lan-range-page .range-direction-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 13px; -fx-text-fill: #3049d5; }
+.lan-range-page .range-peer-address { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; -fx-text-fill: -ink; }
 .lan-range-page .range-count { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 23px; }
 .lan-range-page .range-farthest { -fx-background-color: #f3f5ff; -fx-background-radius: 8; -fx-padding: 12; }
 .lan-range-page .range-farthest-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 23px; }

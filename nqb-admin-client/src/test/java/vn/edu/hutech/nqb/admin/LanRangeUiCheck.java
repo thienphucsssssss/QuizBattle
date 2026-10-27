@@ -44,7 +44,33 @@ public final class LanRangeUiCheck {
                         check(Window.getWindows().stream().filter(Window::isShowing).count()==1,"Manager LAN tab opened an extra dialog");
                     });
                     await(()->pane()!=null);
+                    await(()->pane().lookup("#lan-range-server-ip") instanceof Label label&&label.getText().contains("127.0.0.1"));
                     fx(()->{
+                        check(pane().lookup("#lan-range-server-panel")!=null&&pane().lookup("#lan-range-client-panel")!=null,"Missing explicit Server / Client panels");
+                        check(((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Chưa có client"),"Empty room invented a connected student");
+                        check(button("#lan-range-start").isDisabled(),"Manager can start a self-measurement with no selected client");
+                    });
+                    String code=gateway.request("ROOM_CONFIGURE",object().put("room_name","Phòng kiểm thử IP").put("question_count",1).put("duration_seconds",15)).get(5,TimeUnit.SECONDS).path("room_code").asText();
+                    try(var player=TlsQuizGateway.connect(new Endpoint("127.0.0.1",server.port()),trust,SECRET.toCharArray())){
+                        player.request("JOIN",object().put("room_code",code).put("nickname","Client kiểm thử IP")).get(5,TimeUnit.SECONDS);
+                        await(()->((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Client kiểm thử IP")
+                            &&((Label)pane().lookup("#lan-range-client-connections")).getText().contains("127.0.0.1"));
+                        fx(()->{check(((Label)pane().lookup("#lan-range-client-stats")).getText().equals("Chưa có kết quả"),"Student JOIN started or invented a measurement");snapshot("connected-client-before-measurement-1366");});
+                    }
+                    await(()->((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Chưa có client"));
+                    try(var rejoined=TlsQuizGateway.connect(new Endpoint("127.0.0.1",server.port()),trust,SECRET.toCharArray())){
+                        rejoined.request("JOIN",object().put("room_code",code).put("nickname","Client kết nối lại")).get(5,TimeUnit.SECONDS);
+                        await(()->((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Client kết nối lại")
+                            &&!((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Client kiểm thử IP"));
+                    }
+                    await(()->((Label)pane().lookup("#lan-range-client-connections")).getText().contains("Chưa có client"));
+                    try(var measuredPeer=TlsQuizGateway.connect(new Endpoint("127.0.0.1",server.port()),trust,SECRET.toCharArray());
+                        var measuredRange=new LanRangeClient(measuredPeer,reports.resolve("qa-target"),s->{})){
+                    measuredPeer.onEvent(measuredRange::onEvent);
+                    String measuredPlayer=measuredPeer.request("JOIN",object().put("room_code",code).put("nickname","Client được chọn để đo")).get(5,TimeUnit.SECONDS).path("player_id").asText();
+                    await(()->((ComboBox<?>)pane().lookup("#lan-range-target")).getItems().size()==1);
+                    fx(()->{
+                        @SuppressWarnings("unchecked") var targets=(ComboBox<JsonNode>)pane().lookup("#lan-range-target");targets.getSelectionModel().selectFirst();
                         ((TextField)pane().lookup("#lan-range-survey")).setText("Kiểm thử cục bộ");
                         ((TextField)pane().lookup("#lan-range-route")).setText("Một máy · cùng IP");
                         ((TextField)pane().lookup("#lan-range-distance")).setText("-1");
@@ -53,7 +79,7 @@ public final class LanRangeUiCheck {
                     });
                     await(()->((Label)pane().lookup("#lan-range-client-stats")).getText().contains("Đã có kết quả: 2")
                         &&((Label)pane().lookup("#lan-range-server-stats")).getText().contains("Đã có kết quả: 2"));
-                    fx(()->{check(((Label)pane().lookup("#lan-range-evidence")).getText().contains("Kiểm thử cục bộ"),"Same-host test labelled as physical range");bounds("#lan-range-stop");((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(0);snapshot("active-1366");app.qaClick("Cài đặt");});
+                    fx(()->{check(((LanRangeClient)get(app,"lanRangeClient")).snapshot().path("player_id").asText().equals(measuredPlayer),"UI is measuring the manager instead of the chosen client");check(measuredRange.snapshot().path("active").asBoolean(),"Chosen client did not receive the measure command");check(((ComboBox<?>)pane().lookup("#lan-range-target")).isDisabled(),"Target can change during measurement");check(((Label)pane().lookup("#lan-range-evidence")).getText().contains("Kiểm thử cục bộ"),"Same-host test labelled as physical range");check(!((TitledPane)pane().lookup("#lan-range-setup")).isExpanded(),"Preparation obscures results while measuring");bounds("#lan-range-stop");((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(0);snapshot("active-1366");app.qaClick("Cài đặt");});
                     fx(()->app.qaClick("Đo tầm kết nối LAN"));
                     fx(()->{check(button("#lan-range-start").isDisabled(),"Tab switch lost the active run");check(((TextField)pane().lookup("#lan-range-distance")).getText().equals("0"),"Tab switch changed measured marker");button("#lan-range-stop").fire();});
                     await(()->!button("#lan-range-start").isDisabled());
@@ -69,7 +95,7 @@ public final class LanRangeUiCheck {
                     fx(()->{
                         check(((Label)pane().lookup("#lan-range-state")).getText().contains("Kết quả"),"Completed run did not render its result");
                         check(((Label)pane().lookup("#lan-range-farthest")).getText().equals("Chưa có mốc đạt"),"Local run became physical range evidence");
-                        ((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(1);snapshot("completed-local-history-1024");
+                        ((TitledPane)pane().lookup("#lan-range-history-section")).setExpanded(true);((ScrollPane)pane().lookup("#lan-range-scroll")).setVvalue(1);snapshot("completed-local-history-1024");
                     });
                     server.close();await(()->!app.qaConnected());
                     fx(()->{check(button("#lan-range-start").isDisabled(),"Disconnected controller can start measurement");snapshot("disconnected-1024");});
@@ -84,6 +110,7 @@ public final class LanRangeUiCheck {
                         }
                         studentDialog.close();
                     });
+                    }
                     System.out.println("LAN_RANGE_UI_PASS: dedicated sidebar page, real TLS both ways, local evidence, invalid distance, tab switch while running, stop/reopen, full 30s completion, CSV, 1366/1024, disconnect, student dialog host");
                 }catch(Throwable error){ArcadeApplication.qaFailed(error);error.printStackTrace();}
                 finally{Platform.runLater(Platform::exit);}
@@ -98,9 +125,18 @@ public final class LanRangeUiCheck {
     private static Button button(String id){return (Button)pane().lookup(id);}
     private static void closeDialog(){var window=pane().getScene().getWindow();window.fireEvent(new WindowEvent(window,WindowEvent.WINDOW_CLOSE_REQUEST));}
     private static void resize(ArcadeApplication app,int width,int height){var stage=(Stage)app.qaScene().getWindow();stage.setWidth(width+stage.getWidth()-app.qaScene().getWidth());stage.setHeight(height+stage.getHeight()-app.qaScene().getHeight());}
-    private static void bounds(String id){var node=pane().lookup(id);var b=node.localToScene(node.getBoundsInLocal());check(b.getMinY()>=0&&b.getMaxY()<=pane().getScene().getHeight()+1&&b.getMinX()>=0&&b.getMaxX()<=pane().getScene().getWidth()+1,"Clipped button "+id);}
+    private static void bounds(String id){
+        var node=pane().lookup(id);var before=node.localToScene(node.getBoundsInLocal());
+        var root=pane().getScene().getRoot();root.applyCss();root.layout();var b=node.localToScene(node.getBoundsInLocal());
+        if(!before.equals(b))System.out.println("Bounds settled after layout "+id+": "+before+" -> "+b);
+        check(b.getMinY()>=0&&b.getMaxY()<=pane().getScene().getHeight()+1&&b.getMinX()>=0&&b.getMaxX()<=pane().getScene().getWidth()+1,"Clipped button "+id+": "+b+", scene="+pane().getScene().getWidth()+"x"+pane().getScene().getHeight());
+    }
     private static void snapshot(String name){
-        pane().applyCss();pane().layout();var image=pane().getScene().snapshot(null);
+        pane().applyCss();pane().layout();
+        var heading=pane().lookup(".range-heading .title");var glyph=heading.lookup(".text");
+        var glyphBounds=glyph.localToScene(glyph.getBoundsInLocal());
+        check(glyphBounds.getMinY()>=0,"Page heading clipped in "+name+": "+glyphBounds);
+        var image=pane().getScene().snapshot(null);
         var bitmap=new BufferedImage((int)image.getWidth(),(int)image.getHeight(),BufferedImage.TYPE_INT_ARGB);
         for(int y=0;y<bitmap.getHeight();y++)for(int x=0;x<bitmap.getWidth();x++)bitmap.setRGB(x,y,image.getPixelReader().getArgb(x,y));
         try{ImageIO.write(bitmap,"png",output.resolve(name+".png").toFile());}catch(Exception error){throw new RuntimeException(error);}
