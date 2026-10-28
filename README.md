@@ -26,6 +26,8 @@ Cập nhật mạng 4G: Server bind/fallback Client `10.122.30.170`, TCP 5050, d
 
 ## Tình trạng hiện tại
 
+**Giao diện — cập nhật 29/10/2026:** giữ cobalt/lime và linh vật hiện có, bổ sung Sáng/Tối trong Tùy chọn → Giao diện; đồng bộ form, bảng, popup, dialog và trạng thái. Ngân hàng có bộ lọc tự xuống dòng, sidebar hỗ trợ tên menu dài, câu hỏi ngắn giữ bốn đáp án 2×2 ở 1024×640. Source đã build và kiểm tra JavaFX/TLS ở 1024×640, 1366×768, 1920×1080; dùng `run.bat admin` / `run.bat player` để chạy bản source mới. Bộ cài trong `dist/` chưa cập nhật. Xem [thay đổi và kiểm thử UI](docs/UI_UX_2026-10-29.md).
+
 **Nhạc nền — sửa lỗi 26/10/2026:** BGM lặp từ đếm ngược đến hết các câu/bảng hạng, dừng khi chung cuộc; chỉ còn hiệu ứng kết thúc ngắn nếu bật SFX. Hủy ván/rời phòng/mất kết nối/reset/đóng ứng dụng dừng nhạc và hủy hiệu ứng đang nạp hoặc chờ phát. Hai WAV gốc vẫn được giữ nguyên trong Client. Tùy chọn có bật/tắt và âm lượng nhạc riêng với SFX, lưu theo vai trò; mặc định giảng viên/Admin bật 20%, học sinh tắt để tránh nhiều loa cùng phát. Không thay Server hoặc dữ liệu. Xem `docs/Nhac_nen_0_3_6.md`.
 
 **Bản 0.3.5 — bục vinh danh chung cuộc:** cột cao thấp theo hạng, khung linh vật và huy chương vector vàng/bạc/đồng cho các hạng 1–3. Giữ nguyên hạng Server (đồng hạng nhận cùng loại huy chương, không lấy ba dòng đầu rồi loại người đồng hạng); bảng đầy đủ ở bên dưới. Có hiệu ứng xuất hiện ngắn, hỗ trợ giảm chuyển động, màn hình nhỏ và trình chiếu. Đây là bục theo thứ hạng, không phải biểu đồ có trục điểm tỷ lệ. Chỉ thay Client; không đổi giao thức, Server hoặc database.

@@ -82,6 +82,8 @@ public final class ArcadeApplication extends Application {
         this.stage = stage; loadFonts();
         reducedMotion = prefs.getBoolean("reducedMotion", false);
         var args = getParameters().getNamed(); qa = qaDriver != null;
+        UiTheme.setDark(prefs.getBoolean("darkTheme", false));
+        UiTheme.apply(root);
         sfx.configure(args.getOrDefault("entry", "MANAGE").equals("STUDENT") ? "STUDENT" : "TEACHER", qa);
         music.configure(args.getOrDefault("entry", "MANAGE").equals("STUDENT") ? "STUDENT" : "TEACHER", qa);
         double width = Double.parseDouble(args.getOrDefault("width", "1366"));
@@ -154,7 +156,11 @@ public final class ArcadeApplication extends Application {
         if(lanEntry!=null)form.getChildren().add(lanEntry);
         if (registering) form.getChildren().add(column(4, field("Tên hiển thị", displayName), nameError));
         if (!selectedRole.isEmpty()) form.getChildren().add(column(4, field(selectedRole.equals("STUDENT") ? "Biệt danh" : "Tên đăng nhập", identity), identityError));
-        if (!selectedRole.isEmpty()&&!selectedRole.equals("STUDENT")) form.getChildren().add(column(7, text("Mật khẩu", "caption"), input, passwordError));
+        if (!selectedRole.isEmpty()&&!selectedRole.equals("STUDENT")) {
+            var passwordLabel = text("Mật khẩu", "caption"); passwordLabel.setLabelFor(password);
+            visible.setAccessibleText("Mật khẩu đang hiển thị");
+            form.getChildren().add(column(7, passwordLabel, input, passwordError));
+        }
         if (registering) form.getChildren().add(column(4, field("Nhập lại mật khẩu", confirmation), confirmationError));
         form.getChildren().add(error);
         var connect = new Button(registering ? "Tạo tài khoản   →" : selectedRole.equals("STUDENT") ? "Tham gia phòng   →" : "Đăng nhập   →"); connect.getStyleClass().add("ink-button"); connect.setMaxWidth(Double.MAX_VALUE); connect.setDefaultButton(true);
@@ -221,7 +227,8 @@ public final class ArcadeApplication extends Application {
             var register = button("Tạo tài khoản giảng viên", "quiet", () -> auth("TEACHER", true)); register.setId("register-open"); form.getChildren().add(register);
         }
         form.getChildren().add(button("Tùy chọn", "quiet", this::settings));
-        form.setMaxWidth(540); form.setPadding(new Insets(24)); var centered = new StackPane(form); centered.setPadding(new Insets(16, 24, 36, 24)); root.setCenter(scroll(centered));
+        form.getStyleClass().add("auth-form");
+        form.setMaxWidth(570); form.setPadding(new Insets(28)); var centered = new StackPane(form); centered.setPadding(new Insets(24, 24, 36, 24)); root.setCenter(scroll(centered));
     }
     private static void showError(Label label, String value) { label.setText(value); label.setVisible(true); label.setManaged(true); }
     private static Label authFieldError() { var label = text("", "caption", "error"); label.setVisible(false); label.setManaged(false); return label; }
@@ -660,8 +667,8 @@ public final class ArcadeApplication extends Application {
             }
             boolean[] lastNarrow = {false}, flowed = {false};
             Runnable reflow = () -> {
-                double viewportWidth = publicView && projection != null ? projection.getScene().getWidth() : scene.getWidth();
-                boolean narrow = viewportWidth < 950 || question.path("content").asText().length() > 200 || tiles.stream().anyMatch(n -> question.path("option_" + "abcd".charAt(tiles.indexOf(n))).asText().length() > 100);
+                double viewportWidth = grid.getWidth() > 0 ? grid.getWidth() : publicView && projection != null ? projection.getScene().getWidth() : scene.getWidth();
+                boolean narrow = viewportWidth < 800 || question.path("content").asText().length() > 200 || tiles.stream().anyMatch(n -> question.path("option_" + "abcd".charAt(tiles.indexOf(n))).asText().length() > 100);
                 if (flowed[0] && lastNarrow[0] == narrow) return;
                 flowed[0] = true; lastNarrow[0] = narrow;
                 grid.getChildren().clear(); grid.getColumnConstraints().forEach(c -> c.setPercentWidth(narrow ? (c == grid.getColumnConstraints().getFirst() ? 100 : 0) : 50));
@@ -741,7 +748,13 @@ public final class ArcadeApplication extends Application {
         var musicVolume = new Slider(0, 100, music.volume() * 100); musicVolume.setId("music-volume"); musicVolume.setAccessibleText("Âm lượng nhạc nền"); musicVolume.setShowTickLabels(true); musicVolume.setMajorTickUnit(25); musicVolume.setBlockIncrement(5); musicVolume.disableProperty().bind(background.selectedProperty().not());
         var musicStatus = text(music.status(), "muted"); musicStatus.setId("music-status");
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));
-        var content = column(16, reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
+        var appearance = new ComboBox<String>(FXCollections.observableArrayList("Sáng", "Tối"));
+        appearance.setId("appearance-theme"); appearance.setValue(UiTheme.isDark() ? "Tối" : "Sáng");
+        appearance.setOnAction(e -> {
+            boolean dark = "Tối".equals(appearance.getValue()); UiTheme.setDark(dark);
+            if (!qa) prefs.putBoolean("darkTheme", dark);
+        });
+        var content = column(16, field("Giao diện", appearance), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
         if(role.equals("STUDENT")){
             var rangeButton=button("Đo tầm kết nối LAN","quiet",this::openLanRange);rangeButton.setId("options-lan-range-open");
             content.getChildren().addAll(new Separator(),text("Mạng LAN","subtitle"),rangeButton);

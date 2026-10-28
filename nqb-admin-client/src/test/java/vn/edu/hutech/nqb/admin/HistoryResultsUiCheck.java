@@ -19,7 +19,7 @@ public final class HistoryResultsUiCheck {
     public static void main(String[] args)throws Exception {
         output=Path.of(args[0]);Files.createDirectories(output);
         var started=new CompletableFuture<Void>();
-        Platform.startup(()->{Platform.setImplicitExit(false);loadFonts();owner=new Stage();started.complete(null);});started.get(5,TimeUnit.SECONDS);
+        Platform.startup(()->{Platform.setImplicitExit(false);loadFonts();UiTheme.setDark(args.length>1&&args[1].equals("dark"));owner=new Stage();started.complete(null);});started.get(5,TimeUnit.SECONDS);
         try {
             check("01-three-winners",1366,768,true,1,2,3,4,5,6,7,8);
             check("02-compact-tied",1024,640,true,1,1,3);

@@ -56,6 +56,26 @@ Tham khảo ui-ux-pro-max cho focus, nhãn form, trạng thái loading/error/emp
 
 ## Tokens
 
+### Giao diện sáng/tối — 29/10/2026
+
+Tinh chỉnh thanh công cụ Ngân hàng theo yêu cầu 29/10/2026: đưa nút **Thêm bộ câu hỏi** (đổi tên từ Bộ câu hỏi, giữ hành vi hiện có) lên cùng nhóm **Nhập từ Excel / Word** và **Thêm câu hỏi** ở đầu trang. Thanh chọn bên dưới chỉ giữ Chọn cả trang, Bỏ chọn tất cả và tổng Đã chọn; bỏ nút Mẫu câu hỏi tại đây. Xem mẫu / Tải mẫu trong dialog import giữ nguyên.
+
+Theo phương án đã được người dùng duyệt trong `docs/De_xuat_UI_UX_2026-10-29.md`, giữ toàn bộ nhận diện cobalt/lime, font, linh vật và luồng hiện tại; chuẩn hóa các component native bằng semantic looked-up colors trong `/ui/arcade.css`.
+
+- Light: canvas `#F4F6FC`, surface `#FFFFFF`, surface-alt `#EDF1FA`, ink `#202146`, muted `#56617A`, line `#D7DDEB`.
+- Dark: canvas `#111729`, surface `#1B2338`, surface-alt `#222D45`, ink `#F1F4FF`, muted `#B8C3DC`, line `#35425F`.
+- Action: light brand `#3049D5`, dark brand `#5268E9`, on-brand `#FFFFFF`; chữ brand trên nền tối dùng `#AFBEFF`.
+- Accent: lime `#C5F45B` luôn đi với on-accent `#202146`; không dùng ink thay đổi theo theme cho chữ trên lime hoặc huy chương.
+- Focus: light `#3049D5`, dark `#9EBAFF`. Control-line tách khỏi viền cấu trúc: light `#8794AC`, dark `#7183A5`.
+- Success, warning, error, info và inactive đều có token nền/chữ riêng cho từng theme. Không thêm màu hex vào component thông thường; bảng màu sân đấu, huy chương và linh vật là ngoại lệ có chủ đích.
+- Các dòng token phía dưới mô tả nhận diện gốc/light; semantic tokens trên là quy ước cho component hỗ trợ hai theme.
+
+`UiTheme` chỉ thay style class trên scene root của cửa sổ, dialog và popup, không dựng lại form hoặc kết nối. Tùy chọn **Giao diện: Sáng/Tối** nằm trong Tùy chọn / Âm thanh & giao diện; lưu `darkTheme` cục bộ ngoài QA. Scene sân đấu và projector giữ bảng màu cobalt/pastel riêng trong cả hai chế độ. Dialog được mở từ sân đấu vẫn theo theme ứng dụng.
+
+Chuẩn component: button/field 44 px; label phụ thông thường 12–13 px; field có labelFor và focus; close/cancel dùng Đóng/Hủy. Ngân hàng dùng hàng 116 px với nội dung hai dòng, toolbar tự wrap và inspector được chuyển sang dialog khi hẹp. Sidebar rộng 248 px, thu về 232 px dưới chiều rộng Scene 1200 px; giữ vị trí menu và footer tài khoản. Trạng thái tải/rỗng/lỗi/thành công và cơ chế reduced motion hiện có tiếp tục hoạt động.
+
+Mục tiêu desktop: 1024×640, 1366×768, 1920×1080. Test theme phải chứng minh giữ nguyên đối tượng/nội dung field, cập nhật dialog đang mở và popup, chữ trên đáp án pastel có tương phản đủ, đồng thời không ghi preference cá nhân khi QA.
+
 | Token | Giá trị | Dùng cho |
 | --- | --- | --- |
 | ink | #202146 | Chữ chính |

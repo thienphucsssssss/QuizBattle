@@ -47,5 +47,16 @@ final class FxKit {
     static Node brand() { return row(12, mark(40), column(1, text("NETWORK", "caption"), text("QUIZ BATTLE", "brand"))); }
     static void styleDialog(Dialog<?> dialog) {
         dialog.getDialogPane().getStylesheets().add(CSS); dialog.getDialogPane().setMinWidth(420);
+        UiTheme.apply(dialog.getDialogPane());
+        dialog.getDialogPane().getButtonTypes().forEach(type -> localizeDialogButton(dialog, type));
+        dialog.getDialogPane().getButtonTypes().addListener((javafx.collections.ListChangeListener<ButtonType>) change -> {
+            while (change.next()) change.getAddedSubList().forEach(type -> localizeDialogButton(dialog, type));
+        });
+    }
+    private static void localizeDialogButton(Dialog<?> dialog, ButtonType type) {
+        if (type == ButtonType.CLOSE || type == ButtonType.CANCEL) {
+            var control = (Button) dialog.getDialogPane().lookupButton(type);
+            if (control != null) control.setText(type == ButtonType.CLOSE ? "Đóng" : "Hủy");
+        }
     }
 }

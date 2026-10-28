@@ -17,6 +17,12 @@ final class ManagementSidebar extends VBox {
 
     ManagementSidebar(String role, String displayName, Consumer<String> navigate) {
         super(8); getStyleClass().add("sidebar"); setMinWidth(248); setPrefWidth(248); setMaxWidth(248);
+        sceneProperty().addListener((o,before,scene)-> {
+            if (scene != null) {
+                prefWidthProperty().bind(javafx.beans.binding.Bindings.when(scene.widthProperty().lessThan(1200)).then(232).otherwise(248));
+                minWidthProperty().bind(prefWidthProperty()); maxWidthProperty().bind(prefWidthProperty());
+            } else { prefWidthProperty().unbind(); minWidthProperty().unbind(); maxWidthProperty().unbind(); }
+        });
         var connection = column(3, network, ping); connection.getStyleClass().add("sidebar-connection"); connection.setId("sidebar-connection");
         var menu = column(2);
         add(menu, "Tổng quan", "Tổng quan", "M3 3H8V8H3Z M12 3H17V8H12Z M3 12H8V17H3Z M12 12H17V17H12Z", navigate);
@@ -39,6 +45,7 @@ final class ManagementSidebar extends VBox {
     }
     private void add(VBox target, String route, String label, String path, Consumer<String> navigate) {
         var button = button(label, "nav", () -> navigate.accept(route)); button.setMaxWidth(Double.MAX_VALUE);
+        button.setWrapText(true); button.setMinWidth(0);
         button.setGraphic(icon(path)); button.setGraphicTextGap(10); button.setTooltip(new Tooltip(label));
         buttons.put(route, button); target.getChildren().add(button);
     }

@@ -36,11 +36,14 @@ public final class LiveLanUiCheck {
         try (var server = new QuizServer(config, config.tls(SECRET.toCharArray()), store)) {
             server.start(); liveServer=server; port = server.port();
             Files.writeString(profile,"server.host=127.0.0.1\nserver.port=1\ndiscovery.port="+server.discoveryPort()+"\ntls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
-            ArcadeApplication.qaDriver = app -> Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
+            ArcadeApplication.qaDriver = app -> {
+                UiTheme.setDark(args.length > 3 && args[3].equals("dark"));
+                Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
                 try { run(app); System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, no Client IP/port, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS"); }
                 catch (Throwable failure) { ArcadeApplication.qaFailed(failure); failure.printStackTrace(); }
                 finally { Platform.runLater(Platform::exit); }
-            });
+                });
+            };
             ArcadeApplication.launchFor("STUDENT", new String[]{"--width="+(args.length>1?args[1]:"1366"), "--height="+(args.length>2?args[2]:"768")});
         } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config"); }
     }
@@ -380,7 +383,7 @@ public final class LiveLanUiCheck {
             if(!firstOnPage.isSelected())throw new AssertionError("Inspecting a row cleared a checked question");
             firstOnPage.fire();assertBankCheckedCount(app,10);bankPageCheck(app).fire();assertBankCheckedCount(app,20);
             bankPageCheck(app).fire();assertBankCheckedCount(app,10);bankPageCheck(app).fire();assertBankCheckedCount(app,20);
-            snapshot(app,"08a-checkbox-bank-page2");app.qaClick("Bộ câu hỏi");
+            snapshot(app,"08a-checkbox-bank-page2");((javafx.scene.control.Button)app.qaScene().lookup("#bank-manage-sets")).fire();
         });
         await(()->!dialogScene("set-create-selected").lookup("#set-create-selected").isDisabled());
         fx(()->{
@@ -395,7 +398,7 @@ public final class LiveLanUiCheck {
         await(()->tableSize(app)==10&&bankTable(app).getItems().getFirst().path("question_id").asInt()==first[0]);
         fx(()->{
             if(!bankCheck(app,first[0]).isSelected()||!bankPageCheck(app).isSelected())throw new AssertionError("Returning to page 1 did not restore checks");
-            bankCheck(app,first[0]).fire();assertBankCheckedCount(app,19);app.qaClick("Bộ câu hỏi");
+            bankCheck(app,first[0]).fire();assertBankCheckedCount(app,19);((javafx.scene.control.Button)app.qaScene().lookup("#bank-manage-sets")).fire();
         });
         await(()->!dialogScene("set-create-selected").lookup("#set-create-selected").isDisabled());
         fx(()->{
@@ -426,7 +429,7 @@ public final class LiveLanUiCheck {
         if(excel.path("question_count").asInt()!=2)throw new AssertionError("Imported set contains unexpected questions");
         await(()->app.qaScene().lookup("#bank-question-set") instanceof javafx.scene.control.ComboBox<?> box&&!box.isDisabled()&&box.getItems().size()==3);
         fx(()->selectNamedSet((javafx.scene.control.ComboBox<?>)app.qaScene().lookup("#bank-question-set"),"Bộ QA Excel"));
-        await(()->tableSize(app)==2);fx(()->{snapshot(app,"13g-bank-set-filter");app.qaClick("Bộ câu hỏi");});
+        await(()->tableSize(app)==2);fx(()->{snapshot(app,"13g-bank-set-filter");((javafx.scene.control.Button)app.qaScene().lookup("#bank-manage-sets")).fire();});
         await(()->dialogScene("set-create-filtered").lookup("#set-create-filtered") instanceof javafx.scene.control.Button button&&!button.isDisabled());
         fx(()->{var scene=dialogScene("question-set-name");((TextField)scene.lookup("#question-set-name")).setText("Bộ tạo từ lọc");((javafx.scene.control.Button)scene.lookup("#set-create-filtered")).fire();});
         await(()->dialogScene("question-sets-table").lookup("#question-sets-table") instanceof javafx.scene.control.TableView<?> table&&table.getItems().size()==3);
@@ -506,7 +509,26 @@ public final class LiveLanUiCheck {
     }
     private static void fx(Runnable action) throws Exception { var future = new CompletableFuture<Void>(); Platform.runLater(() -> { try { action.run(); future.complete(null); } catch (Throwable failure) { future.completeExceptionally(failure); } }); future.get(5, TimeUnit.SECONDS); }
     private static void snapshot(ArcadeApplication app, String name) {
-        var scene = app.qaScene(); scene.getRoot().applyCss(); scene.getRoot().layout(); saveImage(scene.snapshot(null), name);
+        var scene = app.qaScene(); scene.getRoot().applyCss(); scene.getRoot().layout();
+        if (name.startsWith("03-question-")) assertShortAnswersVisible(app);
+        saveImage(scene.snapshot(null), name);
+    }
+    private static void assertShortAnswersVisible(ArcadeApplication app) {
+        var root = app.qaScene().getRoot();
+        var title = root.lookup(".game-title");
+        var answers = root.lookupAll(".answer").stream().filter(n -> n instanceof javafx.scene.control.Button).toList();
+        if (!(title instanceof javafx.scene.control.Label label) || label.getText().length() > 120 || answers.size() != 4
+                || answers.stream().anyMatch(n -> n.getAccessibleText().length() > 120)) return;
+        for (var answer : answers) {
+            javafx.scene.Node parent = answer.getParent();
+            while (parent != null && !(parent instanceof javafx.scene.control.ScrollPane)) parent = parent.getParent();
+            if (parent == null) throw new AssertionError("Answer lost its scrolling container");
+            var viewport = parent.lookup(".viewport");
+            var visible = viewport.localToScene(viewport.getBoundsInLocal());
+            var bounds = answer.localToScene(answer.getBoundsInLocal());
+            if (bounds.getMinY() < visible.getMinY()-1 || bounds.getMaxY() > visible.getMaxY()+1)
+                throw new AssertionError("All four short answers must be visible without scrolling at " + app.qaScene().getWidth() + "×" + app.qaScene().getHeight());
+        }
     }
     private static void saveImage(WritableImage image, String name) { try { var buffer = new BufferedImage((int)image.getWidth(), (int)image.getHeight(), BufferedImage.TYPE_INT_ARGB); for (int y=0; y<buffer.getHeight(); y++) for (int x=0; x<buffer.getWidth(); x++) buffer.setRGB(x,y,image.getPixelReader().getArgb(x,y)); ImageIO.write(buffer,"png",output.resolve(name+".png").toFile()); } catch(Exception error) { throw new RuntimeException(error); } }
     private static void keytool(String... args) throws Exception { var command = new ArrayList<String>(); command.add(Path.of(System.getProperty("java.home"), "bin", "keytool.exe").toString()); command.addAll(List.of(args)); var process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start(); if (!process.waitFor(20, TimeUnit.SECONDS) || process.exitValue() != 0) throw new IllegalStateException("Temporary QA certificate failed"); }

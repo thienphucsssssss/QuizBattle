@@ -35,7 +35,7 @@ public final class LanRangeUiCheck {
                 try(var gateway=TlsQuizGateway.connect(new Endpoint("127.0.0.1",server.port()),trust,SECRET.toCharArray())){
                     JsonNode user=gateway.request("LOGIN",object().put("username","admin").put("password",SECRET)).get(5,TimeUnit.SECONDS);
                     fx(()->{
-                        application=app;
+                        application=app; UiTheme.setDark(args.length>1&&args[1].equals("dark"));
                         set(app,"gateway",gateway);set(app,"user",user);set(app,"role","ADMIN");
                         call(app,"attachEvents");call(app,"shell");
                         app.qaScene().getRoot().applyCss();app.qaScene().getRoot().layout();

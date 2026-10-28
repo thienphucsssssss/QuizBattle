@@ -65,7 +65,7 @@ final class ManagementViews {
         column.setCellValueFactory(value->new ReadOnlyObjectWrapper<>(value.getValue()));
         column.setCellFactory(ignored->new TableCell<>() {
             private final Label category=text("","bank-category"),status=text("","bank-status"),title=text("","bank-question-title"),updated=text("","bank-question-meta");
-            private final VBox preview=column(6,row(8,category,space(),status),title,updated);
+            private final VBox preview=column(4,row(8,category,space(),status),title,updated);
             {
                 getStyleClass().add("bank-preview-cell");category.setWrapText(false);category.setMaxWidth(260);status.setWrapText(false);status.setMinWidth(Region.USE_PREF_SIZE);
                 title.setAlignment(Pos.TOP_LEFT);title.setMinHeight(0);title.setPrefHeight(44);title.setMaxHeight(44);title.setMaxWidth(Double.MAX_VALUE);updated.setWrapText(false);
@@ -82,8 +82,11 @@ final class ManagementViews {
         return column;
     }
     private static void compactFilter(ComboBox<String> combo,String label) {
+        compactFilter(combo,label,true);
+    }
+    private static void compactFilter(ComboBox<String> combo,String label,boolean prefix) {
         combo.setAccessibleText(label);combo.setButtonCell(new ListCell<>() {
-            @Override protected void updateItem(String item,boolean empty){super.updateItem(item,empty);setText(empty||item==null?label:label+": "+(item.startsWith("Tất cả")?"Tất cả":item));setTooltip(empty||item==null?null:new Tooltip(label+": "+item));}
+            @Override protected void updateItem(String item,boolean empty){super.updateItem(item,empty);setText(empty||item==null?label:prefix?label+": "+(item.startsWith("Tất cả")?"Tất cả":item):item);setTooltip(empty||item==null?null:new Tooltip(label+": "+item));}
         });
     }
     private static VBox emptyInspector() {return column(10,text("Chi tiết câu hỏi","bank-section-title"),text("Chọn một câu để xem nội dung và bốn đáp án.","muted"));}
@@ -94,23 +97,23 @@ final class ManagementViews {
         return p;
     }
     void bank(String keyword, String category, String active, String sort, int page) {
-        var data = table();data.setId("bank-questions");data.getStyleClass().add("bank-table");data.setFixedCellSize(128);
+        var data = table();data.setId("bank-questions");data.getStyleClass().add("bank-table");data.setFixedCellSize(116);
         var checkPage=new CheckBox();checkPage.setId("bank-check-page");checkPage.getStyleClass().add("question-pick");checkPage.setAllowIndeterminate(false);checkPage.setAccessibleText("Chọn tất cả câu hỏi trên trang hiện tại");checkPage.setTooltip(new Tooltip("Tick hoặc bỏ tick tất cả câu hỏi trên trang này. Các trang khác giữ lựa chọn hiện tại."));
         TextField search = new TextField(keyword);search.setId("bank-search");search.setAccessibleText("Tìm nội dung câu hỏi"); search.setPromptText("Tìm nội dung câu hỏi…"); search.setMaxWidth(Double.MAX_VALUE);
         var sets=new ComboBox<QuestionSets.Choice>();sets.setId("bank-question-set");sets.setAccessibleText("Lọc bộ câu hỏi");sets.setPrefWidth(255);sets.setMinWidth(180);sets.setValue(QuestionSets.Choice.all());sets.setDisable(true);
         sets.setButtonCell(new ListCell<>(){@Override protected void updateItem(QuestionSets.Choice item,boolean empty){super.updateItem(item,empty);setText(empty||item==null?"Bộ câu hỏi":"Bộ: "+item.name());setTooltip(empty||item==null?null:new Tooltip(item.toString()));}});
         ComboBox<String> categories = new ComboBox<>(FXCollections.observableArrayList("Tất cả chủ đề")); categories.setValue(category); categories.setPrefWidth(220);compactFilter(categories,"Chủ đề");
         ComboBox<String> statuses = new ComboBox<>(FXCollections.observableArrayList("Tất cả trạng thái", "Đang bật", "Đã tắt")); statuses.setValue(active);statuses.setPrefWidth(210);compactFilter(statuses,"Trạng thái");
-        ComboBox<String> order = new ComboBox<>(FXCollections.observableArrayList("Mới cập nhật", "ID tăng dần")); order.setValue(sort);order.setPrefWidth(210);compactFilter(order,"Xếp theo");
+        ComboBox<String> order = new ComboBox<>(FXCollections.observableArrayList("Mới cập nhật", "ID tăng dần")); order.setValue(sort);order.setPrefWidth(210);compactFilter(order,"Xếp theo",false);
         Label count = text("Đang tải ngân hàng…", "muted"), paging = text("", "muted");
         var add = button("+ Thêm câu hỏi", "ink-button", () -> editQuestion(object())); add.setDisable(!app.editsAllowed());
         var heading=text("Ngân hàng câu hỏi","bank-title");
         var importFile=button("Nhập từ Excel / Word","quiet",()->new QuestionImportView(app).show());importFile.setDisable(!app.editsAllowed());importFile.setId("bank-import");
-        var manageSets=button("Bộ câu hỏi","quiet",()->{
+        var manageSets=button("Thêm bộ câu hỏi","quiet",()->{
             var p=filters(search.getText(),categories.getValue(),statuses.getValue(),1,order.getValue()).put("question_set_id",app.bankQuestionSet());
             QuestionSets.manage(app,p,app.bankSelectedQuestions());
         });manageSets.setId("bank-manage-sets");manageSets.setDisable(!app.editsAllowed());
-        var headerActions=row(10,importFile,add);headerActions.getStyleClass().add("bank-header-actions");
+        var headerActions=row(10,manageSets,importFile,add);headerActions.getStyleClass().add("bank-header-actions");
         var header=new BorderPane(column(5,heading,count));header.setRight(headerActions);BorderPane.setAlignment(headerActions,Pos.TOP_RIGHT);BorderPane.setMargin(headerActions,new Insets(0,0,0,18));
         boolean[] stackedHeader={false};header.widthProperty().addListener((o,before,width)->{
             boolean stacked=width.doubleValue()<900;if(stacked==stackedHeader[0])return;stackedHeader[0]=stacked;
@@ -130,12 +133,13 @@ final class ManagementViews {
         var checkColumn=questionSelectionColumn(selectionSummary);checkColumn.setGraphic(checkPage);
         data.getColumns().addAll(checkColumn,questionPreviewColumn());
         selectionSummary.run();
-        var templates=button("Mẫu câu hỏi","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage()));
-        var selectionActions=new FlowPane(10,8,manageSets,templates,selectPage,clearSelection,selectedCount);selectionActions.getStyleClass().add("bank-toolbar");
-        var filterRow = new FlowPane(10, 10, categories,statuses,order);
-        var searchRow=row(12,search,sets);HBox.setHgrow(search,Priority.ALWAYS);
-        var filters=column(10,searchRow,filterRow);filters.getStyleClass().add("bank-filter-panel");
-        var top = column(14, header,filters,selectionActions); top.setPadding(new Insets(0, 0, 10, 0));
+        var selectionActions=new FlowPane(10,8,selectPage,clearSelection,selectedCount);selectionActions.getStyleClass().add("bank-toolbar");
+        search.setPrefWidth(220); search.setMinWidth(220);
+        sets.setPrefWidth(210); categories.setPrefWidth(170); statuses.setPrefWidth(180); order.setPrefWidth(205);
+        var filters=new FlowPane(10,10,search,sets,categories,statuses,order);
+        filters.getStyleClass().add("bank-filter-panel");
+        filters.widthProperty().addListener((o,before,width)->search.setPrefWidth(Math.max(220,width.doubleValue()-837)));
+        var top = column(12, header,filters,selectionActions); top.setPadding(new Insets(0, 0, 8, 0));
         var inspector = emptyInspector();inspector.setPadding(new Insets(18));inspector.setPrefWidth(318);inspector.setMaxWidth(318);
         var content = new BorderPane(data); var detailScroll = scroll(inspector);detailScroll.setId("bank-inspector");detailScroll.getStyleClass().add("bank-inspector");detailScroll.setPrefWidth(318); BorderPane.setMargin(detailScroll, new Insets(0, 0, 0, 16)); content.setRight(detailScroll);
         content.widthProperty().addListener((o, before, width) -> content.setRight(width.doubleValue() < 950 ? null : detailScroll));
