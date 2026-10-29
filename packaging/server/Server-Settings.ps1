@@ -14,7 +14,7 @@ function Read-NqbSettings {
         catch {throw 'Invalid config/server.json. Check JSON quotes, commas and field names.'}
     } else {
         $nqbSettings=[pscustomobject]@{
-            server=[pscustomobject]@{bind='127.0.0.1';port=5050;maxPlayers=10;maxConnections=32}
+            server=[pscustomobject]@{bind='auto';port=5050;maxPlayers=10;maxConnections=32}
             database=[pscustomobject]@{path='data/quiz.db'}
             tls=[pscustomobject]@{keyStore='certs/server.p12';password='';passwordProtected=''}
             bootstrap=[pscustomobject]@{adminUsername='admin';adminPassword='';adminPasswordProtected=''}
@@ -51,9 +51,12 @@ function Read-NqbSettings {
 }
 function Write-NqbRuntimeConfig($Settings) {
     $nqbAddress=$null
-    if(-not [Net.IPAddress]::TryParse([string]$Settings.server.bind,[ref]$nqbAddress) -or $nqbAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork){throw 'server.bind must be this Server private LAN IPv4 address.'}
-    $nqbIpBytes=$nqbAddress.GetAddressBytes()
-    if(-not($nqbIpBytes[0] -eq 10 -or $nqbIpBytes[0] -eq 127 -or ($nqbIpBytes[0] -eq 172 -and $nqbIpBytes[1] -ge 16 -and $nqbIpBytes[1] -le 31) -or ($nqbIpBytes[0] -eq 192 -and $nqbIpBytes[1] -eq 168))){throw 'server.bind must be a private LAN or loopback IPv4 address.'}
+    $nqbAuto=[string]$Settings.server.bind -in @('auto','0.0.0.0')
+    if(-not $nqbAuto) {
+        if(-not [Net.IPAddress]::TryParse([string]$Settings.server.bind,[ref]$nqbAddress) -or $nqbAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork){throw 'server.bind must be auto or a private LAN IPv4 address.'}
+        $nqbIpBytes=$nqbAddress.GetAddressBytes()
+        if(-not($nqbIpBytes[0] -eq 10 -or $nqbIpBytes[0] -eq 127 -or ($nqbIpBytes[0] -eq 172 -and $nqbIpBytes[1] -ge 16 -and $nqbIpBytes[1] -le 31) -or ($nqbIpBytes[0] -eq 192 -and $nqbIpBytes[1] -eq 168))){throw 'server.bind must be auto or a private LAN/loopback IPv4 address.'}
+    }
     $nqbPort=[int]$Settings.server.port;$nqbPlayers=[int]$Settings.server.maxPlayers;$nqbConnections=[int]$Settings.server.maxConnections
     if($nqbPort -lt 0 -or $nqbPort -gt 65535 -or $nqbPlayers -lt 2 -or $nqbPlayers -gt 10 -or $nqbConnections -lt ($nqbPlayers+1) -or $nqbConnections -gt 128){throw 'Invalid port/player/connection limits in config/server.json.'}
     foreach($nqbPath in @($Settings.database.path,$Settings.tls.keyStore)){if($nqbPath -isnot [string] -or [string]::IsNullOrWhiteSpace($nqbPath) -or $nqbPath -match '[\r\n]'){throw 'Invalid database.path or tls.keyStore.'}}

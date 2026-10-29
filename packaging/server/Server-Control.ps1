@@ -49,8 +49,8 @@ function Test-NqbAdmin {
     throw 'Server files are from different versions. Update the Server scripts and library together.'
 }
 function Configure-NqbStartup($Settings) {
-    Write-Host 'ONE-TIME SETUP. Press Enter to keep the existing IP/port.'
-    $nqbIp=Read-Host "Server LAN IPv4 [$($Settings.server.bind)]"
+    Write-Host 'ONE-TIME SETUP. Use auto for any LAN/hotspot; press Enter to keep settings.'
+    $nqbIp=Read-Host "Server binding: auto or fixed LAN IPv4 [$($Settings.server.bind)]"
     if(-not [string]::IsNullOrWhiteSpace($nqbIp)){$Settings.server.bind=$nqbIp.Trim()}
     $nqbPort=Read-Host "Server TCP port [$($Settings.server.port)]"
     if(-not [string]::IsNullOrWhiteSpace($nqbPort)){$Settings.server.port=[int]$nqbPort}

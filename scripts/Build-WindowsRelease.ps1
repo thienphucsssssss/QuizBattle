@@ -1,6 +1,6 @@
-param([switch]$Offline,[string]$WixBin='',[string]$Version='0.3.6',
+param([switch]$Offline,[string]$WixBin='',[string]$Version='0.6.2',
     [Parameter(Mandatory=$true)][string]$ClientTruststore,
-    [string]$ServerHost='127.0.0.1',[ValidateRange(1,65535)][int]$ServerPort=5050,[ValidateRange(1,65535)][int]$DiscoveryPort=5051)
+    [string]$ServerHost='auto',[ValidateRange(1,65535)][int]$ServerPort=5050,[ValidateRange(1,65535)][int]$DiscoveryPort=5051)
 $ErrorActionPreference='Stop'
 $nqbRoot=Split-Path -Parent $PSScriptRoot
 $nqbTag=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -52,7 +52,7 @@ try {
             Copy-Item -LiteralPath $nqbInput -Destination "$nqbServer/lib" -Recurse
             Copy-Item -LiteralPath $nqbRuntime -Destination "$nqbServer/runtime" -Recurse
             Get-ChildItem -LiteralPath 'packaging/server' -Filter '*.bat' | ForEach-Object {Copy-Item -LiteralPath $_.FullName -Destination $nqbServer}
-            Copy-Item -LiteralPath 'packaging/server/Server-Control.ps1','packaging/server/Server-Settings.ps1','scripts/Setup-Lan.ps1' -Destination "$nqbServer/scripts"
+            Copy-Item -LiteralPath 'packaging/server/Server-Control.ps1','packaging/server/Server-Settings.ps1','packaging/server/Allow-Lan.ps1','scripts/Setup-Lan.ps1' -Destination "$nqbServer/scripts"
             Copy-Item -LiteralPath 'config/server.example.properties' -Destination "$nqbServer/config/server.properties"
             Copy-Item -LiteralPath 'packaging/server/server.json' -Destination "$nqbServer/config/server.json"
             Copy-Item -LiteralPath 'packaging/README-Windows.txt' -Destination "$nqbServer/README.txt"

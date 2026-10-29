@@ -57,6 +57,32 @@
 .scroll-bar:horizontal, .scroll-bar:vertical { -fx-background-color: transparent; }
 .scroll-bar .thumb { -fx-background-color: #bec8bd; -fx-background-radius: 8; }
 .separator .line { -fx-border-color: -line; }
+.topology-panel { -fx-padding: 20; -fx-background-color: white; -fx-background-radius: 20; -fx-border-color: #dce3f5; -fx-border-radius: 20; }
+.room-details-panel { -fx-padding: 24; -fx-background-color: #eef2ff; -fx-background-radius: 20; }
+.topology-player { -fx-padding: 2; -fx-background-color: transparent; -fx-border-color: transparent; -fx-border-radius: 12; -fx-background-radius: 12; }
+.topology-player:hover { -fx-background-color: #eef2ff; }
+.topology-player:focused { -fx-border-color: #3147e4; -fx-border-width: 2; }
+.topology-name { -fx-font-size: 13px; -fx-font-family: "Be Vietnam Pro Bold"; }
+.topology-metrics, .topology-status, .topology-legend, .topology-ssid { -fx-font-size: 12px; -fx-text-fill: #536181; }
+.topology-anchor { -fx-background-color: #d1fa62; -fx-background-radius: 20; -fx-padding: 6; }
+.topology-anchor .label { -fx-text-fill: #202549; }
+.topology-ap-icon { -fx-font-size: 28px; }
+.topology-server { -fx-background-color: #eef2ff; -fx-background-radius: 10; }
+.topology-server-icon { -fx-font-size: 20px; -fx-text-fill: #3147e4; }
+.topology-device-shape { -fx-stroke: #202549; -fx-stroke-width: 2.2; -fx-fill: transparent; }
+.topology-link { -fx-stroke: #8c9ddb; -fx-stroke-width: 2; }
+.topology-link.missing { -fx-stroke: #a4afc6; -fx-stroke-dash-array: 5 5; }
+.topology-link.warning { -fx-stroke: #b57716; -fx-stroke-width: 3; }
+.topology-link.lost { -fx-stroke: #b4474d; -fx-stroke-dash-array: 3 6; }
+.results-podium-panel, .results-ranking-panel { -fx-padding: 18; }
+.game .topology-panel { -fx-background-color: #2b40ad; -fx-border-color: #6475cd; }
+.game .topology-player:hover { -fx-background-color: #3b50bc; }
+.game .topology-metrics, .game .topology-status, .game .topology-legend { -fx-text-fill: #d4ddff; }
+.game .topology-anchor .label, .game .topology-server .label { -fx-text-fill: #202549; }
+.answer-meta { -fx-font-size: 13px; -fx-text-fill: #536181; }
+.answer-streak { -fx-font-size: 12px; -fx-font-family: "Be Vietnam Pro Bold"; -fx-background-color: #d1fa62; -fx-text-fill: #202549; -fx-background-radius: 7; -fx-padding: 4 8; }
+.game .label.answer-meta { -fx-text-fill: #d4ddff; }
+.game .label.answer-streak { -fx-text-fill: #202549; }
 .game { -fx-background-color: #2438aa; }
 .game .label { -fx-text-fill: -cream; }
 .game .muted, .game .caption { -fx-text-fill: #d4ddff; }
@@ -162,3 +188,93 @@
 .medal-ring { -fx-stroke: #202146; -fx-stroke-width: 1; -fx-opacity: .4; }
 .medal-ribbon { -fx-fill: #ee6c83; }
 .game .medal-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+
+/* Selected bank/history/ranking polish from feature/viet-my (01429cb). */
+.table-cell.question-select-cell { -fx-alignment: CENTER; -fx-padding: 0; }
+.table-view .column-header#bank-selection-column .label { -fx-alignment: CENTER; }
+.question-pick { -fx-min-width: 44; -fx-min-height: 44; -fx-padding: 10; -fx-alignment: CENTER; -fx-font-size: 16; }
+.bank-title { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 28px; -fx-text-fill: #202146; }
+.bank-header-actions .button { -fx-font-size: 13px; -fx-padding: 10 14; }
+.bank-filter-panel { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 14; }
+.bank-filter-panel .text-field { -fx-font-size: 14px; -fx-min-height: 42; }
+.bank-filter-panel .combo-box { -fx-font-size: 13px; -fx-min-height: 40; -fx-padding: 3 6; -fx-border-color: #e0e5f1; -fx-background-color: #f7f9ff; }
+.bank-filter-panel .combo-box:focused { -fx-border-color: #256c90; }
+.bank-toolbar .button, .bank-footer .button { -fx-font-size: 13px; -fx-min-height: 40; -fx-padding: 8 12; }
+.bank-selection-total { -fx-font-size: 12px; -fx-text-fill: #344a20; -fx-background-color: #eef7dc; -fx-background-radius: 10; -fx-padding: 9 12; }
+.bank-footer .label { -fx-font-size: 12px; }
+.bank-table .column-header-background { -fx-background-color: transparent; -fx-background-radius: 0; }
+.bank-table .column-header .label { -fx-font-size: 12px; -fx-text-fill: #66728a; }
+.bank-table .table-row-cell:filled { -fx-background-color: white; -fx-background-insets: 4 0; -fx-background-radius: 14; -fx-border-width: 0; -fx-padding: 4 0; }
+.bank-table .table-row-cell:filled:hover { -fx-background-color: #f2f5ff; }
+.bank-table .table-row-cell:filled:selected { -fx-background-color: #3049d5, #edf2ff; -fx-background-insets: 4 0, 4 0 4 3; -fx-background-radius: 14, 12; }
+.bank-table .table-cell { -fx-background-color: transparent; -fx-border-width: 0; }
+.bank-table .bank-preview-cell { -fx-padding: 8 14; -fx-alignment: CENTER_LEFT; }
+.bank-question-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: #202146; }
+.bank-question-meta { -fx-font-size: 12px; -fx-text-fill: #66728a; }
+.bank-preview-cell .bank-question-title .text { -fx-fill: #202146; }
+.bank-preview-cell .bank-question-meta .text { -fx-fill: #66728a; }
+.bank-preview-cell .bank-category .text { -fx-fill: #344b92; }
+.bank-preview-cell .bank-status.active .text { -fx-fill: #385923; }
+.bank-preview-cell .bank-status.inactive .text { -fx-fill: #7b5963; }
+.bank-category { -fx-font-size: 11px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-text-fill: #344b92; -fx-background-color: #edf1ff; -fx-background-radius: 7; -fx-padding: 4 8; }
+.bank-status { -fx-font-size: 11px; -fx-background-radius: 7; -fx-padding: 4 8; }
+.bank-status.active { -fx-text-fill: #385923; -fx-background-color: #eaf4dc; }
+.bank-status.inactive { -fx-text-fill: #7b5963; -fx-background-color: #f6e9ec; }
+.bank-inspector { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-width: 1; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 0; }
+.bank-inspector > .viewport { -fx-background-color: transparent; }
+.bank-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: #202146; }
+.bank-question-code { -fx-font-size: 11px; -fx-text-fill: #66728a; -fx-background-color: #f1f4fb; -fx-background-radius: 6; -fx-padding: 4 6; }
+.bank-detail-question { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 17px; -fx-text-fill: #202146; }
+.bank-answer-option { -fx-background-color: #f4f6fc; -fx-background-radius: 11; -fx-border-color: transparent; -fx-border-radius: 11; -fx-border-width: 1; -fx-padding: 11; }
+.bank-answer-option.correct { -fx-background-color: #eef8dd; -fx-border-color: #bfdc90; }
+.bank-answer-letter { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 13px; -fx-text-fill: #526387; -fx-background-color: #e6ebf8; -fx-background-radius: 7; -fx-padding: 4 0; }
+.bank-answer-option.correct .bank-answer-letter { -fx-background-color: #3049d5; -fx-text-fill: white; }
+.bank-answer-text { -fx-font-size: 14px; -fx-text-fill: #202146; }
+.bank-answer-note { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: #426621; }
+.bank-detail-content .button { -fx-font-size: 13px; -fx-padding: 8 12; }
+.bank-detail-dialog .bank-answer-option { -fx-background-color: white; -fx-border-color: #e2e7f3; }
+.bank-detail-dialog .bank-answer-option.correct { -fx-background-color: #eef8dd; -fx-border-color: #bfdc90; }
+.history-table { -fx-background-color: white; -fx-background-radius: 15; -fx-border-color: -line; -fx-border-radius: 15; -fx-padding: 8; }
+.history-table .column-header-background { -fx-background-color: #edf1fb; -fx-background-radius: 9; }
+.history-table .column-header { -fx-size: 44; }
+.history-table .column-header .label { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; }
+.history-table .table-row-cell:filled { -fx-background-color: white; -fx-border-color: transparent transparent #edf0f8 transparent; }
+.history-table .table-row-cell:empty { -fx-background-color: transparent; -fx-border-color: transparent; }
+.history-table .table-row-cell:filled:hover { -fx-background-color: #f4f6ff; }
+.history-table .table-row-cell:filled:selected { -fx-background-color: #3049d5, #edf2ff; -fx-background-insets: 4 0, 4 0 4 3; -fx-background-radius: 10, 8; -fx-border-color: transparent; }
+.history-table .table-cell { -fx-font-size: 13px; -fx-padding: 10 12; }
+.history-table .history-room-cell { -fx-padding: 10 14; }
+.history-room-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: -ink; }
+.history-room-meta { -fx-font-size: 12px; -fx-text-fill: -muted; }
+.history-table .history-room-name .text, .history-table .history-count .text { -fx-fill: -ink; }
+.history-table .history-room-meta .text { -fx-fill: -muted; }
+.history-count { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 14px; -fx-background-color: #eef2fc; -fx-background-radius: 8; -fx-padding: 5 12; }
+.history-total { -fx-font-size: 12px; -fx-text-fill: #344b92; -fx-background-color: #e9eefc; -fx-background-radius: 9; -fx-padding: 8 12; }
+.history-footer .button { -fx-font-size: 13px; -fx-padding: 8 12; }
+.history-footer .error { -fx-text-fill: #9c3026; }
+.history-dialog { -fx-background-color: -cream; -fx-padding: 0; }
+.history-dialog > .header-panel { -fx-background-color: #2438aa; -fx-padding: 18 24; }
+.history-dialog > .header-panel .label { -fx-text-fill: white; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 19px; }
+.history-dialog > .content { -fx-padding: 0; }
+.history-dialog > .button-bar { -fx-padding: 12 20; -fx-background-color: white; }
+#history-results-scroll { -fx-padding: 0; }
+.history-results { -fx-padding: 12 20 20 20; }
+.history-section { -fx-background-color: white; -fx-border-color: #e2e7f3; -fx-border-radius: 15; -fx-background-radius: 15; -fx-padding: 18; }
+.history-section-title { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+.history-chip { -fx-font-size: 12px; -fx-text-fill: -muted; -fx-background-color: #e9edf8; -fx-background-radius: 8; -fx-padding: 7 12; }
+.history-saved { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 12px; -fx-text-fill: #344a20; -fx-background-color: -mint; -fx-background-radius: 8; -fx-padding: 6 12; }
+.history-winners { -fx-background-color: #edf2ff; -fx-border-color: #dfe6fb; -fx-padding: 14 18; }
+.history-results .victory-podium { -fx-hgap: 12; -fx-vgap: 20; -fx-padding: 8 0 0 0; }
+.history-results .winner-name { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 16px; -fx-text-fill: -ink; -fx-text-alignment: center; }
+.history-results .winner-score { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 22px; -fx-text-fill: #3049d5; }
+.history-results .podium-place { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 36px; -fx-text-fill: -ink; }
+.history-results .podium-caption { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: -ink; }
+.history-results .medal-value { -fx-font-family: "Be Vietnam Pro ExtraBold"; -fx-font-size: 18px; -fx-text-fill: -ink; }
+.history-results .ranking-row { -fx-background-color: #f7f9fe; -fx-background-radius: 12; -fx-padding: 8 14; }
+.history-results .ranking-row.rank-top { -fx-background-color: #eaf0ff; }
+.history-results .rank-number { -fx-font-size: 23px; -fx-text-fill: #3049d5; }
+.history-results .ranking-row .subtitle { -fx-font-size: 15px; }
+.history-results .rank-score { -fx-font-size: 23px; }
+.rank-detail { -fx-font-size: 12px; -fx-text-fill: -muted; }
+.game .ranking-row .rank-detail { -fx-text-fill: -muted; }
+.rank-own-badge, .game .ranking-row .rank-own-badge { -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-font-size: 11px; -fx-text-fill: white; -fx-background-color: #3049d5; -fx-background-radius: 6; -fx-padding: 3 7; }

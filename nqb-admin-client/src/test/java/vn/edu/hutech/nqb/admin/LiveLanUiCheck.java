@@ -2,6 +2,7 @@ package vn.edu.hutech.nqb.admin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import javafx.application.Platform;
+import javafx.scene.Scene;
 import javafx.scene.control.TextField;
 import javafx.scene.image.WritableImage;
 import vn.edu.hutech.nqb.client.*;
@@ -30,12 +31,14 @@ public final class LiveLanUiCheck {
         Files.writeString(profile,"tls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
         System.setProperty("nqb.client.config",profile.toString());
         var store = new QuizStore(temp.resolve("qa.db")); store.bootstrap("admin", "Giảng viên QA", SECRET.toCharArray());
-        var config = new ServerConfig("127.0.0.1", 0, temp.resolve("qa.db"), key, 10, 32, 1500, 1600, 1800);
+        var config = new ServerConfig("auto", 0, temp.resolve("qa.db"), key, 10, 32, 1500, 1600, 1800);
         try (var server = new QuizServer(config, config.tls(SECRET.toCharArray()), store)) {
             server.start(); liveServer=server; port = server.port();
-            Files.writeString(profile,"server.host=127.0.0.1\nserver.port=1\ndiscovery.port="+server.discoveryPort()+"\ntls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
+            Files.writeString(profile,"server.host=auto\nserver.port=1\ndiscovery.port="+server.discoveryPort()+"\ntls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
             ArcadeApplication.qaDriver = app -> Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
-                try { run(app); System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, no Client IP/port, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS"); }
+                try { if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
+                    else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, no Client IP/port, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
                 catch (Throwable failure) { ArcadeApplication.qaFailed(failure); failure.printStackTrace(); }
                 finally { Platform.runLater(Platform::exit); }
             });
@@ -43,6 +46,66 @@ public final class LiveLanUiCheck {
         } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config"); }
     }
     private static TlsQuizGateway connect() throws Exception { return TlsQuizGateway.connect(new Endpoint("127.0.0.1", port), trust, SECRET.toCharArray()); }
+    private static void checkAccessPoints(ArcadeApplication app) throws Exception {
+        fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
+        await(app::qaConnected);
+        uiRequest(app, "QUESTION_CREATE", object().put("content", "AP QA fixture").put("option_a", "A")
+            .put("option_b", "B").put("option_c", "C").put("option_d", "D").put("correct_answer", "A").put("category", "QA"));
+        var room = uiRequest(app, "ROOM_CONFIGURE", object().put("room_name", "Hành lang E1 · QA dữ liệu giả lập")
+            .put("question_count", 1).put("duration_seconds", 5).put("proximity_enabled", false));
+        await(() -> app.managedRoomSnapshot().path("is_owner").asBoolean());
+        fx(app::openProximityMonitor);
+        await(() -> app.qaMonitorStage() != null && !app.qaMonitorStage().getScene().lookup("#ap-open-config").isDisabled());
+        fx(() -> ((javafx.scene.control.Button)app.qaMonitorStage().getScene().lookup("#ap-open-config")).fire());
+        await(() -> javafx.stage.Window.getWindows().stream().anyMatch(w -> w.isShowing() && w.getScene().lookup("#ap-config-dialog") != null));
+        fx(() -> {
+            var scene = auxiliary("#ap-config-dialog");
+            for (int i = 0; i < 2; i++) ((javafx.scene.control.Button)scene.lookup("#ap-add-row")).fire();
+            var fields = scene.getRoot().lookupAll(".text-field").stream().filter(TextField.class::isInstance).map(TextField.class::cast).toList();
+            for (var field : fields) {
+                int row = javafx.scene.layout.GridPane.getRowIndex(field);
+                switch (field.getAccessibleText()) {
+                    case "Tên Wi-Fi (SSID)" -> field.setText("HUTECH E1");
+                    case "BSSID" -> field.setText("aa:bb:cc:dd:ee:0" + row);
+                    case "Tên AP" -> field.setText("AP" + row);
+                    case "Tầng / hành lang" -> field.setText("Tầng 3 / hành lang A");
+                    case "Thứ tự" -> field.setText(String.valueOf(row));
+                    default -> throw new AssertionError("Unexpected AP field");
+                }
+            }
+            scene.getRoot().applyCss(); scene.getRoot().layout(); saveImage(scene.snapshot(null), "ap-01-configuration");
+            ((javafx.scene.control.Button)scene.lookup("#ap-save-config")).fire();
+        });
+        await(() -> javafx.stage.Window.getWindows().stream().noneMatch(w -> w.isShowing() && w.getScene().lookup("#ap-config-dialog") != null));
+        if (uiRequest(app, "AP_CONFIG_GET").path("access_points").size() != 2) throw new AssertionError("UI AP save did not reach server");
+        try (var client = connect()) {
+            request(client, "JOIN", object().put("nickname", "Client QA giả lập").put("room_code", room.path("room_code").asText()));
+            var report = object().put("config_epoch", room.path("proximity").path("config_epoch").asInt())
+                .put("adapter_id", "qa-wifi").put("device_status", "CONNECTED").put("ssid", "HUTECH E1")
+                .put("band", "5 GHz").put("rssi_dbm", -55).put("bssid", "aa:bb:cc:dd:ee:01");
+            request(client, "PROXIMITY_REPORT", report.put("seq", 1));
+            Thread.sleep(5100); request(client, "PROXIMITY_REPORT", report.put("seq", 2));
+            Thread.sleep(5100); request(client, "PROXIMITY_REPORT", report.put("seq", 3).put("bssid", "aa:bb:cc:dd:ee:02"));
+            Thread.sleep(5100); request(client, "PROXIMITY_REPORT", report.put("seq", 4));
+            await(() -> app.latestProximitySnapshot().path("players").path(0).path("access_point").path("direction").asText().equals("FORWARD"));
+            fx(() -> {
+                var stage = app.qaMonitorStage(); var scene = stage.getScene();
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-ap-mode")).fire();
+                var table = (javafx.scene.control.TableView<?>)scene.lookup("#ap-monitor-table");
+                table.getSelectionModel().selectFirst(); stage.setWidth(1024); stage.setHeight(640);
+            });
+            Thread.sleep(250);
+            fx(() -> {
+                var scene = app.qaMonitorStage().getScene(); scene.getRoot().applyCss(); scene.getRoot().layout();
+                if (scene.lookup("#ap-monitor-table").getBoundsInParent().getHeight() < 80) throw new AssertionError("AP table clipped at compact size");
+                saveImage(scene.snapshot(null), "ap-02-forward-1024");
+                app.qaMonitorStage().setWidth(1366); app.qaMonitorStage().setHeight(768);
+            });
+            Thread.sleep(250);
+            fx(() -> { var scene = app.qaMonitorStage().getScene(); scene.getRoot().applyCss(); scene.getRoot().layout(); saveImage(scene.snapshot(null), "ap-03-forward-1366"); });
+        }
+        fx(() -> app.qaMonitorStage().close());
+    }
     private static JsonNode request(QuizGateway gateway, String type, com.fasterxml.jackson.databind.node.ObjectNode payload) throws Exception { return gateway.request(type, payload).get(8, TimeUnit.SECONDS); }
     private static void run(ArcadeApplication app) throws Exception {
         fx(() -> { assertLogin(app); snapshot(app,"00-login-role-selection"); });
@@ -78,10 +141,13 @@ public final class LiveLanUiCheck {
             request(host, "START_GAME", object()); await(() -> app.qaPhase().equals("COUNTDOWN")); fx(() -> { assertMusic(app, MusicSlots.Track.GAME); snapshot(app, "02-live-countdown"); });
             for (int i = 1; i <= 2; i++) {
                 final int number = i; await(() -> app.qaPhase().equals("QUESTION_ACTIVE"));
+                fx(()->{var timing=(javafx.scene.control.Label)app.qaScene().lookup("#answer-time");if(timing==null||timing.isManaged())throw new AssertionError("Previous response time leaked into next question");});
                 fx(() -> { assertMusic(app, MusicSlots.Track.GAME); snapshot(app, "03-question-" + number); app.qaAnswer("A"); });
                 if(number==1){var state=request(host,"ROOM_STATE",object());request(opponent,"ANSWER",object().put("session_id",state.path("session_id").asText()).put("question_id",state.path("question").path("question_id").asInt()).put("answer","A"));}
                 await(() -> app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n -> n instanceof javafx.scene.control.Label l && l.getText().contains("Đã nhận đáp án A")));
+                fx(()->{var timing=(javafx.scene.control.Label)app.qaScene().lookup("#answer-time");if(!timing.isManaged()||!timing.getText().matches("[0-9]+,[0-9]{2} s"))throw new AssertionError("Server response time missing beside nickname");if(timing.getFont().getSize()>14)throw new AssertionError("Answer time is not compact");snapshot(app,"03-answer-time-"+number);});
                 await(() -> app.qaPhase().equals("SHOW_RESULT")); fx(() -> { assertMusic(app, MusicSlots.Track.GAME); snapshot(app, "04-result-" + number); });
+                if(number==2)fx(()->{var streak=(javafx.scene.control.Label)app.qaScene().lookup("#answer-streak");if(!streak.isManaged()||!streak.getText().equals("Chuỗi ×2")||app.qaResult().path("streak_bonus").asInt()!=20)throw new AssertionError("Correct-answer streak not rendered");if(!javafx.scene.paint.Color.web("#202549").equals(streak.getTextFill()))throw new AssertionError("Streak text lost contrast against lime badge");});
                 await(() -> app.qaPhase().equals("SHOW_RANKING")); Thread.sleep(1400); fx(() -> { assertMusic(app, MusicSlots.Track.GAME); app.qaAssertRanksSettled(); snapshot(app, "05-ranking-" + number); });
             }
             await(() -> app.qaPhase().equals("FINISHED"));Thread.sleep(950); fx(() -> { assertMusic(app, MusicSlots.Track.VICTORY); if (!app.qaResult().path("result_saved").asBoolean() || app.qaResult().path("ranking").size() != 3 || app.qaScene().getRoot().lookupAll(".victory-column").size()!=3) throw new AssertionError("UI final result/podium missing persistence/ranking"); snapshot(app, "06-live-final"); });
@@ -89,7 +155,7 @@ public final class LiveLanUiCheck {
             request(host, "ROOM_CLOSE", object()); await(() -> !app.qaConnected());
         }
         fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
-        await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app) == 10); fx(() -> snapshot(app, "08-live-bank"));
+        await(app::qaConnected);checkManagedTopology(app);fx(app::bankView); await(() -> tableSize(app) == 10); fx(() -> snapshot(app, "08-live-bank"));
         fx(app::historyView); await(() -> tableSize(app) == 1); fx(() -> snapshot(app, "09-live-history"));
         fx(() -> { app.qaSettings(); var dialog = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing()).toList().getLast().getScene(); dialog.getRoot().applyCss(); dialog.getRoot().layout();
             var sound = (javafx.scene.control.CheckBox)dialog.getRoot().lookupAll(".check-box").stream().filter(n -> n instanceof javafx.scene.control.CheckBox c && c.getText().equals("Âm thanh giao diện")).findFirst().orElseThrow();
@@ -104,6 +170,10 @@ public final class LiveLanUiCheck {
         await(app::qaConnected); fx(app::bankView); await(() -> tableSize(app)==0 && app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n -> n instanceof javafx.scene.control.Label l && l.getText().startsWith("0 câu phù hợp")));
         fx(() -> { if(app.qaScene().getRoot().lookupAll(".button").stream().anyMatch(n -> n instanceof javafx.scene.control.Button b && b.getText().equals("Người dùng")))throw new AssertionError("Teacher sees Admin navigation"); snapshot(app,"13-teacher-empty-bank"); });
         checkQuestionImport(app);
+        checkQuestionSetsUi(app);
+        checkTopologyLayouts(app);
+        checkProximityUi(app);
+        checkHistoryReuseUi(app);
         fx(app::qaLogout); await(() -> app.qaScene().lookup("#login-role")!=null); fx(() -> assertLogin(app));
         fx(app::qaStudentAuth); await(() -> app.qaScene().lookup("#identity")!=null);
         fx(() -> { if(!((TextField)app.qaScene().lookup("#identity")).getText().isEmpty())throw new AssertionError("Sample nickname prefilled"); snapshot(app,"14-student-blank-nickname"); });
@@ -127,7 +197,56 @@ public final class LiveLanUiCheck {
     private static javafx.scene.Scene importScene(){return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene().lookup("#import-confirm")!=null).findFirst().orElseThrow().getScene();}
     private static void importDetails(){if(importScene().lookup("#import-tabs") instanceof javafx.scene.control.TabPane tabs)tabs.getSelectionModel().select(1);importScene().getRoot().applyCss();importScene().getRoot().layout();}
     private static javafx.scene.control.Button importConfirm(){return (javafx.scene.control.Button)importScene().lookup("#import-confirm");}
-    private static JsonNode uiRequest(ArcadeApplication app,String type)throws Exception {var result=new CompletableFuture<JsonNode>();fx(()->app.call(type,object(),result::complete,result::completeExceptionally));return result.get(8,TimeUnit.SECONDS);}
+    private static JsonNode uiRequest(ArcadeApplication app,String type)throws Exception {return uiRequest(app,type,object());}
+    private static JsonNode uiRequest(ArcadeApplication app,String type,com.fasterxml.jackson.databind.node.ObjectNode payload)throws Exception {var result=new CompletableFuture<JsonNode>();fx(()->app.call(type,payload,result::complete,result::completeExceptionally));return result.get(8,TimeUnit.SECONDS);}
+    private static Scene auxiliary(String selector){return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene().lookup(selector)!=null).findFirst().orElseThrow().getScene();}
+    private static void checkQuestionSetsUi(ArcadeApplication app)throws Exception {
+        for(int i=0;i<12;i++)uiRequest(app,"QUESTION_CREATE",object().put("content","Câu kiểm thử chọn nhiều trang số "+i).put("option_a","TCP").put("option_b","UDP").put("option_c","IP").put("option_d","ARP").put("correct_answer","A").put("category","QA tạm"));
+        fx(()->{app.setBankQuestionSet(0);app.bankView();});await(()->tableSize(app)==10);
+        fx(()->{((javafx.scene.control.Button)app.qaScene().lookup("#bank-select-page")).fire();app.qaClick("Sau →");});await(()->tableSize(app)==5);
+        fx(()->{((javafx.scene.control.Button)app.qaScene().lookup("#bank-select-page")).fire();if(app.bankSelectedQuestions().size()!=15)throw new AssertionError("Selection did not survive pagination");snapshot(app,"13m-bank-cross-page-selection");((javafx.scene.control.Button)app.qaScene().lookup("#bank-manage-sets")).fire();});
+        await(()->!((javafx.scene.control.Button)auxiliary("#question-sets-table").lookup("#set-create-selected")).isDisabled());
+        fx(()->{var scene=auxiliary("#question-sets-table");((TextField)scene.lookup("#question-set-name")).setText("Bộ QA đa trang");((javafx.scene.control.Button)scene.lookup("#set-create-selected")).fire();});
+        await(()->((javafx.scene.control.Label)auxiliary("#question-sets-table").lookup("#question-set-status")).getText().startsWith("Đã tạo"));
+        fx(()->{var scene=auxiliary("#question-sets-table");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"13n-question-sets");app.qaCloseAuxiliary();app.roomConfig();});
+        await(()->!((javafx.scene.control.ComboBox<?>)auxiliary("#room-question-set").lookup("#room-question-set")).isDisabled());
+        fx(()->{var scene=auxiliary("#room-question-set");@SuppressWarnings("unchecked") var choices=(javafx.scene.control.ComboBox<QuestionSets.Choice>)scene.lookup("#room-question-set");choices.getItems().stream().filter(v->v.name().equals("Bộ QA đa trang")).findFirst().ifPresentOrElse(choices::setValue,()->{throw new AssertionError("Created set missing in room choices");});((javafx.scene.control.Spinner<Integer>)scene.lookup("#room-question-count")).getValueFactory().setValue(1);var proximity=(javafx.scene.control.CheckBox)scene.lookup("#room-proximity-enabled");if(proximity.isSelected())proximity.fire();scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"13o-room-question-source");scene.getRoot().lookupAll(".button").stream().filter(n->n instanceof javafx.scene.control.Button b&&b.getText().equals("Lưu cấu hình")).map(n->(javafx.scene.control.Button)n).findFirst().orElseThrow().fire();});
+        await(()->javafx.stage.Window.getWindows().stream().noneMatch(w->w.isShowing()&&w.getScene().lookup("#room-question-set")!=null));var state=uiRequest(app,"ROOM_STATE");if(state.path("question_set_id").asInt()==0)throw new AssertionError("Room source not persisted");
+        uiRequest(app,"ROOM_CLOSE");fx(()->{app.clearBankSelection();app.setBankQuestionSet(0);});
+        System.out.println("QUESTION_SETS_UI_PASS: cross-page selection, create set, room source, no duplicate LAN controls");
+    }
+    private static void checkHistoryReuseUi(ArcadeApplication app)throws Exception {
+        fx(app::historyView);await(()->tableSize(app)>=1);
+        fx(()->{((javafx.scene.control.TableView<?>)app.qaScene().lookup("#history-matches")).getSelectionModel().selectFirst();app.qaClick("Xem bảng điểm");});
+        await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene().lookup("#history-reuse")!=null));
+        fx(()->{var scene=auxiliary("#history-reuse");scene.getRoot().applyCss();scene.getRoot().layout();if(scene.lookup("#history-ranking")==null)throw new AssertionError("History podium missing");saveImage(scene.snapshot(null),"13p-history-podium");((javafx.scene.control.Button)scene.lookup("#history-reuse")).fire();});
+        await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene().lookup("#room-reuse-history")!=null));
+        fx(()->{var scene=auxiliary("#room-reuse-history");if(!((javafx.scene.control.CheckBox)scene.lookup("#room-reuse-history")).isSelected())throw new AssertionError("History questions not selected");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"13q-reuse-history-source");app.qaCloseAuxiliary();});
+        System.out.println("HISTORY_REUSE_UI_PASS: persisted ranking/podium, reuse opens room with saved snapshot");
+    }
+    private static void checkManagedTopology(ArcadeApplication app)throws Exception {
+        var configured=uiRequest(app,"ROOM_CONFIGURE",object().put("room_name","Sơ đồ lớp LAN").put("question_count",2).put("duration_seconds",5));
+        try(var a=connect();var b=connect()){
+            request(a,"JOIN",object().put("room_code",configured.path("room_code").asText()).put("nickname","Máy A"));request(b,"JOIN",object().put("room_code",configured.path("room_code").asText()).put("nickname","Máy B"));
+            fx(app::roomView);await(()->app.qaScene().lookup("#lan-topology")!=null&&app.qaScene().getRoot().lookupAll(".topology-player").size()==2);
+            fx(()->{snapshot(app,"00-real-manager-topology");app.qaClick("Trình chiếu ↗");});
+            fx(()->{var shown=javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene().lookup("#projected-topology")!=null).findFirst().orElseThrow().getScene();shown.getRoot().applyCss();shown.getRoot().layout();if(shown.getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains("127.0.0.1")))throw new AssertionError("Projection exposes address");saveImage(shown.snapshot(null),"00-real-projected-topology");app.qaCloseAuxiliary();});
+            uiRequest(app,"ROOM_CLOSE");
+        }
+    }
+    private static void checkTopologyLayouts(ArcadeApplication app)throws Exception {
+        fx(()->{
+            var room=object().put("room_code","QA-LAN");var roster=room.putArray("players");var snap=object().put("room_code","QA-LAN").put("anchor_ssid","Điểm phát demo").put("enabled",true);var rows=snap.putArray("players");var ranks=object().putArray("ranking");
+            for(int i=0;i<10;i++){var p=object().put("player_id","test-"+i).put("nickname","Sinh viên có biệt danh "+i).put("avatar_id","quizling-"+(i+1)).put("ready",i<8).put("connected",true);roster.add(p);rows.add(p.deepCopy().put("ping_ms",8+i).put("ping_age_ms",0).put("measurement_age_ms",0).put("estimated_meters",2+i*.5).put("status_label","Đang đo").put("status","MEASURING").put("ip_address","10.0.0."+i).put("bssid","aa:bb:cc:dd:ee:01"));ranks.add(p.deepCopy().put("rank",1).put("score",300).put("correct_count",2));}
+            var view=new LanTopologyView(true,null);view.update(room,snap);var lifecycle=new javafx.animation.Timeline(new javafx.animation.KeyFrame(javafx.util.Duration.seconds(1),e->{}));lifecycle.setCycleCount(javafx.animation.Timeline.INDEFINITE);FxKit.runWhenShowing(view,lifecycle);var stage=new javafx.stage.Stage();var scene=new Scene(FxKit.scroll(view),app.qaScene().getWidth(),app.qaScene().getHeight());scene.getStylesheets().add(FxKit.CSS);stage.setScene(scene);stage.show();scene.getRoot().applyCss();scene.getRoot().layout();
+            var players=new ArrayList<>(scene.getRoot().lookupAll(".topology-player"));if(players.size()!=10)throw new AssertionError("Missing topology players");
+            for(int i=0;i<players.size();i++){var a=players.get(i);if(a.getBoundsInParent().getMinX()<-2||a.getBoundsInParent().getMaxX()>a.getParent().getLayoutBounds().getWidth()+2)throw new AssertionError("Topology node clipped");for(int j=i+1;j<players.size();j++)if(a.getBoundsInParent().intersects(players.get(j).getBoundsInParent()))throw new AssertionError("Topology player nodes overlap");}
+            if(scene.getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&(l.getText().contains("10.0.0.")||l.getText().contains("aa:bb"))))throw new AssertionError("Public topology exposes private fields");
+            saveImage(scene.snapshot(null),"13r-topology-ten-players");if(lifecycle.getStatus()!=javafx.animation.Animation.Status.RUNNING)throw new AssertionError("Visible topology timer did not run");stage.close();if(lifecycle.getStatus()!=javafx.animation.Animation.Status.STOPPED)throw new AssertionError("Hidden topology timer kept running");
+            var results=ResultsLayout.create(ranks,"",true,true,"qa-tied-ranking");var resultStage=new javafx.stage.Stage();var resultScene=new Scene(FxKit.scroll(results),app.qaScene().getWidth(),app.qaScene().getHeight());resultScene.getStylesheets().add(FxKit.CSS);resultStage.setScene(resultScene);resultStage.show();resultScene.getRoot().applyCss();resultScene.getRoot().layout();if(resultScene.getRoot().lookupAll(".victory-column").size()!=10)throw new AssertionError("Tied winners were dropped");saveImage(resultScene.snapshot(null),"13s-ten-tied-winners");resultStage.close();
+        });
+        System.out.println("TOPOLOGY_LAYOUT_UI_PASS: ten nodes, no overlap, private data omitted on projection, all ties retained");
+    }
     private static void checkQuestionImport(ArcadeApplication app)throws Exception {
         Path file=output.resolve("qa-only-import.xlsx");var bad=new ArrayList<>(QuestionFilesTest.VALUES);bad.set(5,"E");var another=new ArrayList<>(QuestionFilesTest.VALUES);another.set(0,"Câu hỏi thứ hai có xuống dòng\ntrong bản xem trước");
         QuestionFilesTest.excelFixture(file,List.of(QuestionFilesTest.VALUES,QuestionFilesTest.VALUES,bad,another));
@@ -147,6 +266,205 @@ public final class LiveLanUiCheck {
         fx(()->{view[0]=new QuestionImportView(app);view[0].show();view[0].loadFile(word);});await(()->!importConfirm().isDisabled());fx(()->{importDetails();saveImage(importScene().snapshot(null),"13f-import-preview-word");importConfirm().fire();});await(()->tableSize(app)==3);
         if(uiRequest(app,"QUESTION_LIST").path("total").asInt()!=3)throw new AssertionError("Excel + Word not committed");
         System.out.println("QUESTION_IMPORT_UI_PASS: XLSX/DOCX, preview, validation, duplicate opt-in, cancel, selected atomic commit, template roundtrip");
+    }
+    private static ProximityClientService attachFreshCapture(QuizGateway transport,Path profiles,int epoch,java.util.concurrent.atomic.AtomicReference<String> session){
+        WifiSignalProvider provider=new WifiSignalProvider(){public Reading readSignal(){return Reading.connected("a1","Wi-Fi QA","Lab-AP","e4:60:4d:b5:6e:48","5 GHz",161,5805000,-61,70,System.currentTimeMillis());}public void close(){}};
+        var service=new ProximityClientService(provider,new ProximityCalibrationStore(profiles),1000,5000,30);
+        // Existing fixture reports used seq=1; continue their real TLS connection's sequence.
+        QuizGateway relay=new QuizGateway(){public CompletableFuture<JsonNode> request(String type,com.fasterxml.jackson.databind.node.ObjectNode data){var payload=data.deepCopy();if(type.equals("PROXIMITY_REPORT"))payload.put("seq",100+payload.path("seq").asLong());return transport.request(type,payload);}public void onEvent(java.util.function.Consumer<JsonNode> listener){}public boolean isPreview(){return false;}public void close(){}};
+        transport.onEvent(event->{if(event.path("type").asText().equals("PROXIMITY_REFRESH_REQUEST")){var data=event.path("payload");service.requestFreshSamples(relay,data.path("refresh_id").asText(),data.path("config_epoch").asInt(),data.path("session_id").asText(),()->epoch,session::get,null);}});
+        return service;
+    }
+    private static void checkProximityUi(ArcadeApplication app) throws Exception {
+        // Permission is requested by an action; Settings is only the recovery path.
+        fx(() -> {
+            new ProximityViews(app).showDiagnosticDialog(
+                WifiSignalProvider.Reading.failure(WifiSignalProvider.Status.PERMISSION_DENIED, "adapter-qa", "Intel AX201", "ERROR_ACCESS_DENIED", System.currentTimeMillis()),
+                "Lab-AP", "e4:60:4d:b5:6e:48", "5 GHz", null
+            );
+            var scene = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing() && w.getScene().lookup("#proximity-diagnostic-message") != null).findFirst().orElseThrow().getScene();
+            scene.getRoot().applyCss(); scene.getRoot().layout();
+            String msg = ((javafx.scene.control.Label) scene.lookup("#proximity-diagnostic-message")).getText();
+            if (!msg.contains("QuizBattle cần quyền vị trí của Windows")) {
+                throw new AssertionError("Unexpected permission dialog text: " + msg);
+            }
+            if (scene.lookup("#proximity-request-access") == null || scene.lookup("#proximity-later") == null || scene.lookup("#proximity-open-settings").isVisible()) {
+                throw new AssertionError("Initial permission dialog must offer consent before Settings");
+            }
+            saveImage(scene.snapshot(null), "13g-proximity-permission-dialog");
+            ((javafx.scene.control.Button)scene.lookup("#proximity-later")).fire();
+        });
+        checkPermissionRecovery(app);
+
+        // 2. Verify 2-step Calibration Wizard UI
+        fx(() -> {
+            new ProximityViews(app).showCalibrationWizard(
+                app.proximityClient(),
+                WifiSignalProvider.Reading.connected("adapter-qa", "Intel AX201", "Lab-AP", "e4:60:4d:b5:6e:48", "5 GHz", 161, 5805000, -47, 88, System.currentTimeMillis()),
+                "Lab-AP", "e4:60:4d:b5:6e:48", "5 GHz", 1, null
+            );
+            var scene = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing() && w.getScene().lookup("#calibration-start-1m") != null).findFirst().orElseThrow().getScene();
+            scene.getRoot().applyCss(); scene.getRoot().layout();
+            saveImage(scene.snapshot(null), "13h-proximity-calibration-wizard");
+            app.qaCloseAuxiliary();
+        });
+
+        // 3. Configure room with proximity monitoring enabled, open standalone Monitor Window, and verify it stays open across question transitions
+        var roomConfigured = new CompletableFuture<JsonNode>();
+        fx(() -> app.call("ROOM_CONFIGURE", object()
+            .put("room_name", "Phòng Giám sát Wi-Fi")
+            .put("question_count", 1)
+            .put("duration_seconds", 8)
+            .put("proximity_enabled", true)
+            .put("anchor_ssid", "Lab-AP")
+            .put("anchor_bssid", "e4:60:4d:b5:6e:48")
+            .put("anchor_band", "5 GHz")
+            .put("threshold_meters", 10), roomConfigured::complete, roomConfigured::completeExceptionally));
+        JsonNode stateNode = roomConfigured.get(8, TimeUnit.SECONDS);
+        String code = stateNode.path("room_code").asText();
+        int epoch = stateNode.path("proximity").path("config_epoch").asInt();
+
+        fx(app::openProximityMonitor);
+        await(() -> app.qaMonitorStage() != null && app.qaMonitorStage().isShowing());
+        fx(()->{var top=(javafx.scene.layout.VBox)((javafx.scene.layout.BorderPane)app.qaMonitorStage().getScene().getRoot()).getTop();top.getChildren().add(0,FxKit.text("KIỂM THỬ · RSSI GIẢ LẬP · KHÔNG PHẢI SỐ ĐO THỰC ĐỊA","caption"));});
+
+        try (var s1 = connect(); var s2 = connect()) {
+            var captureSession=new java.util.concurrent.atomic.AtomicReference<>("");
+            try(var capture1=attachFreshCapture(s1,output.resolve("qa-fresh-1.json"),epoch,captureSession);var capture2=attachFreshCapture(s2,output.resolve("qa-fresh-2.json"),epoch,captureSession)){
+            request(s1, "JOIN", object().put("nickname", "SV Đo 1").put("room_code", code));
+            request(s2, "JOIN", object().put("nickname", "SV Đo 2").put("room_code", code));
+            for (var s : List.of(s1, s2)) {
+                var cal = object().put("config_epoch", epoch).put("adapter_id", "a1").put("adapter_name", "Intel Wi-Fi 6").put("bssid", "e4:60:4d:b5:6e:48").put("band", "5 GHz");
+                var a1 = cal.putArray("samples_1m"); var a5 = cal.putArray("samples_5m");
+                for (int i = 0; i < 22; i++) { a1.add(-45); a5.add(-61); }
+                request(s, "PROXIMITY_CALIBRATION", cal);
+                var rep = object().put("config_epoch", epoch).put("seq", 1).put("device_status", "CONNECTED").put("adapter_id", "a1").put("adapter_name", "Intel Wi-Fi 6").put("ssid", "Lab-AP").put("bssid", "e4:60:4d:b5:6e:48").put("band", "5 GHz").put("channel", 161).put("rssi_dbm", s == s1 ? -52 : -76).put("signal_quality", 85);
+                var samples = rep.putArray("samples");
+                for (int i = 0; i < 5; i++) samples.add(s == s1 ? -52 : -76);
+                request(s, "PROXIMITY_REPORT", rep);
+                request(s, "READY_SET", object().put("ready", true));
+            }
+            fx(app::refreshProximityMonitor);
+            await(() -> {
+                var stage = app.qaMonitorStage();
+                if (stage == null) return false;
+                var tbl = (javafx.scene.control.TableView<?>) stage.getScene().lookup("#proximity-monitor-table");
+                return tbl != null && tbl.getItems().size() == 2;
+            });
+            fx(() -> {
+                var mScene = app.qaMonitorStage().getScene();
+                mScene.getRoot().applyCss(); mScene.getRoot().layout();
+                saveImage(mScene.snapshot(null), "13i-proximity-monitor-live");
+            });
+
+            // Start match on teacher UI and verify Monitor Window stays open across QUESTION_ACTIVE and FINISHED
+            var startFut = new CompletableFuture<JsonNode>();
+            fx(() -> app.call("START_GAME", object(), startFut::complete, startFut::completeExceptionally));
+            startFut.get(8, TimeUnit.SECONDS);
+
+            await(() -> app.qaPhase().equals("QUESTION_ACTIVE"));
+            fx(() -> {
+                if (app.qaMonitorStage() == null || !app.qaMonitorStage().isShowing()) {
+                    throw new AssertionError("Monitor window closed during question transition");
+                }
+            });
+            var currentState = uiRequest(app, "ROOM_STATE");
+            String sid = currentState.path("session_id").asText();
+            captureSession.set(sid);
+            int qid = currentState.path("question").path("question_id").asInt();
+            request(s1, "ANSWER", object().put("session_id", sid).put("question_id", qid).put("answer", "A"));
+            request(s2, "ANSWER", object().put("session_id", sid).put("question_id", qid).put("answer", "A"));
+            fx(()->((javafx.scene.control.Button)app.qaMonitorStage().getScene().lookup("#proximity-monitor-refresh")).fire());
+            await(()->app.latestProximitySnapshot().path("refresh").path("state").asText().equals("RUNNING"));
+            await(()->app.latestProximitySnapshot().path("refresh").path("updated").asInt()==2);
+            Thread.sleep(300); // Allow the cooldown/progress control's next display tick.
+            fx(()->{var scene=app.qaMonitorStage().getScene();scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"13i2-refreshed-during-game");((javafx.scene.control.ToggleButton)scene.lookup("#monitor-list-mode")).fire();scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"13i3-monitor-list");});
+
+            await(() -> app.qaPhase().equals("FINISHED"));
+            fx(() -> {
+                if (app.qaMonitorStage() == null || !app.qaMonitorStage().isShowing()) {
+                    throw new AssertionError("Monitor window closed at match finish");
+                }
+                app.qaMonitorStage().close();
+            });
+            var closeFut = new CompletableFuture<JsonNode>();
+            fx(() -> app.call("ROOM_CLOSE", object(), closeFut::complete, closeFut::completeExceptionally));
+            closeFut.get(8, TimeUnit.SECONDS);
+            }
+        }
+
+        // 4. Verify Proximity History view in History screen
+        fx(app::historyView);
+        await(() -> tableSize(app) >= 1);
+        fx(() -> ((javafx.scene.control.Button) app.qaScene().lookup("#history-proximity-list-btn")).fire());
+        await(() -> app.qaScene().lookup("#proximity-history-table") instanceof javafx.scene.control.TableView<?> t && !t.getItems().isEmpty());
+        fx(() -> snapshot(app, "13j-proximity-history-list"));
+        var historyDetail = new CompletableFuture<JsonNode>();
+        fx(() -> {
+            var table = (javafx.scene.control.TableView<?>) app.qaScene().lookup("#proximity-history-table");
+            var first = (JsonNode) table.getItems().getFirst();
+            app.call("PROXIMITY_HISTORY_GET", object().put("session_id", first.path("session_id").asText()), historyDetail::complete, historyDetail::completeExceptionally);
+        });
+        var detail = historyDetail.get(8, TimeUnit.SECONDS);
+        fx(() -> {
+            new ProximityViews(app).showProximityHistoryDetail(detail);
+            var scene = javafx.stage.Window.getWindows().stream().filter(w -> w.isShowing() && w.getScene().lookup("#proximity-history-detail") != null).findFirst().orElseThrow().getScene();
+            scene.getRoot().applyCss(); scene.getRoot().layout();
+            saveImage(scene.snapshot(null), "13k-proximity-history-detail");
+            app.qaCloseAuxiliary();
+        });
+        System.out.println("PROXIMITY_UI_PASS: Permission dialog, 2-step calibration wizard, live monitor window persisting across questions, proximity history");
+    }
+    private static Scene permissionScene() {
+        return javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene().lookup("#proximity-diagnostic-message")!=null).findFirst().orElseThrow().getScene();
+    }
+    private static void checkPermissionRecovery(ArcadeApplication app) throws Exception {
+        var allowed=WifiSignalProvider.Reading.connected("adapter-qa","Intel AX201","Lab-AP","e4:60:4d:b5:6e:48","5 GHz",161,5805000,-47,88,System.currentTimeMillis());
+        var denied=WifiSignalProvider.Reading.failure(WifiSignalProvider.Status.PERMISSION_DENIED,"Windows access denied",System.currentTimeMillis());
+        var resumed=new java.util.concurrent.atomic.AtomicInteger();
+        var decision=new CompletableFuture<WindowsWifiPermission.Result>();
+        fx(()->{
+            new ProximityViews(app,()->decision,callback->callback.accept(allowed),()->{throw new AssertionError("Granted permission must not open Settings");})
+                .showDiagnosticDialog(denied,"Lab-AP","e4:60:4d:b5:6e:48","5 GHz",resumed::incrementAndGet);
+            saveImage(permissionScene().snapshot(null),"13g-proximity-permission-dialog");
+            ((javafx.scene.control.Button)permissionScene().lookup("#proximity-request-access")).fire();
+        });
+        decision.complete(new WindowsWifiPermission.Result(WindowsWifiPermission.Status.ALLOWED,"QA"));
+        await(()->resumed.get()==1);
+
+        var reading=new java.util.concurrent.atomic.AtomicReference<>(denied);
+        javafx.stage.Stage[] settingsWindow={null};javafx.stage.Window[] consentWindow={null};
+        fx(()->{
+            new ProximityViews(app,()->CompletableFuture.completedFuture(new WindowsWifiPermission.Result(WindowsWifiPermission.Status.DENIED,"QA")),
+                callback->callback.accept(reading.get()),()->{Platform.runLater(()->{
+                    settingsWindow[0]=new javafx.stage.Stage();settingsWindow[0].setTitle("QA settings stand-in");
+                    settingsWindow[0].setScene(new Scene(new javafx.scene.control.Label("QA only"),240,100));settingsWindow[0].show();settingsWindow[0].requestFocus();
+                });return true;})
+                .showDiagnosticDialog(denied,"Lab-AP","e4:60:4d:b5:6e:48","5 GHz",resumed::incrementAndGet);
+            consentWindow[0]=permissionScene().getWindow();
+            ((javafx.scene.control.Button)permissionScene().lookup("#proximity-request-access")).fire();
+        });
+        await(()->permissionScene().lookup("#proximity-open-settings").isVisible());
+        fx(()->{
+            var scene=permissionScene();scene.getRoot().applyCss();scene.getRoot().layout();
+            var status=(javafx.scene.control.Label)scene.lookup("#proximity-permission-status");
+            if(status.getHeight()+1<status.prefHeight(status.getWidth()))throw new AssertionError("Permission recovery instructions are clipped");
+            saveImage(scene.snapshot(null),"13g2-proximity-permission-recovery");((javafx.scene.control.Button)scene.lookup("#proximity-open-settings")).fire();
+        });
+        await(()->settingsWindow[0]!=null&&settingsWindow[0].isShowing()&&!consentWindow[0].isFocused());
+        reading.set(allowed);
+        fx(()->{settingsWindow[0].close();consentWindow[0].requestFocus();});
+        await(()->resumed.get()==2);
+
+        var cancelled=new CompletableFuture<WindowsWifiPermission.Result>();
+        fx(()->{
+            new ProximityViews(app,()->cancelled,callback->{throw new AssertionError("Closed permission dialog must ignore late results");},()->true)
+                .showDiagnosticDialog(denied,"Lab-AP","e4:60:4d:b5:6e:48","5 GHz",resumed::incrementAndGet);
+            ((javafx.scene.control.Button)permissionScene().lookup("#proximity-request-access")).fire();
+            ((javafx.scene.control.Button)permissionScene().lookup("#proximity-later")).fire();
+        });
+        if(!cancelled.isCancelled()||resumed.get()!=2)throw new AssertionError("Permission cancellation leaked a callback");
+        System.out.println("WIFI_PERMISSION_UI_PASS: grant, denied recovery, auto-resume on focus, cancellation");
     }
     private static int tableSize(ArcadeApplication app) { var table = app.qaScene().getRoot().lookup(".table-view"); return table instanceof javafx.scene.control.TableView<?> t ? t.getItems().size() : -1; }
     private static void fillForm(ArcadeApplication app, String identity, String code) {

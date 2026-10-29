@@ -23,7 +23,7 @@ Chạy tại thư mục repo. Các file sau là cấu hình **cục bộ**, đư
 ```powershell
 Copy-Item config/server.example.properties config/server.properties
 Copy-Item client.example.properties client.properties
-.\scripts\Setup-Lan.ps1 -ServerAddress 127.0.0.1
+.\scripts\Setup-Lan.ps1 -ServerAddress auto
 .\scripts\Start-Server.ps1 -InitAdmin
 .\scripts\Start-Server.ps1
 ```
@@ -48,11 +48,11 @@ Chọn Học sinh, nhập hai nickname khác nhau, chọn phòng hoặc mã phò
 
 ## 3. Nhiều máy trên LAN
 
-Chọn **một Server của nhóm**. Với Server mới chưa có chứng chỉ, sao chép cấu hình mẫu rồi chạy Setup với IPv4 LAN thật thay vì 127.0.0.1. Giữ các cổng TCP 5050 và UDP 5051; cần mạng cho phép các máy liên lạc trực tiếp, không chỉ cùng tên Wi-Fi.
+Chọn **một Server của nhóm**. Với Server mới chưa có chứng chỉ, sao chép cấu hình mẫu rồi chạy Setup với `-ServerAddress auto`. Giữ `server.bind=auto` và các cổng TCP 5050, UDP 5051; cần mạng cho phép các máy liên lạc trực tiếp, không chỉ cùng tên Wi-Fi.
 
-Client nhận `certs/client-truststore.p12` từ người vận hành Server qua kênh tin cậy, xác nhận fingerprint. Chỉ đây là chứng chỉ công khai; không gửi `server.p12`, database hoặc mật khẩu keystore. Sửa `server.host` trong `client.properties` thành IP Server để có kết nối dự phòng khi broadcast UDP bị chặn; các trường kỹ thuật này không hiển thị trên UI.
+Client nhận `certs/client-truststore.p12` từ người vận hành Server qua kênh tin cậy, xác nhận fingerprint. Chỉ đây là chứng chỉ công khai; không gửi `server.p12`, database hoặc mật khẩu keystore. Giữ `server.host=auto` trong `client.properties` để tự dò mạng hiện tại. Một IP cụ thể chỉ là lựa chọn dự phòng dành cho người vận hành khi UDP bị chặn; các trường kỹ thuật này không hiển thị trên UI.
 
-**Giới hạn hiện tại:** Server bind IP cụ thể, chứng chỉ TLS có SAN chứa IP. IP thay đổi ngoài SAN cần cập nhật cấu hình/chứng chỉ và phân phối truststore phù hợp; chức năng tự thích nghi IP động mới là đề xuất, chưa được triển khai. Không dùng địa chỉ LAN cá nhân trong báo cáo cũ làm cấu hình chung cho nhóm. Mã phòng không vượt qua firewall/AP isolation. Không tắt firewall, không bỏ xác minh TLS và không forward cổng ra Internet.
+**Từ bản 0.4.0:** Server hỗ trợ binding auto, Client xác minh khóa công khai Server đã biết cùng kiểm tra chứng chỉ/TLS, độc lập địa chỉ DHCP. Đổi IP không cần thay chứng chỉ hoặc bộ cài. Bộ chạy Windows có `allow-lan.bat` để tạo rule cho runtime/cổng/LocalSubnet với quyền quản trị. Với Server chạy từ source, tạo rule tương ứng cho Java đang dùng. Không dùng IP cá nhân trong báo cáo cũ làm cấu hình chung cho nhóm. Mã phòng không vượt qua firewall/AP isolation. Không tắt firewall và không forward cổng ra Internet. Xem [LAN tự động](LAN_tu_dong_0_4_0.md).
 
 ## 4. Phân chia mã nguồn
 
@@ -83,6 +83,8 @@ git push -u origin feature/ten-chuc-nang
 Mở Pull Request trên GitHub để nhóm review trước khi gộp vào main. Không dùng force push lên main hoặc commit mật khẩu/khóa/database. Người dùng có quyền write/collaborator mới push được; public repo cho phép clone nhưng không tự cấp quyền ghi. Chủ repo mời thành viên tại Settings → Collaborators.
 
 ## 6. Kiểm thử và đóng gói
+
+Từ bản tích hợp 0.5.0, đọc [bộ câu hỏi/lịch sử](Bo_cau_hoi_va_lich_su_0_5_0.md) và [phạm vi tiếp nhận từ feature/viet-my](Tich_hop_viet_my_0_5_0.md) trước khi merge tiếp các nhánh. Database hợp nhất là schema 4; không thay lại bằng migration schema 2/3 từ nhánh cũ. Giữ LAN auto và TLS pin. Từ 0.5.1, dùng [quy tắc điểm tốc độ/streak](Toc_do_va_streak_0_5_1.md) theo yêu cầu mới, thay mức cố định 100 điểm/câu. Từ 0.6.2, [Client chỉ mở một phiên trong mỗi hồ sơ Windows](Mot_Client_tren_Windows_0_6_2.md); Server không chặn theo IP, bộ kiểm thử vẫn tạo nhiều kết nối cùng máy qua test driver.
 
 Sau lần `install` đầu và tải đủ thư viện, có thể thêm `-o` để build offline. Các unit/integration tests nằm trong từng module. QA JavaFX opt-in (tự mở/đóng UI, dùng Server/SQLite tạm riêng):
 

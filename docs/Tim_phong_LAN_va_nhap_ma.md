@@ -1,5 +1,7 @@
 # Tự tìm phòng LAN và vào bằng mã — 0.3.3
 
+**Cập nhật 0.4.0:** các giới hạn bind IP/SAN và đường dẫn bộ chạy theo timestamp trong tài liệu lịch sử này đã được thay thế. Dùng `dist/QuizBattle/`, giữ Server/Client ở chế độ auto; xem [LAN tự động khi đổi điểm phát](LAN_tu_dong_0_4_0.md).
+
 Bộ cài hiện hành: `dist/QuizBattle-Windows-20261022-101323/QuizBattle-Setup.exe`; Client trên máy này đã cài lại bản cuối cùng. Server cá nhân tiếp tục chạy tại `dist/QuizBattle-Windows-20261022-084345/Server/start.bat`, đã cập nhật mã mà giữ nguyên database/config/chứng chỉ. Installer mới ghép với chứng chỉ **Server 084345**, không dùng lẫn với Server 073803 hoặc một Server mới khởi tạo. Thư mục/ZIP Server trong bản phát hành 101323 là gói sạch để cài mới/cập nhật mã, không chứa dữ liệu/chứng chỉ cá nhân. [Kết quả kiểm thử](Nghiem_thu_LAN_Discovery_0_3_3.md).
 
 Client không còn ô IP/cổng trên màn đăng nhập, đăng ký hoặc tham gia. Hai cách vào phòng chạy song song, không đổi mô hình Java Client–Server hay quy tắc điểm/linh vật.

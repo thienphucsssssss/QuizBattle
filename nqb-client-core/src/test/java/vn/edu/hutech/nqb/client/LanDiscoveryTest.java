@@ -27,4 +27,25 @@ class LanDiscoveryTest {
             assertThrows(IllegalArgumentException.class,()->LanDiscovery.find(profile,3000));
         }
     }
+    @Test void automaticProfileUsesReplySourceAndDoesNotKeepPreviousAddress() throws Exception {
+        try(var server=new DatagramSocket(new InetSocketAddress("127.0.0.1",0))) {
+            server.setSoTimeout(2500);
+            var failure=new java.util.concurrent.CompletableFuture<Void>();
+            var responder=Thread.ofVirtual().start(()->{try {
+                for(String source:java.util.List.of("127.0.0.1","127.0.0.2")) {
+                    var packet=new DatagramPacket(new byte[513],513);server.receive(packet);
+                    var request=DiscoveryProtocol.parse(packet,"DISCOVER",null);
+                    try(var reply=new DatagramSocket(new InetSocketAddress(source,0))) {
+                        byte[] bytes=DiscoveryProtocol.message("DISCOVER_OK",request.path("nonce").asText(),5050);
+                        reply.send(new DatagramPacket(bytes,bytes.length,packet.getSocketAddress()));
+                    }
+                }
+                failure.complete(null);
+            }catch(Exception error){failure.completeExceptionally(error);}});
+            var profile=new ClientConnectionProfile("auto",1,Path.of("unused"),"unused",server.getLocalPort());
+            assertEquals(java.util.List.of(new Endpoint("127.0.0.1",5050)),LanDiscovery.find(profile,200));
+            assertEquals(java.util.List.of(new Endpoint("127.0.0.2",5050)),LanDiscovery.find(profile,200));
+            failure.get(3,java.util.concurrent.TimeUnit.SECONDS);responder.join(1000);
+        }
+    }
 }

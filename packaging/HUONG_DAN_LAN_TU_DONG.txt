@@ -1,0 +1,50 @@
+QUIZBATTLE 0.6.2 — CHƠI LAN QUA ĐIỂM PHÁT ĐIỆN THOẠI
+
+CHUẨN BỊ MỘT LẦN
+1. Cài Client\QuizBattle-Setup.exe trên MSI và các máy tham gia.
+   Máy đã cài bản cũ cũng cần chạy bộ cài mới này một lần.
+2. Trên MSI, chạy Server\allow-lan.bat và chọn Có/Yes ở yêu cầu
+   quyền quản trị của Windows. Công cụ tạo hai rule Firewall cho
+   Java Server, TCP/UDP và LocalSubnet; không gắn với một IP cụ thể.
+   Nếu chuyển thư mục Server hoặc đổi cổng, chạy lại công cụ.
+
+MỖI BUỔI CHƠI
+1. MSI và tất cả Client kết nối cùng một điểm phát điện thoại.
+2. Mở Server\start.bat, đợi NQB_SERVER_READY, giữ cửa sổ đang chạy.
+3. Mở QuizBattle: giảng viên/Admin đăng nhập rồi tạo phòng.
+4. Học sinh chọn phòng trong LAN hoặc nhập mã phòng, chọn nickname
+   và linh vật. Bấm Tìm lại nếu vừa bật Server hoặc vừa đổi mạng.
+
+MỘT CỬA SỔ CLIENT
+Mở QuizBattle lần nữa sẽ đưa cửa sổ hiện tại lên trước, kể cả khi đang
+thu nhỏ. Phiên đang dùng được giữ nguyên. Muốn đổi vai trò, đăng xuất
+trong cửa sổ đó. Cập nhật bộ cài mới trên tất cả máy tham gia.
+Khóa áp dụng trong cùng hồ sơ Windows; Server vẫn chạy độc lập.
+
+ĐỔI ĐIỆN THOẠI HOẶC IP
+- Giữ server.bind là auto trong Server\config\server.json.
+- IP hiện tại được tự dò; dùng lại chính bộ cài Client 0.6.2 này.
+- Không cần sửa IP, tạo chứng chỉ hoặc build lại bộ cài mỗi buổi.
+- Giữ nguyên Server\data, Server\certs và thông tin đăng nhập.
+- Nên đổi điểm phát trước khi mở phòng; đổi giữa ván có thể ngắt kết nối.
+
+GIÁM SÁT KHOẢNG CÁCH VÀ QUYỀN WINDOWS
+Nếu Client chưa đọc được Wi-Fi, bấm Cho phép rồi đồng ý khi Windows hỏi.
+Client tự kiểm tra Wi-Fi và tiếp tục. Nếu Windows đã từ chối hoặc dịch vụ
+vị trí bị tắt, bấm Mở cài đặt và cấp quyền. Bật quyền rồi quay lại QuizBattle;
+Client sẽ tự kiểm tra tiếp, không cần nhập đường dẫn hay mở lại ứng dụng.
+
+Điện thoại/BSSID mới là mốc Wi-Fi mới. Nếu bật giám sát, giảng viên
+chọn lại mốc và học sinh hiệu chuẩn lại. Việc này không cần bộ cài mới.
+
+NẾU KHÔNG TÌM THẤY SERVER
+- Xác nhận cùng điểm phát, Server có NQB_SERVER_READY.
+- Chạy allow-lan.bat nếu chưa cho phép Firewall, rồi bấm Tìm lại.
+- Kiểm tra điện thoại cho phép các máy giao tiếp và đủ số thiết bị.
+  Mã phòng không vượt qua cách ly thiết bị hoặc việc chặn broadcast.
+- Client dùng chứng chỉ công khai đi kèm để nhận đúng Server MSI;
+  không phát server.p12 hoặc database cho học sinh.
+
+Gói này giữ database và chứng chỉ Server cũ. Khi chứng chỉ hết hạn,
+mất/thay keystore hoặc thay danh tính Server, cần cập nhật chứng chỉ
+tin cậy theo quy trình riêng. Đổi IP đơn thuần không yêu cầu việc đó.

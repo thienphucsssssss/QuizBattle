@@ -79,7 +79,7 @@ class ServerIntegrationTest {
     @Test void threeRealPlayersFinishRankingAndPersistAfterRestart()throws Exception {
         var host=admin();String code=room(host,2);Client a=guest(code,"Minh Ánh"),b=guest(code,"Quốc Bảo"),c=guest(code,"Thu Hà");
         for(var player:List.of(a,b,c))player.request("READY_SET",obj().put("ready",true));
-        host.request("START_GAME",obj());String sessionId="";
+        host.request("START_GAME",obj());String sessionId="";int expectedTotal=0;
         for(int round=0;round<2;round++){
             var q=a.event("QUESTION");sessionId=q.path("session_id").asText();assertFalse(q.has("correct_answer"));
             var detail=host.request("QUESTION_GET",obj().put("question_id",q.path("question_id").asInt()));
@@ -88,15 +88,15 @@ class ServerIntegrationTest {
             var ack=a.request("ANSWER",answer);assertTrue(ack.path("accepted").asBoolean());assertFalse(ack.has("score"));assertFalse(ack.has("correct"));
             assertFalse(a.request("ANSWER",answer).path("accepted").asBoolean());b.request("ANSWER",answer);
             error(host,"INVALID_STATE","QUESTION_DELETE",obj().put("question_id",q.path("question_id").asInt()));
-            assertEquals((round+1)*100,a.event("QUESTION_RESULT").path("score").asInt());
-            var ranking=a.event("ROUND_RANKING").path("ranking");assertEquals(3,ranking.size());assertEquals(1,ranking.get(0).path("rank").asInt());assertEquals(1,ranking.get(1).path("rank").asInt());assertEquals(3,ranking.get(2).path("rank").asInt());
+            var scored=a.event("QUESTION_RESULT");assertTrue(scored.path("points").asInt()>=100);expectedTotal+=scored.path("points").asInt();assertEquals(expectedTotal,scored.path("score").asInt());assertEquals(round+1,scored.path("streak").asInt());
+            var ranking=a.event("ROUND_RANKING").path("ranking");assertEquals(3,ranking.size());assertEquals(1,ranking.get(0).path("rank").asInt());assertEquals(ranking.get(0).path("score").asInt()==ranking.get(1).path("score").asInt()?1:2,ranking.get(1).path("rank").asInt());assertEquals(3,ranking.get(2).path("rank").asInt());
             assertEquals(round+1,b.event("ROUND_RANKING").path("number").asInt());assertEquals(round+1,c.event("ROUND_RANKING").path("number").asInt());
         }
-        var end=a.event("GAME_OVER");assertTrue(end.path("result_saved").asBoolean());assertEquals(200,end.path("score").asInt());
+        var end=a.event("GAME_OVER");assertTrue(end.path("result_saved").asBoolean());assertEquals(expectedTotal,end.path("score").asInt());
         assertEquals(1,host.request("HISTORY_LIST",obj()).path("total").asInt());
         String newCode=host.request("ROOM_RESET",obj()).path("room_code").asText();assertNotEquals(code,newCode);
         clients.forEach(Client::close);server.close();server=null;
-        try(var store=new QuizStore(data.resolve("quiz.db"))){assertEquals(20,store.questions(1,obj()).path("total").asInt());assertEquals(200,store.historyDetail(1,sessionId).path("ranking").get(0).path("score").asInt());}
+        try(var store=new QuizStore(data.resolve("quiz.db"))){assertEquals(20,store.questions(1,obj()).path("total").asInt());var saved=store.historyDetail(1,sessionId).path("ranking");for(var p:saved)if(p.path("nickname").asText().equals("Minh Ánh"))assertEquals(expectedTotal,p.path("score").asInt());}
     }
     @Test void avatarRaceAcrossSocketsHasOneWinnerAndDisconnectReleases()throws Exception {
         var host=admin();String code=room(host,1);Client a=guest(code,"Một"),b=guest(code,"Hai");
@@ -150,8 +150,8 @@ class ServerIntegrationTest {
         assertEquals("WRONG_QUESTION",a.request("ANSWER",payload.deepCopy().put("question_id",999)).path("reason").asText());
         assertEquals("INVALID_ANSWER",a.request("ANSWER",payload.deepCopy().put("answer","Z")).path("reason").asText());
         assertTrue(a.request("ANSWER",payload).path("accepted").asBoolean());assertEquals("DUPLICATE_ANSWER",a.request("ANSWER",payload).path("reason").asText());
-        assertEquals(100,a.event("QUESTION_RESULT").path("score").asInt());assertFalse(b.request("ANSWER",payload).path("accepted").asBoolean());
-        assertEquals(0,b.event("GAME_OVER").path("score").asInt());assertEquals(100,a.event("GAME_OVER").path("score").asInt());
+        int earned=a.event("QUESTION_RESULT").path("score").asInt();assertTrue(earned>=100&&earned<=200);assertFalse(b.request("ANSWER",payload).path("accepted").asBoolean());
+        assertEquals(0,b.event("GAME_OVER").path("score").asInt());assertEquals(earned,a.event("GAME_OVER").path("score").asInt());
     }
     @Test void disconnectedPlayerRemainsInFinalRankingAndSavedHistory()throws Exception {
         var host=admin();String code=room(host,1);Client a=guest(code,"Rời mạng"),b=guest(code,"Còn mạng");a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
@@ -179,6 +179,102 @@ class ServerIntegrationTest {
         assertEquals(1,LanDirectory.scan(known).size());
         Path empty=certs.resolve("empty-directory-trust.p12");var store=java.security.KeyStore.getInstance("PKCS12");store.load(null,KEY_PASSWORD);try(var out=Files.newOutputStream(empty)){store.store(out,KEY_PASSWORD);}
         assertTrue(LanDirectory.scan(new ClientConnectionProfile("127.0.0.1",port,empty,new String(KEY_PASSWORD),server.discoveryPort())).isEmpty());
+    }
+    @Test void automaticBindingAndPinnedIdentityWorkAtANewIpAndAfterRestartWithoutChangingClientProfile()throws Exception {
+        server.close();
+        var config=new ServerConfig("auto",0,data.resolve("quiz.db"),key,10,32,100,120,180);
+        assertEquals("0.0.0.0",config.bind());
+        server=new QuizServer(config,config.tls(KEY_PASSWORD),new QuizStore(data.resolve("quiz.db")));
+        server.start();port=server.port();int discovery=server.discoveryPort();
+        var profile=new ClientConnectionProfile("auto",1,trust,new String(KEY_PASSWORD),discovery);
+        var host=admin();String code=room(host,1);
+        var listed=LanDirectory.scan(profile);
+        assertEquals(1,listed.size());assertEquals(code,listed.getFirst().rooms().getFirst().code());
+        // Certificate only has 127.0.0.1; .2 models an address absent from its SAN.
+        try(var changed=TlsQuizGateway.connect(new Endpoint("127.0.0.2",port),trust,KEY_PASSWORD)) {
+            changed.request("PING",obj()).get(3,TimeUnit.SECONDS);
+            var joined=changed.request("JOIN",obj().put("room_code",code).put("nickname","Địa chỉ mới")).get(3,TimeUnit.SECONDS);
+            assertFalse(joined.path("player_id").asText().isBlank());
+            assertEquals(code,joined.path("room_code").asText());
+        }
+        server.close();
+        config=new ServerConfig("auto",0,data.resolve("quiz.db"),key,10,32,100,120,180,true,discovery);
+        server=new QuizServer(config,config.tls(KEY_PASSWORD),new QuizStore(data.resolve("quiz.db")));
+        server.start();port=server.port();
+        listed=LanDirectory.scan(profile);
+        assertEquals(1,listed.size());assertEquals(port,listed.getFirst().endpoint().port());
+        assertTrue(listed.getFirst().rooms().isEmpty());
+        admin(); // Stored credentials remain usable after restart.
+    }
+    @Test void questionSetSourceAndHistoryReplayCoexistWithProximityAndSpeedScoring()throws Exception {
+        var host=admin();var set=obj().put("name","Bộ chỉ một câu");set.putArray("question_ids").add(1);
+        int setId=host.request("QUESTION_SET_CREATE",set).path("question_set_id").asInt();
+        var configured=host.request("ROOM_CONFIGURE",obj().put("room_name","Thi bộ riêng").put("question_count",1).put("duration_seconds",5).put("question_set_id",setId));
+        Client a=guest(configured.path("room_code").asText(),"Một"),b=guest(configured.path("room_code").asText(),"Hai");
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));
+        error(host,"QUESTION_SET_IN_USE","QUESTION_SET_DELETE",obj().put("question_set_id",setId));
+        host.request("QUESTION_SET_ACTIVE",obj().put("question_id",1).put("is_active",false));
+        error(host,"NOT_ENOUGH_QUESTIONS","START_GAME",obj());
+        host.request("QUESTION_SET_ACTIVE",obj().put("question_id",1).put("is_active",true));
+        host.request("START_GAME",obj());var q=a.event("QUESTION");assertEquals(1,q.path("question_id").asInt());String original=q.path("content").asText();
+        assertTrue(a.request("ANSWER",obj().put("session_id",q.path("session_id").asText()).put("question_id",1).put("answer","B")).path("accepted").asBoolean());
+        assertTrue(a.event("GAME_OVER").path("score").asInt()>=100);
+        String saved=q.path("session_id").asText();var history=host.request("HISTORY_GET",obj().put("session_id",saved));assertTrue(history.path("reuse_available").asBoolean());
+        var finished=host.request("ROOM_STATE",obj());
+        error(host,"NOT_FOUND","ROOM_CONFIGURE",obj().put("room_name","Không được đổi").put("question_count",1).put("duration_seconds",5).put("history_session_id","missing"));
+        assertEquals(finished.path("room_code"),host.request("ROOM_STATE",obj()).path("room_code"));
+        host.request("ROOM_RESET",obj());host.request("QUESTION_DELETE",obj().put("question_id",1));
+        var replay=host.request("ROOM_CONFIGURE",obj().put("room_name","Thi lại").put("question_count",1).put("duration_seconds",5).put("history_session_id",saved));
+        assertEquals(saved,replay.path("history_session_id").asText());
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+        var again=a.event("QUESTION");assertEquals(original,again.path("content").asText());
+        assertTrue(a.request("ANSWER",obj().put("session_id",again.path("session_id").asText()).put("question_id",1).put("answer","B")).path("accepted").asBoolean());
+        assertTrue(a.event("GAME_OVER").path("score").asInt()>=100);
+        assertEquals(2,host.request("HISTORY_LIST",obj()).path("total").asInt());
+    }
+    @Test void speedAndStreakUseServerTimeAndResetOnWrongMissingAndNewGame()throws Exception {
+        var host=admin();String code=room(host,3);Client a=guest(code,"Nhanh"),b=guest(code,"Chậm");
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+        int totalA=0;String sid="",aid="";
+        for(int round=1;round<=3;round++){
+            var q=a.event("QUESTION");sid=q.path("session_id").asText();int qid=q.path("question_id").asInt();
+            String correct=host.request("QUESTION_GET",obj().put("question_id",qid)).path("correct_answer").asText();
+            var payload=obj().put("session_id",sid).put("question_id",qid).put("answer",correct).put("answer_elapsed_ms",0).put("score",999999).put("streak",99);
+            JsonNode ack=null;
+            if(round<3){
+                ack=a.request("ANSWER",payload);assertTrue(ack.path("accepted").asBoolean());assertTrue(ack.path("answer_elapsed_ms").asLong(-1)>=0);
+                assertFalse(ack.has("points"));assertFalse(ack.has("score"));assertFalse(ack.has("correct"));assertFalse(ack.has("streak"));
+            }
+            if(round==1){
+                Thread.sleep(1100);
+                assertEquals("DUPLICATE_ANSWER",a.request("ANSWER",payload).path("reason").asText());
+                for(var self:a.request("ROOM_STATE",obj()).path("players"))if(self.has("answer_elapsed_ms")){assertEquals(ack.path("answer_elapsed_ms").asLong(),self.path("answer_elapsed_ms").asLong());aid=self.path("player_id").asText();}
+            }
+            var slow=b.request("ANSWER",payload.deepCopy().put("answer",round==2?(correct.equals("A")?"B":"A"):correct));
+            if(round==1)assertTrue(slow.path("answer_elapsed_ms").asLong()>ack.path("answer_elapsed_ms").asLong()+700);
+            var ar=a.event("QUESTION_RESULT");var br=b.event("QUESTION_RESULT");
+            if(round==1){assertTrue(ar.path("points").asInt()>br.path("points").asInt());assertEquals(1,ar.path("streak").asInt());assertEquals(0,ar.path("streak_bonus").asInt());}
+            if(round==2){assertEquals(2,ar.path("streak").asInt());assertEquals(20,ar.path("streak_bonus").asInt());assertEquals(0,br.path("streak").asInt());assertEquals(0,br.path("points").asInt());}
+            if(round==3){assertEquals(0,ar.path("streak").asInt());assertEquals(-1,ar.path("answer_elapsed_ms").asLong());assertEquals(0,ar.path("points").asInt());assertEquals(1,br.path("streak").asInt());}
+            if(ack!=null){assertEquals(ack.path("answer_elapsed_ms"),ar.path("answer_elapsed_ms"));assertEquals(100+ar.path("speed_bonus").asInt()+ar.path("streak_bonus").asInt(),ar.path("points").asInt());}
+            totalA+=ar.path("points").asInt();assertEquals(totalA,ar.path("score").asInt());
+        }
+        var end=a.event("GAME_OVER");assertEquals(totalA,end.path("score").asInt());assertTrue(end.path("result_saved").asBoolean());
+        var history=host.request("HISTORY_GET",obj().put("session_id",sid));boolean found=false;
+        for(var row:history.path("ranking"))if(row.path("player_id").asText().equals(aid)){assertEquals(totalA,row.path("score").asInt());found=true;}
+        assertTrue(found);
+        var reset=host.request("ROOM_RESET",obj());for(var row:reset.path("players")){assertEquals(0,row.path("streak").asInt());assertEquals(0,row.path("best_streak").asInt());assertEquals(-1,row.path("answer_elapsed_ms").asLong());}
+    }
+    @Test void socketIpIsVisibleOnlyToRoomOwnerAndAdminWhileLocalMultiClientTestingRemainsAllowed()throws Exception {
+        var host=admin();String code=room(host,1);Client a=guest(code,"Cùng máy A"),b=guest(code,"Cùng máy B");
+        var tracked=host.request("ROOM_STATE",obj());assertEquals(2,tracked.path("players").size());
+        for(var player:tracked.path("players"))assertEquals("127.0.0.1",player.path("ip_address").asText());
+        for(var player:a.request("ROOM_STATE",obj()).path("players"))assertFalse(player.has("ip_address"));
+        for(var player:host.request("PROXIMITY_GET",obj()).path("players"))assertEquals("127.0.0.1",player.path("ip_address").asText());
+        var other=new Client();other.request("REGISTER",obj().put("username","viewer.ip").put("display_name","Giảng viên khác").put("password","Viewer-ip-test-1"));
+        other.request("LOGIN",obj().put("username","viewer.ip").put("password","Viewer-ip-test-1"));
+        for(var player:other.request("ROOM_STATE",obj()).path("players"))assertFalse(player.has("ip_address"));
+        error(other,"FORBIDDEN","PROXIMITY_GET",obj());
     }
     @Test void selfRegistrationCreatesOnlyTeacherWithPrivateEmptyBankAndHashedPassword()throws Exception {
         var c=new Client();

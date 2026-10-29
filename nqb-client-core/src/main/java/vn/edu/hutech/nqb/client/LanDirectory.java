@@ -5,7 +5,7 @@ import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.*;
 
-/** Only certificate/IP-verified TLS ROOM_BROWSE results reach the interface. */
+/** Only Server-key-pinned TLS ROOM_BROWSE results reach the interface. */
 public final class LanDirectory {
     private LanDirectory() { }
     public record Room(String serverId,Endpoint endpoint,String code,String name,String teacher,String phase,int players,int maxPlayers,boolean joinable) { }
@@ -15,8 +15,8 @@ public final class LanDirectory {
     public static List<Server> scan(ClientConnectionProfile profile) throws Exception {
         if(!java.nio.file.Files.isRegularFile(profile.truststore()))throw new IllegalStateException("Bộ cài chưa có chứng chỉ máy chủ. Nhận bộ cài Client từ Admin.");
         var endpoints=new LinkedHashSet<Endpoint>();
-        // A configured, pinned endpoint remains usable when only UDP broadcasts are blocked.
-        try { if(DiscoveryProtocol.localAddress(InetAddress.getByName(profile.host())))endpoints.add(new Endpoint(profile.host(),profile.port())); } catch(Exception ignored) { }
+        // Explicit legacy destinations are hints only. Automatic profiles carry no hotspot IP.
+        if(!profile.automaticLan())try { if(DiscoveryProtocol.localAddress(InetAddress.getByName(profile.host())))endpoints.add(new Endpoint(profile.host(),profile.port())); } catch(Exception ignored) { }
         try { endpoints.addAll(LanDiscovery.find(profile,650)); } catch(Exception ignored) { /* Directed TLS fallback remains available. */ }
         var pool=Executors.newFixedThreadPool(4,Thread.ofPlatform().daemon().name("lan-probe-",0).factory());
         var completion=new ExecutorCompletionService<Server>(pool);int submitted=0;

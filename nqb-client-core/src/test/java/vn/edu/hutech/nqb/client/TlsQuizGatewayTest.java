@@ -19,20 +19,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class TlsQuizGatewayTest {
     @TempDir static Path temporary;
     private static char[] password;
-    private static Path valid, wrongName, emptyTrust;
+    private static Path valid, wrongName, expired, clientOnly, emptyTrust;
     @BeforeAll static void certificates() throws Exception {
         password = UUID.randomUUID().toString().toCharArray();
         valid = certificate("valid", "dns:localhost,ip:127.0.0.1");
         wrongName = certificate("wrong-name", "dns:not-local.invalid");
+        expired = certificate("expired", "dns:quizbattle-server", "-10d", null);
+        clientOnly = certificate("client-only", "dns:quizbattle-server", null, "clientAuth");
         emptyTrust = temporary.resolve("empty.p12");
         var empty = KeyStore.getInstance("PKCS12"); empty.load(null, password);
         try (var out = Files.newOutputStream(emptyTrust)) { empty.store(out, password); }
     }
     private static Path certificate(String name, String san) throws Exception {
+        return certificate(name,san,null,null);
+    }
+    private static Path certificate(String name, String san, String startDate, String extendedUsage) throws Exception {
         Path path = temporary.resolve(name + ".p12");
         String keytool = Path.of(System.getProperty("java.home"), "bin", System.getProperty("os.name").startsWith("Windows") ? "keytool.exe" : "keytool").toString();
-        var process = new ProcessBuilder(keytool, "-genkeypair", "-alias", "nqb-test", "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-dname", "CN=Quiz Test", "-ext", "SAN=" + san,
-            "-storetype", "PKCS12", "-keystore", path.toString(), "-storepass", new String(password), "-keypass", new String(password), "-noprompt").redirectErrorStream(true).start();
+        var command = new ArrayList<>(List.of(keytool, "-genkeypair", "-alias", "nqb-test", "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-dname", "CN=Quiz Test", "-ext", "SAN=" + san,
+            "-storetype", "PKCS12", "-keystore", path.toString(), "-storepass", new String(password), "-keypass", new String(password), "-noprompt"));
+        if(startDate!=null)command.addAll(List.of("-startdate",startDate));
+        if(extendedUsage!=null)command.addAll(List.of("-ext","EKU="+extendedUsage));
+        var process = new ProcessBuilder(command).redirectErrorStream(true).start();
         if (!process.waitFor(20, TimeUnit.SECONDS)) { process.destroyForcibly(); throw new IOException("Test certificate generation timed out"); }
         assertEquals(0, process.exitValue(), "Unable to generate ephemeral test certificate"); return path;
     }
@@ -70,7 +78,7 @@ class TlsQuizGatewayTest {
         var frame = object().put("protocol_version", 1).put("type", type).put("request_id", request.path("request_id").asText()); frame.set("payload", payload);
         socket.getOutputStream().write(JsonMessages.encode(frame)); socket.getOutputStream().flush();
     }
-    @Test void verifiesDnsCorrelatesResponsesAndDecodesFragmentedVietnamesePush() throws Exception {
+    @Test void verifiesPinnedServerCorrelatesResponsesAndDecodesFragmentedVietnamesePush() throws Exception {
         var keep = new CountDownLatch(1);
         try (var peer = new Peer(valid, socket -> {
             var request = read(socket); assertEquals("LOGIN", request.path("type").asText());
@@ -88,7 +96,7 @@ class TlsQuizGatewayTest {
             assertEquals("s1", event.get().path("payload").path("session_id").asText()); keep.countDown(); peer.served.get(3, TimeUnit.SECONDS);
         } finally { keep.countDown(); }
     }
-    @Test void verifiesIpAndPlacesRoomSessionInTheEnvelope() throws Exception {
+    @Test void verifiesPinnedKeyAndPlacesRoomSessionInTheEnvelope() throws Exception {
         try (var peer = new Peer(valid, socket -> {
             var request = read(socket); assertEquals("QZ7K2", request.path("room_code").asText()); assertEquals("s1", request.path("session_id").asText());
             assertFalse(request.path("payload").has("room_code")); assertFalse(request.path("payload").has("session_id"));
@@ -98,11 +106,25 @@ class TlsQuizGatewayTest {
             assertTrue(ack.path("accepted").asBoolean()); peer.served.get(3, TimeUnit.SECONDS);
         }
     }
-    @Test void trustedCertificateWithWrongSanIsRejectedWithoutPlaintextFallback() throws Exception {
-        try (var peer = new Peer(wrongName, socket -> fail("Wrong SAN must not complete a usable connection"))) {
-            assertThrows(SSLHandshakeException.class, () -> TlsQuizGateway.connect(new Endpoint("127.0.0.1", peer.port()), trust(wrongName), password));
-            assertThrows(ExecutionException.class, () -> peer.served.get(3, TimeUnit.SECONDS));
+    @Test void trustedIdentityWorksAfterDhcpAddressChangesWithoutIpSan() throws Exception {
+        try (var peer = new Peer(wrongName, socket -> {
+            var request=read(socket);reply(socket,request,"PING_OK",object());
+        });var gateway=TlsQuizGateway.connect(new Endpoint("127.0.0.1",peer.port()),trust(wrongName),password)) {
+            gateway.request("PING",object()).get(3,TimeUnit.SECONDS);peer.served.get(3,TimeUnit.SECONDS);
         }
+    }
+    @Test void matchingIpSanCannotImpersonateAnotherPinnedServer() throws Exception {
+        try(var peer=new Peer(valid,socket->fail("A different Server key must not be accepted"))) {
+            assertThrows(SSLHandshakeException.class,()->TlsQuizGateway.connect(new Endpoint("127.0.0.1",peer.port()),trust(wrongName),password));
+        }
+    }
+    @Test void pinnedExpiredAndClientOnlyCertificatesAreRejected() throws Exception {
+        for(Path certificate:List.of(expired,clientOnly))try(var peer=new Peer(certificate,socket->fail("Invalid leaf must be rejected"))) {
+            assertThrows(SSLHandshakeException.class,()->TlsQuizGateway.connect(new Endpoint("127.0.0.1",peer.port()),trust(certificate),password));
+        }
+    }
+    @Test void clientCannotLoadServerPrivateKeystore() throws Exception {
+        assertThrows(IllegalArgumentException.class,()->TlsQuizGateway.connect(new Endpoint("127.0.0.1",1),valid,password));
     }
     @Test void untrustedCertificateIsRejected() throws Exception {
         try (var peer = new Peer(valid, socket -> fail("Untrusted certificate must not complete a usable connection"))) {

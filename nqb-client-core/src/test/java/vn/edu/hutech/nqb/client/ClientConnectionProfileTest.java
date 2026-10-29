@@ -18,4 +18,10 @@ class ClientConnectionProfileTest {
         Path file = directory.resolve("client.properties"); Files.writeString(file,"server.port=invalid\n");
         assertThrows(java.io.IOException.class,()->ClientConnectionProfile.read(file));
     }
+    @Test void defaultProfileUsesAutomaticLanWithoutAHotspotAddress() throws Exception {
+        var profile=ClientConnectionProfile.read(directory.resolve("missing.properties"));
+        assertTrue(profile.automaticLan());assertEquals(5051,profile.discoveryPort());
+        Path file=directory.resolve("auto.properties");Files.writeString(file,"server.host=auto\n");
+        assertTrue(ClientConnectionProfile.read(file).automaticLan());
+    }
 }

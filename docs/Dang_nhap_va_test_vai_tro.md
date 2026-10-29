@@ -1,5 +1,7 @@
 # Bản chạy thật, không dữ liệu mẫu — 22/10/2026
 
+**Cập nhật 0.6.2:** hướng dẫn bên dưới ghi lại cách chạy bản cũ. Hiện chỉ mở một Client trong mỗi hồ sơ Windows; đăng xuất để đổi vai trò, dùng các máy khác nhau để thử nhiều học sinh. Xem [cơ chế mở lại cửa sổ](Mot_Client_tren_Windows_0_6_2.md). Bộ chạy hiện tại nằm duy nhất ở `dist/QuizBattle`, tự dò LAN và không nhập IP/TLS trên form.
+
 **Cập nhật 0.3.2:** xem `Dang_ky_va_TLS_tu_dong.md`: giảng viên có thể tự đăng ký, Client không hỏi chứng chỉ/mật khẩu TLS. Bộ cài mới ghép với Server cá nhân đã cấu hình ở `dist/QuizBattle-Windows-20261022-084345/Server/`. Thông tin Server `073803` bên dưới là bản dọn dữ liệu trước đó, có chứng chỉ khác; không dùng lẫn hai bộ.
 
 Client Windows 0.3.1 luôn mở form **Đăng nhập Quiz Battle**, có ô **Bạn là ai?** chưa chọn vai trò. Các lựa chọn: Admin, Giảng viên, Học sinh. Đăng xuất/quay lại hoặc mở cửa sổ mới đều trở về trạng thái chưa đăng nhập. Nút đăng nhập chỉ dùng được sau khi chọn vai trò; tên tài khoản, mật khẩu và nickname để trống.

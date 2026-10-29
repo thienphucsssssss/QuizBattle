@@ -1,22 +1,34 @@
 # Network Quiz Battle Java LAN
 
+**Theo dõi AP và hướng di chuyển:** nhận diện BSSID khi client đi qua các AP cùng SSID, cấu hình tên/vị trí AP tại **Giám sát → Cấu hình AP**, xem lịch sử và hướng suy đoán trong tab **AP & hướng di chuyển**. Xem [hướng dẫn thiết lập và demo](docs/Nhan_dien_AP_va_huong_di_chuyen.md).
+
 Dự án môn Lập trình mạng của nhóm VUA, lớp 23DTHA3. Toàn bộ sản phẩm dùng **Java 21**; chỉ chạy trong **mạng LAN**, không có server Internet. Một máy chạy Server, các máy khác chạy Client giảng viên/Admin hoặc học sinh.
 
 ## Thành viên nhóm bắt đầu tại đây
 
 Xem **[Hướng dẫn clone, build, chạy và làm việc theo nhánh](docs/PHAT_TRIEN_NHOM.md)**. Cần Windows, JDK 21 x64 và Maven 3.9.x; chạy `mvn -B -ntp install` tại thư mục gốc. Repo chứa mã nguồn/tài nguyên, không chứa tài khoản mặc định, private key, database hoặc bộ cài cá nhân. Tự tạo `config/server.properties` và `client.properties` từ các file mẫu, rồi thiết lập Server phát triển theo hướng dẫn. Không dùng lệnh Preview/Seed trong các ghi chép lịch sử bên dưới.
 
-Hỗ trợ đăng nhập Admin/giảng viên, học sinh nickname/linh vật; ngân hàng theo chủ sở hữu, lọc/trùng/import Excel–Word; chơi LAN thời gian thực, bảng hạng sau từng câu và bục vinh danh, SFX và nhạc nền offline. Tự dò Server/phòng và vào bằng mã đã có; tự thích nghi khi IP DHCP thay đổi **chưa triển khai**.
+Hỗ trợ đăng nhập Admin/giảng viên, học sinh nickname/linh vật; ngân hàng riêng, bộ câu hỏi, lọc/trùng/import Excel–Word; chọn đề cho phòng, dùng lại đề và bảng điểm từ lịch sử; chơi LAN thời gian thực, bảng hạng sau từng câu và bục vinh danh, SFX và nhạc nền offline. Tự dò mạng hiện tại và xác minh khóa Server độc lập IP DHCP: đổi điểm phát giữa các buổi không cần build lại Client. Xem [LAN tự động](docs/LAN_tu_dong_0_4_0.md).
+
+**Bản 0.5.0 — tích hợp chọn lọc từ `feature/viet-my`:** chọn câu qua nhiều trang, tạo/lọc bộ riêng, nhập file thành bộ, chọn bộ khi mở phòng và dùng lại bản đề đã lưu. IP kết nối chỉ hiển thị cho chủ phòng/Admin trong giám sát hiện có. Giữ chấm đúng 100 điểm, cho phép nhiều Client cùng máy, LAN tự động và xin quyền Wi-Fi. Database dùng schema 4, nhận diện cả hai biến thể schema 2 của các nhánh. Xem [hướng dẫn bộ câu hỏi và lịch sử](docs/Bo_cau_hoi_va_lich_su_0_5_0.md) và [báo cáo tích hợp](docs/Tich_hop_viet_my_0_5_0.md).
+
+**Bản 0.5.1 — tốc độ và chuỗi đúng:** đúng được 100 điểm cơ bản, cộng tối đa 100 điểm tốc độ và tối đa 100 điểm chuỗi; sai/bỏ lỡ ngắt chuỗi. Server đo và chấm, Client hiển thị số giây nhỏ cạnh nickname sau khi nhận đáp án. Áp dụng cho ván mới, giữ nguyên điểm lịch sử. Xem [quy tắc điểm và hiển thị](docs/Toc_do_va_streak_0_5_1.md). Quy định cố định 100 điểm trong các ghi chép bản cũ đã được thay thế theo yêu cầu mới.
+
+**Bản 0.6.0 — sơ đồ LAN và làm mới số đo:** giảng viên/Admin xem ping và mét ước lượng trên sơ đồ điểm phát Wi-Fi; có trình chiếu và chế độ Danh sách trong Giám sát. Nút Làm mới số đo yêu cầu 5 mẫu RSSI mới, dùng được khi đang thi. Chung cuộc bố trí bục và bảng hạng song song khi đủ rộng. Giữ dữ liệu/chứng chỉ/schema 4 và điểm tốc độ/streak. Xem [hướng dẫn và demo](docs/So_do_LAN_va_lam_moi_0_6_0.md).
+
+**Bản 0.6.2 — một Client trong mỗi hồ sơ Windows:** mở QuizBattle lần nữa sẽ đưa cửa sổ đang chạy lên trước, khôi phục nếu thu nhỏ và giữ nguyên phiên đang dùng. Áp dụng chung cho mọi vai trò và cả hai điểm vào Admin/Player; thay thế việc cho phép nhiều Client cùng máy ở bản cũ. Server chạy độc lập. Xem [cơ chế và cách kiểm tra](docs/Mot_Client_tren_Windows_0_6_2.md).
 
 ## Bản dùng chính trên máy tác giả — không có trong Git
 
-Từ 22/10/2026, dùng duy nhất `dist/QuizBattle/`: chạy [Server/start.bat](dist/QuizBattle/Server/start.bat), gửi [Client/QuizBattle-Setup.exe](dist/QuizBattle/Client/QuizBattle-Setup.exe) cho máy khác. Xem [hướng dẫn ngắn](dist/QuizBattle/HUONG_DAN.txt). Bộ cài Client 0.3.7 đi cùng Server đã cấu hình, có chứng chỉ khớp và database cũ; không tạo Server mới khi chỉ nâng cấp Client. Các đường dẫn timestamp trong báo cáo trước đây là lịch sử.
+Từ 22/10/2026, dùng duy nhất `dist/QuizBattle/`: chạy [Server/start.bat](dist/QuizBattle/Server/start.bat), gửi [Client/QuizBattle-Setup.exe](dist/QuizBattle/Client/QuizBattle-Setup.exe) cho máy khác. Xem [hướng dẫn ngắn](dist/QuizBattle/HUONG_DAN.txt). Bộ cài Client **0.6.2** đi cùng Server đã nâng cấp, chứng chỉ khớp và dữ liệu cũ. Vẫn hỗ trợ xin quyền Windows trực tiếp; xem [Cấp quyền Wi-Fi](docs/Cap_quyen_WiFi_0_4_1.md). Các đường dẫn timestamp trong báo cáo trước đây là lịch sử.
 
-Cập nhật mạng 4G: Server bind/fallback Client `10.122.30.170`, TCP 5050, discovery UDP 5051. Chứng chỉ có cả IP 4G và IP trường `10.12.89.105`, không đổi khóa riêng/tài khoản/câu hỏi. Cả hai máy phải cùng điểm phát Wi-Fi. Máy học sinh dùng bộ cài mới; việc đổi Wi-Fi sau khi chạy Server đòi hỏi kiểm tra lại IP và khởi động lại. Chi tiết/giới hạn QA: `docs/Cap_nhat_mang_4G_20261022.md`.
+Từ 0.4.0, giữ Server và Client ở chế độ `auto`: IP DHCP được dò lại, danh tính TLS được kiểm tra bằng khóa tin cậy đã biết, không cần đổi chứng chỉ/bộ cài theo IP. Các IP và thao tác bind cụ thể trong báo cáo `docs/Cap_nhat_mang_4G_20261022.md` là lịch sử; xem [LAN tự động](docs/LAN_tu_dong_0_4_0.md).
 
 12 bản cũ đã được chuyển nguyên vẹn sang `backups/dist-archive-20261022-123050/`, không xóa hoặc tự gộp database. Không chia sẻ thư mục Server/backups vì chứa khóa riêng và dữ liệu người dùng. Kiểm tra đầy đủ SHA256 237 tệp Server sau di chuyển; Client đang cài trên máy không bị thay đổi bởi việc dọn dist.
 
 ## Tình trạng hiện tại
+
+**Bản 0.3.8 — ước lượng khoảng cách tới điểm phát Wi-Fi:** đọc tín hiệu Wi-Fi trên Windows qua JNA (`wlanapi.dll`), chọn điểm phát làm mốc theo BSSID + băng tần, hiệu chuẩn hai bước (1 m và 5 m, 30 giây/bước) trên từng laptop và lưu hồ sơ cục bộ. Server tự tính khoảng cách ước lượng theo mô hình suy hao logarithm từ trung vị 5 mẫu gần nhất, hiển thị nhãn “ước lượng” trên cửa sổ **Giám sát** riêng của giảng viên/Admin (giữ mở khi chuyển câu hỏi, không hiện trên màn trình chiếu). Khi đang thi, cảnh báo vượt ngưỡng (sau 3 báo cáo liên tiếp) hoặc mất dữ liệu (> 15 giây) không tự loại người chơi hay trừ điểm. Nâng SQLite lên schema 2, lưu tóm tắt và nhật ký cảnh báo qua kết nối/hàng đợi riêng. Xem [Hướng dẫn và báo cáo giám sát Wi-Fi](docs/Giam_sat_khoang_cach_WiFi_0_3_8.md).
 
 **Bản 0.3.6 — nhạc nền:** hai WAV người dùng cung cấp được đóng gói nguyên bản vào Client. BGM lặp từ đếm ngược đến hết các câu/bảng hạng; khi chung cuộc chuyển sang High Score Glory phát một lần, không chồng hai bản nhạc. Hủy ván/rời phòng/mất kết nối/reset/đóng ứng dụng dừng nhạc. Tùy chọn có bật/tắt và âm lượng nhạc riêng với SFX, lưu theo vai trò; mặc định giảng viên/Admin bật 20%, học sinh tắt để tránh nhiều loa cùng phát. Không thay Server hoặc dữ liệu. Xem `docs/Nhac_nen_0_3_6.md`.
 
@@ -106,10 +118,10 @@ QA opt-in chụp 41 trạng thái UI và tự đóng ứng dụng:
 ## Cách triển khai LAN
 
 1. Chọn một máy làm Server; không tắt máy hoặc cho máy ngủ khi đang thi.
-2. Server bind `0.0.0.0:5050` hoặc IP LAN cụ thể. `0.0.0.0` là địa chỉ lắng nghe, **không nhập vào Client**.
-3. Client cùng mạng nhập IP LAN thật của máy Server, ví dụ `192.168.1.10`, và cổng `5050`. `127.0.0.1` chỉ dùng khi Client chạy cùng máy Server.
-4. Kiểm tra rule inbound TCP của firewall trên máy Server, network profile và Wi-Fi client isolation. Không cần mở cổng router hay public IP. Script hiện tại không tự đổi firewall.
-5. Chạy Setup-Lan để tạo Server keystore/chứng chỉ tự ký có SAN khớp IP/hostname và Client truststore ghim chứng chỉ này; xác minh fingerprint khi phân phối. Không dùng CA riêng trong bản hiện tại. Lỗi TLS không hạ xuống raw TCP.
+2. Giữ `server.bind=auto` để Server lắng nghe trên các địa chỉ hiện tại. Client dùng `server.host=auto` và tự dò mỗi lần mở/làm mới, không đóng sẵn IP hotspot.
+3. MSI và các Client cùng kết nối vào điểm phát điện thoại; chạy Server, mở Client rồi chọn phòng hoặc nhập mã. Đổi IP/điện thoại giữa các buổi không cần build lại Client.
+4. Chạy `Server/allow-lan.bat` một lần với quyền quản trị Windows để thêm rule TCP/UDP giới hạn theo runtime và LocalSubnet, áp dụng các network profile. Quy tắc không gắn IP cụ thể. Điểm phát phải cho phép các máy giao tiếp với nhau.
+5. Chạy Setup-Lan một lần khi khởi tạo Server để tạo keystore/chứng chỉ và Client truststore công khai. Client 0.4.0+ kiểm tra khóa công khai Server đã được phân phối, thời hạn chứng chỉ và kiểm tra TLS của JDK; không xác thực danh tính bằng IP DHCP. Xác minh fingerprint khi phân phối. Giữ nguyên certs khi đổi mạng; không dùng trust-all hoặc hạ xuống TCP rõ.
 6. Bootstrap Admin cục bộ, Admin cấp tài khoản giảng viên; user đổi mật khẩu tạm trước CRUD/tạo phòng. Chọn vai trò trên UI không cấp quyền. Học sinh chỉ cần nickname/mã phòng.
 7. Client quản lý có thể chạy cùng Server hoặc máy khác nhưng luôn gửi API qua socket, không mở DB trực tiếp. Có nhiều tài khoản nhưng một chủ phòng tại một thời điểm; ngân hàng/lịch sử giữ theo tài khoản trên cùng Server.
 

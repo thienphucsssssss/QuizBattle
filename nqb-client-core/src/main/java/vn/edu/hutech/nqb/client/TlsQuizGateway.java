@@ -39,10 +39,8 @@ public final class TlsQuizGateway implements QuizGateway {
         for (var aliases = store.aliases(); aliases.hasMoreElements();) {
             if (store.isKeyEntry(aliases.nextElement())) throw new IllegalArgumentException("Client chỉ sử dụng chứng chỉ công khai, không sử dụng khóa bí mật Server.");
         }
-        TrustManagerFactory factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        factory.init(store);
         SSLContext context = SSLContext.getInstance("TLS");
-        context.init(null, factory.getTrustManagers(), null);
+        context.init(null, new TrustManager[]{PinnedServerTrust.from(store)}, null);
         Socket transport = new Socket();
         SSLSocket socket = null;
         try {
@@ -51,7 +49,9 @@ public final class TlsQuizGateway implements QuizGateway {
             socket.setSoTimeout(timeoutMillis);
             socket.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
             SSLParameters parameters = socket.getSSLParameters();
-            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            // QuizBattle authenticates the pre-distributed Server key, not a DHCP IP/SAN.
+            // PKIX, certificate lifetime, TLS constraints and proof of key possession still apply.
+            parameters.setEndpointIdentificationAlgorithm(null);
             socket.setSSLParameters(parameters);
             socket.startHandshake();
             socket.setSoTimeout(0);
@@ -75,8 +75,9 @@ public final class TlsQuizGateway implements QuizGateway {
         if (pending.size() >= 64) return CompletableFuture.failedFuture(new GatewayException("BUSY", "Có quá nhiều yêu cầu đang chờ.", object()));
         var message = object().put("protocol_version", Protocol.VERSION).put("type", type).put("request_id", id);
         var body = payload.deepCopy();
+        if(java.util.Set.of("LOGIN","REGISTER","JOIN").contains(type)&&!body.has("client_capabilities"))body.putArray("client_capabilities").add(vn.edu.hutech.nqb.shared.LanTelemetryRules.CAPABILITY);
         if (body.has("room_code")) message.set("room_code", body.remove("room_code"));
-        if (body.has("session_id") && !type.startsWith("HISTORY_")) message.set("session_id", body.remove("session_id"));
+        if (body.has("session_id") && !type.startsWith("HISTORY_") && !type.startsWith("PROXIMITY_HISTORY_")) message.set("session_id", body.remove("session_id"));
         message.set("payload", body);
         pending.put(id, result);
         try {
@@ -109,6 +110,11 @@ public final class TlsQuizGateway implements QuizGateway {
                     JsonNode payload = message.path("payload");
                     if (payload instanceof ObjectNode body && message.has("session_id")) body.set("session_id", message.get("session_id"));
                     String type = message.path("type").asText();
+                    if(type.equals("NETWORK_PROBE")){
+                        String probe=payload.path("probe_id").asText();
+                        if(!probe.isBlank()&&probe.length()<=80)request("NETWORK_PROBE_REPLY",object().put("probe_id",probe)).exceptionally(error->null);
+                        continue;
+                    }
                     if (future != null) {
                         if (type.equals("ERROR") || type.equals("LOGIN_ERROR")) {
                             future.completeExceptionally(new GatewayException(payload.path("code").asText("ERROR"), payload.path("message").asText("Yêu cầu bị từ chối."), payload));

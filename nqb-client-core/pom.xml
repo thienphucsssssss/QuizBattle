@@ -5,5 +5,6 @@
     <artifactId>nqb-client-core</artifactId>
     <dependencies>
         <dependency><groupId>vn.edu.hutech.nqb</groupId><artifactId>nqb-shared</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>net.java.dev.jna</groupId><artifactId>jna</artifactId></dependency>
     </dependencies>
 </project>

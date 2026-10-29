@@ -19,3 +19,7 @@ The project owner supplied 17 WAV interface/game effects and two WAV music track
 ## Apache POI
 
 Apache POI 5.5.1 and its runtime dependencies are bundled in the desktop Client for local XLSX/DOCX import and blank template creation. POI is licensed under Apache License 2.0; upstream LICENSE/NOTICE files remain in the distributed dependency JARs. Sources and release information: [Apache POI](https://poi.apache.org/). No Microsoft Office installation or Internet connection is needed by the product. The Server does not include POI.
+
+## Java Native Access (JNA)
+
+Java Native Access (`net.java.dev.jna:jna`, version 5.16.0) is bundled in the desktop Client (`nqb-client-core`) to call the Windows Native Wifi API (`wlanapi.dll`) for LAN-only Wi-Fi RSSI proximity estimation and the Windows Runtime permission API (`combase.dll`) for user consent. JNA is dual-licensed under the Apache License 2.0 and LGPL 2.1+; this project uses JNA under the Apache License 2.0. Upstream notices and source information: [Java Native Access](https://github.com/java-native-access/jna).

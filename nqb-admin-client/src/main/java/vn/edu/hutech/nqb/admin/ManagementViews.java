@@ -3,6 +3,7 @@ package vn.edu.hutech.nqb.admin;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import javafx.animation.PauseTransition;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.collections.FXCollections;
 import javafx.geometry.*;
@@ -14,6 +15,8 @@ import javafx.util.Duration;
 import vn.edu.hutech.nqb.client.GatewayException;
 import java.util.*;
 import java.util.function.Consumer;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
 
 import static vn.edu.hutech.nqb.admin.FxKit.*;
 import static vn.edu.hutech.nqb.client.QuizGateway.object;
@@ -33,6 +36,57 @@ final class ManagementViews {
     private TableColumn<JsonNode, String> activeColumn() {
         var column = new TableColumn<JsonNode, String>("Trạng thái"); column.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().path("is_active").asBoolean() ? "Đang bật" : "Đã tắt")); column.setPrefWidth(115); column.setSortable(false); return column;
     }
+    private TableColumn<JsonNode,JsonNode> questionSelectionColumn(Runnable changed) {
+        var column=new TableColumn<JsonNode,JsonNode>();column.setId("bank-selection-column");column.setMinWidth(64);column.setPrefWidth(64);column.setMaxWidth(64);column.setSortable(false);column.setResizable(false);column.setReorderable(false);
+        column.setCellValueFactory(value->new ReadOnlyObjectWrapper<>(value.getValue()));
+        column.setCellFactory(ignored->new TableCell<>() {
+            private final CheckBox check=new CheckBox();
+            {
+                getStyleClass().add("question-select-cell");check.getStyleClass().add("question-pick");check.setTooltip(new Tooltip("Tick để chọn câu hỏi cho bộ. Bỏ tick để bỏ chọn."));
+                check.setOnAction(event->{
+                    JsonNode question=getItem();if(isEmpty()||question==null)return;int id=question.path("question_id").asInt();
+                    app.updateBankSelection(List.of(id),check.isSelected()?List.of(id):List.of());getTableView().getSelectionModel().select(getIndex());changed.run();
+                });
+            }
+            @Override protected void updateItem(JsonNode question,boolean empty) {
+                super.updateItem(question,empty);setText(null);
+                if(empty||question==null){check.setId(null);setGraphic(null);return;}
+                int id=question.path("question_id").asInt();check.setId("question-check-"+id);check.setSelected(app.bankQuestionSelected(id));check.setAccessibleText("Chọn câu hỏi: "+question.path("content_preview").asText());setGraphic(check);
+            }
+        });
+        return column;
+    }
+    private static String updatedLabel(JsonNode question) {
+        try{return "Cập nhật "+DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(question.path("updated_at_utc").asText()));}
+        catch(java.time.DateTimeException invalid){return "Chưa có thông tin cập nhật";}
+    }
+    private TableColumn<JsonNode,JsonNode> questionPreviewColumn() {
+        var column=new TableColumn<JsonNode,JsonNode>("Câu hỏi");column.setSortable(false);column.setMinWidth(280);column.setPrefWidth(620);
+        column.setCellValueFactory(value->new ReadOnlyObjectWrapper<>(value.getValue()));
+        column.setCellFactory(ignored->new TableCell<>() {
+            private final Label category=text("","bank-category"),status=text("","bank-status"),title=text("","bank-question-title"),updated=text("","bank-question-meta");
+            private final VBox preview=column(6,row(8,category,space(),status),title,updated);
+            {
+                getStyleClass().add("bank-preview-cell");category.setWrapText(false);category.setMaxWidth(260);status.setWrapText(false);status.setMinWidth(Region.USE_PREF_SIZE);
+                title.setAlignment(Pos.TOP_LEFT);title.setMinHeight(0);title.setPrefHeight(44);title.setMaxHeight(44);title.setMaxWidth(Double.MAX_VALUE);updated.setWrapText(false);
+                preview.setMaxWidth(Double.MAX_VALUE);preview.prefWidthProperty().bind(widthProperty().subtract(28));
+            }
+            @Override protected void updateItem(JsonNode question,boolean empty) {
+                super.updateItem(question,empty);setText(null);
+                if(empty||question==null){setGraphic(null);return;}
+                category.setText(question.path("category").asText());category.setTooltip(new Tooltip(category.getText()));
+                boolean active=question.path("is_active").asBoolean();status.setText(active?"Đang bật":"Đã tắt");status.getStyleClass().setAll("bank-status",active?"active":"inactive");
+                title.setText(question.path("content_preview").asText());title.setTooltip(new Tooltip(title.getText()));updated.setText(updatedLabel(question));setGraphic(preview);
+            }
+        });
+        return column;
+    }
+    private static void compactFilter(ComboBox<String> combo,String label) {
+        combo.setAccessibleText(label);combo.setButtonCell(new ListCell<>() {
+            @Override protected void updateItem(String item,boolean empty){super.updateItem(item,empty);setText(empty||item==null?label:label+": "+(item.startsWith("Tất cả")?"Tất cả":item));setTooltip(empty||item==null?null:new Tooltip(label+": "+item));}
+        });
+    }
+    private static VBox emptyInspector() {return column(10,text("Chi tiết câu hỏi","bank-section-title"),text("Chọn một câu để xem nội dung và bốn đáp án.","muted"));}
     private ObjectNode filters(String keyword, String category, String active, int page, String sort) {
         var p = object().put("keyword", keyword).put("page", page).put("page_size", 10).put("sort", sort.equals("ID tăng dần") ? "ID_ASC" : "UPDATED_DESC");
         if (!category.equals("Tất cả chủ đề")) p.put("category", category);
@@ -40,34 +94,67 @@ final class ManagementViews {
         return p;
     }
     void bank(String keyword, String category, String active, String sort, int page) {
-        var data = table(); data.getColumns().addAll(textColumn("ID", "question_id", 64), textColumn("Nội dung câu hỏi", "content_preview", 450), textColumn("Chủ đề", "category", 140), activeColumn());
-        TextField search = new TextField(keyword); search.setPromptText("Tìm nội dung câu hỏi…"); search.setMaxWidth(Double.MAX_VALUE);
-        ComboBox<String> categories = new ComboBox<>(FXCollections.observableArrayList("Tất cả chủ đề")); categories.setValue(category); categories.setPrefWidth(190);
-        ComboBox<String> statuses = new ComboBox<>(FXCollections.observableArrayList("Tất cả trạng thái", "Đang bật", "Đã tắt")); statuses.setValue(active);
-        ComboBox<String> order = new ComboBox<>(FXCollections.observableArrayList("Mới cập nhật", "ID tăng dần")); order.setValue(sort);
+        var data = table();data.setId("bank-questions");data.getStyleClass().add("bank-table");data.setFixedCellSize(128);
+        var checkPage=new CheckBox();checkPage.setId("bank-check-page");checkPage.getStyleClass().add("question-pick");checkPage.setAllowIndeterminate(false);checkPage.setAccessibleText("Chọn tất cả câu hỏi trên trang hiện tại");checkPage.setTooltip(new Tooltip("Tick hoặc bỏ tick tất cả câu hỏi trên trang này. Các trang khác giữ lựa chọn hiện tại."));
+        TextField search = new TextField(keyword);search.setId("bank-search");search.setAccessibleText("Tìm nội dung câu hỏi"); search.setPromptText("Tìm nội dung câu hỏi…"); search.setMaxWidth(Double.MAX_VALUE);
+        var sets=new ComboBox<QuestionSets.Choice>();sets.setId("bank-question-set");sets.setAccessibleText("Lọc bộ câu hỏi");sets.setPrefWidth(255);sets.setMinWidth(180);sets.setValue(QuestionSets.Choice.all());sets.setDisable(true);
+        sets.setButtonCell(new ListCell<>(){@Override protected void updateItem(QuestionSets.Choice item,boolean empty){super.updateItem(item,empty);setText(empty||item==null?"Bộ câu hỏi":"Bộ: "+item.name());setTooltip(empty||item==null?null:new Tooltip(item.toString()));}});
+        ComboBox<String> categories = new ComboBox<>(FXCollections.observableArrayList("Tất cả chủ đề")); categories.setValue(category); categories.setPrefWidth(220);compactFilter(categories,"Chủ đề");
+        ComboBox<String> statuses = new ComboBox<>(FXCollections.observableArrayList("Tất cả trạng thái", "Đang bật", "Đã tắt")); statuses.setValue(active);statuses.setPrefWidth(210);compactFilter(statuses,"Trạng thái");
+        ComboBox<String> order = new ComboBox<>(FXCollections.observableArrayList("Mới cập nhật", "ID tăng dần")); order.setValue(sort);order.setPrefWidth(210);compactFilter(order,"Xếp theo");
         Label count = text("Đang tải ngân hàng…", "muted"), paging = text("", "muted");
         var add = button("+ Thêm câu hỏi", "ink-button", () -> editQuestion(object())); add.setDisable(!app.editsAllowed());
-        var header = row(16, column(4, text("Ngân hàng của tôi", "title"), text("Câu hỏi rõ ràng, một đáp án đúng.", "muted")), space(), add);
+        var heading=text("Ngân hàng câu hỏi","bank-title");
         var importFile=button("Nhập từ Excel / Word","quiet",()->new QuestionImportView(app).show());importFile.setDisable(!app.editsAllowed());importFile.setId("bank-import");
-        var fileActions=new FlowPane(12,8,importFile,button("Xem mẫu / Tải mẫu","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage())));
-        var filterRow = new FlowPane(12, 12, field("Chủ đề", categories), field("Trạng thái", statuses), field("Sắp xếp", order));
-        var top = column(16, header, fileActions, search, filterRow, count); top.setPadding(new Insets(0, 0, 18, 0));
-        var inspector = column(14, text("CHI TIẾT CÂU HỎI", "caption"), text("Chọn một câu trong danh sách", "subtitle")); inspector.setPrefWidth(300); inspector.setMaxWidth(340); inspector.getStyleClass().add("panel");
-        var content = new BorderPane(data); var detailScroll = scroll(inspector); detailScroll.setPrefWidth(320); BorderPane.setMargin(detailScroll, new Insets(0, 0, 0, 20)); content.setRight(detailScroll);
-        content.widthProperty().addListener((o, before, width) -> content.setRight(width.doubleValue() < 1020 ? null : detailScroll));
+        var manageSets=button("Bộ câu hỏi","quiet",()->{
+            var p=filters(search.getText(),categories.getValue(),statuses.getValue(),1,order.getValue()).put("question_set_id",app.bankQuestionSet());
+            QuestionSets.manage(app,p,app.bankSelectedQuestions());
+        });manageSets.setId("bank-manage-sets");manageSets.setDisable(!app.editsAllowed());
+        var headerActions=row(10,importFile,add);headerActions.getStyleClass().add("bank-header-actions");
+        var header=new BorderPane(column(5,heading,count));header.setRight(headerActions);BorderPane.setAlignment(headerActions,Pos.TOP_RIGHT);BorderPane.setMargin(headerActions,new Insets(0,0,0,18));
+        boolean[] stackedHeader={false};header.widthProperty().addListener((o,before,width)->{
+            boolean stacked=width.doubleValue()<900;if(stacked==stackedHeader[0])return;stackedHeader[0]=stacked;
+            header.setRight(null);header.setBottom(null);if(stacked){header.setBottom(headerActions);BorderPane.setMargin(headerActions,new Insets(10,0,0,0));}else{header.setRight(headerActions);BorderPane.setMargin(headerActions,new Insets(0,0,0,18));}
+        });
+        var selectedCount=text("","caption","bank-selection-total");selectedCount.setId("bank-selected-count");selectedCount.setTooltip(new Tooltip("Tổng số câu đã tick trên mọi trang và bộ lọc. Tick ô bên cạnh câu hỏi để chọn hoặc bỏ chọn."));
+        var selectPage=button("Chọn cả trang","quiet",()->{});selectPage.setId("bank-select-page");selectPage.setDisable(true);
+        var clearSelection=button("Bỏ chọn tất cả","link-button",()->{});clearSelection.setId("bank-clear-selection");
+        Runnable selectionSummary=()->{
+            int total=app.bankSelectedQuestions().size();selectedCount.setText("Đã chọn "+total+" câu");clearSelection.setDisable(total==0);
+            long checked=data.getItems().stream().filter(q->app.bankQuestionSelected(q.path("question_id").asInt())).count();int size=data.getItems().size();
+            checkPage.setDisable(size==0);checkPage.setSelected(size>0&&checked==size);checkPage.setIndeterminate(checked>0&&checked<size);
+        };
+        Consumer<Boolean> markPage=checked->{var ids=data.getItems().stream().map(q->q.path("question_id").asInt()).toList();app.updateBankSelection(ids,checked?ids:List.of());data.refresh();selectionSummary.run();};
+        selectPage.setOnAction(e->markPage.accept(true));checkPage.setOnAction(e->markPage.accept(checkPage.isSelected()));
+        clearSelection.setOnAction(e->{app.clearBankSelection();data.getSelectionModel().clearSelection();data.refresh();selectionSummary.run();});
+        var checkColumn=questionSelectionColumn(selectionSummary);checkColumn.setGraphic(checkPage);
+        data.getColumns().addAll(checkColumn,questionPreviewColumn());
+        selectionSummary.run();
+        var templates=button("Mẫu câu hỏi","link-button",()->QuestionImportView.showTemplates(app,app.ownerStage()));
+        var selectionActions=new FlowPane(10,8,manageSets,templates,selectPage,clearSelection,selectedCount);selectionActions.getStyleClass().add("bank-toolbar");
+        var filterRow = new FlowPane(10, 10, categories,statuses,order);
+        var searchRow=row(12,search,sets);HBox.setHgrow(search,Priority.ALWAYS);
+        var filters=column(10,searchRow,filterRow);filters.getStyleClass().add("bank-filter-panel");
+        var top = column(14, header,filters,selectionActions); top.setPadding(new Insets(0, 0, 10, 0));
+        var inspector = emptyInspector();inspector.setPadding(new Insets(18));inspector.setPrefWidth(318);inspector.setMaxWidth(318);
+        var content = new BorderPane(data); var detailScroll = scroll(inspector);detailScroll.setId("bank-inspector");detailScroll.getStyleClass().add("bank-inspector");detailScroll.setPrefWidth(318); BorderPane.setMargin(detailScroll, new Insets(0, 0, 0, 16)); content.setRight(detailScroll);
+        content.widthProperty().addListener((o, before, width) -> content.setRight(width.doubleValue() < 950 ? null : detailScroll));
         Button previous = new Button("← Trước"), next = new Button("Sau →"); previous.setDisable(page <= 1);
-        var inspect = button("Xem câu đã chọn", "quiet", () -> { var row = data.getSelectionModel().getSelectedItem(); if (row != null) openDetail(row.path("question_id").asInt()); });
+        var inspect = button("Xem chi tiết", "quiet", () -> { var row = data.getSelectionModel().getSelectedItem(); if (row != null) openDetail(row.path("question_id").asInt()); });
         inspect.setDisable(true);
-        var clear = button("Xóa bộ lọc", "link-button", () -> { app.setBankFilter("", "Tất cả chủ đề", "Tất cả trạng thái", "Mới cập nhật", 1); app.bankView(); });
-        var bottom = row(12, paging, clear, space(), inspect, previous, next); bottom.setPadding(new Insets(16, 0, 0, 0));
-        var layout = new BorderPane(content); layout.setTop(top); layout.setBottom(bottom); app.showManagement("Ngân hàng", layout);
+        var clear = button("Xóa bộ lọc", "link-button", () -> { app.setBankQuestionSet(0);app.setBankFilter("", "Tất cả chủ đề", "Tất cả trạng thái", "Mới cập nhật", 1); app.bankView(); });
+        var bottom = row(12, paging, clear, space(), inspect, previous, next);bottom.getStyleClass().add("bank-footer"); bottom.setPadding(new Insets(12, 0, 0, 0));
+        var layout = new BorderPane(content);layout.getStyleClass().add("bank-view"); layout.setTop(top); layout.setBottom(bottom); app.showManagement("Ngân hàng", layout);
         Runnable refresh = () -> {
             int version = ++requestVersion; count.setText("Đang tải…"); data.setPlaceholder(text("Đang tải câu hỏi…", "muted"));
             app.setBankFilter(search.getText(), categories.getValue(), statuses.getValue(), order.getValue(), page);
-            app.call("QUESTION_LIST", filters(search.getText(), categories.getValue(), statuses.getValue(), page, order.getValue()), response -> {
+            app.call("QUESTION_LIST", filters(search.getText(), categories.getValue(), statuses.getValue(), page, order.getValue()).put("question_set_id",app.bankQuestionSet()), response -> {
                 if (version != requestVersion || layout.getScene() == null) return;
-                List<JsonNode> rows = new ArrayList<>(); response.path("items").forEach(rows::add); data.setItems(FXCollections.observableArrayList(rows));
-                data.setPlaceholder(column(8, text("Không tìm thấy câu hỏi", "subtitle"), text("Thử bỏ bớt điều kiện lọc hoặc thêm câu hỏi mới.", "muted")));
+                List<JsonNode> rows = new ArrayList<>(); response.path("items").forEach(rows::add);
+                data.setItems(FXCollections.observableArrayList(rows));
+                if(!rows.isEmpty())data.getSelectionModel().selectFirst();
+                selectPage.setDisable(rows.isEmpty());selectionSummary.run();
+                data.setPlaceholder(column(8, text("Chưa có câu hỏi phù hợp", "subtitle"), text("Thử bỏ bớt bộ lọc, thêm câu hỏi hoặc nhập từ Excel / Word.", "muted")));
                 count.setText(response.path("total").asInt() + " câu phù hợp" + (!app.editsAllowed() ? " · Chỉ xem: phòng không ở trạng thái chờ" : ""));
                 paging.setText("Trang " + page + " / " + Math.max(1, (response.path("total").asInt() + 9) / 10)); next.setDisable(!response.path("has_more").asBoolean());
             }, failure -> { if (version == requestVersion) { count.setText("Không tải được ngân hàng. Enter để thử lại."); data.setPlaceholder(text(ArcadeApplication.message(failure), "feedback", "error")); } });
@@ -84,7 +171,7 @@ final class ManagementViews {
         data.getSelectionModel().selectedItemProperty().addListener((o, old, selected) -> {
             int version = ++detailVersion;
             inspect.setDisable(selected == null);
-            if (selected == null) return;
+            if (selected == null){inspector.getChildren().setAll(emptyInspector());return;}
             inspector.getChildren().setAll(text("Đang tải chi tiết…", "muted"));
             app.call("QUESTION_GET", object().put("question_id", selected.path("question_id").asInt()), q -> {
                 if (version != detailVersion || layout.getScene() == null) return;
@@ -94,23 +181,39 @@ final class ManagementViews {
         app.call("QUESTION_CATEGORIES", object(), response -> {
             if (layout.getScene() == null) return;
             categories.setOnAction(null); response.path("categories").forEach(v -> { if (!categories.getItems().contains(v.asText())) categories.getItems().add(v.asText()); }); categories.setValue(category); categories.setOnAction(e -> newFilter.run());
-        }); refresh.run();
+        });
+        QuestionSets.load(app,()->layout.getScene()!=null,values->{
+            var choices=new ArrayList<QuestionSets.Choice>();choices.add(QuestionSets.Choice.all());choices.addAll(values);sets.setItems(FXCollections.observableArrayList(choices));sets.setValue(choices.stream().filter(v->v.id()==app.bankQuestionSet()).findFirst().orElse(choices.getFirst()));sets.setDisable(false);
+            sets.setOnAction(e->{if(sets.getValue()!=null){app.setBankQuestionSet(sets.getValue().id());app.bankView();}});
+        },failure->app.notice("Không tải được bộ câu hỏi: "+ArcadeApplication.message(failure),true));
+        refresh.run();
     }
     private VBox detail(JsonNode question) { return detail(question, false); }
     private VBox detail(JsonNode question, boolean readOnly) {
-        var nodes = column(12, text("Q" + String.format("%03d", question.path("question_id").asInt()) + " / " + question.path("category").asText(), "caption"), text(question.path("content").asText(), "subtitle"));
-        for (String letter : List.of("A", "B", "C", "D")) nodes.getChildren().add(text(letter + ". " + question.path("option_" + letter.toLowerCase(Locale.ROOT)).asText() + (letter.equals(question.path("correct_answer").asText()) ? "  ✓ Đúng" : "")));
+        var title=text(question.path("content").asText(),"bank-detail-question");title.setMinHeight(Region.USE_PREF_SIZE);title.setMaxWidth(Double.MAX_VALUE);
+        var category=text(question.path("category").asText(),"bank-category");category.setMinHeight(Region.USE_PREF_SIZE);
+        var nodes = column(14,row(8,text("Chi tiết câu hỏi","bank-section-title"),space(),text("Q"+String.format("%03d",question.path("question_id").asInt()),"bank-question-code")),category,title);
+        nodes.setId("bank-detail-content");nodes.getStyleClass().add("bank-detail-content");
+        var answers=column(8);
+        for (String letter : List.of("A", "B", "C", "D")) {
+            boolean correct=letter.equals(question.path("correct_answer").asText());
+            var value=text(question.path("option_"+letter.toLowerCase(Locale.ROOT)).asText(),"bank-answer-text");value.setMinHeight(Region.USE_PREF_SIZE);value.setMaxWidth(Double.MAX_VALUE);
+            var body=column(4,value);if(correct)body.getChildren().add(text("Đáp án đúng","bank-answer-note"));HBox.setHgrow(body,Priority.ALWAYS);
+            var badge=text(letter,"bank-answer-letter");badge.setAlignment(Pos.CENTER);badge.setMinWidth(28);badge.setPrefWidth(28);badge.setMaxWidth(28);
+            var option=row(10,badge,body);option.setAlignment(Pos.TOP_LEFT);option.getStyleClass().add("bank-answer-option");if(correct)option.getStyleClass().add("correct");option.setId("bank-answer-"+letter);answers.getChildren().add(option);
+        }
+        nodes.getChildren().addAll(answers,text(updatedLabel(question),"bank-question-meta"));
         if (readOnly) return nodes;
-        var edit = button("Chỉnh sửa", "primary", () -> editQuestion(question)); edit.setDisable(!app.editsAllowed());
+        var edit = button("Chỉnh sửa câu hỏi", "primary", () -> editQuestion(question));edit.setMaxWidth(Double.MAX_VALUE); edit.setDisable(!app.editsAllowed());
         var toggle = button(question.path("is_active").asBoolean() ? "Tắt câu hỏi" : "Bật câu hỏi", "quiet", () -> app.call("QUESTION_SET_ACTIVE", object().put("question_id", question.path("question_id").asInt()).put("is_active", !question.path("is_active").asBoolean()), ignored -> { app.notice("Đã cập nhật trạng thái câu hỏi.", false); app.bankView(); })); toggle.setDisable(!app.editsAllowed());
         var delete = button("Xóa câu hỏi", "danger", () -> {
             var confirm = new Alert(Alert.AlertType.CONFIRMATION, "Câu hỏi sẽ bị xóa khỏi ngân hàng. Thao tác này không có Undo.", ButtonType.CANCEL, ButtonType.OK); confirm.initOwner(app.ownerStage()); confirm.setHeaderText("Xóa câu Q" + question.path("question_id").asInt() + "?"); styleDialog(confirm);
-            if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) app.call("QUESTION_DELETE", object().put("question_id", question.path("question_id").asInt()), ignored -> { app.bankView(); app.notice("Đã xóa câu hỏi.", false); });
+            if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) app.call("QUESTION_DELETE", object().put("question_id", question.path("question_id").asInt()), ignored -> { app.removeBankSelection(question.path("question_id").asInt());app.bankView(); app.notice("Đã xóa câu hỏi.", false); });
         }); delete.setDisable(!app.editsAllowed());
-        nodes.getChildren().addAll(new Separator(), edit, toggle, delete); return nodes;
+        var otherActions=new FlowPane(8,8,toggle,delete);nodes.getChildren().addAll(new Separator(), edit,otherActions); return nodes;
     }
     private void openDetail(int id) { openDetail(id, false); }
-    private void openDetail(int id, boolean readOnly) { app.call("QUESTION_GET", object().put("question_id", id), q -> { var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog); dialog.setHeaderText("Chi tiết câu hỏi"); dialog.getDialogPane().setContent(scroll(detail(q, readOnly))); dialog.getDialogPane().setPrefSize(580, 570); dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE); dialog.show(); }); }
+    private void openDetail(int id, boolean readOnly) { app.call("QUESTION_GET", object().put("question_id", id), q -> { var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog);dialog.setTitle("Chi tiết câu hỏi");dialog.getDialogPane().getStyleClass().add("bank-detail-dialog"); dialog.getDialogPane().setContent(scroll(detail(q, readOnly))); dialog.getDialogPane().setPrefSize(600,Math.min(650,app.ownerStage().getHeight()-80));dialog.setResizable(true); dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);((Button)dialog.getDialogPane().lookupButton(ButtonType.CLOSE)).setText("Đóng"); dialog.show(); }); }
     void editQuestion(JsonNode original) {
         boolean existing = original.has("question_id");
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); dialog.setTitle("Ngân hàng câu hỏi"); dialog.setHeaderText(existing ? "Chỉnh sửa câu hỏi" : "Thêm câu hỏi mới"); styleDialog(dialog);
@@ -221,19 +324,108 @@ final class ManagementViews {
         }); dialog.show();
     }
     void history(int page) {
-        var table = table(); table.getColumns().addAll(textColumn("Phòng thi", "room_name", 280), textColumn("Kết thúc (UTC)", "ended_at_utc", 280), textColumn("Số câu", "question_count", 100), textColumn("Người chơi", "player_count", 120));
-        var heading = column(6, text("Lịch sử của tôi", "title"), text("Các ván do tài khoản của bạn tổ chức.", "muted")); heading.setPadding(new Insets(0,0,20,0));
-        var show = button("Xem bảng điểm", "ink-button", () -> { JsonNode chosen = table.getSelectionModel().getSelectedItem(); if (chosen != null) app.call("HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()), details -> {
-            var dialog = new Dialog<ButtonType>(); dialog.initOwner(app.ownerStage()); styleDialog(dialog); dialog.setHeaderText(details.path("room_name").asText("Bảng điểm"));
-            var list = column(12); details.path("ranking").forEach(v -> list.getChildren().add(row(16, text("#" + v.path("rank").asInt(), "subtitle"), text(v.path("nickname").asText()), space(), text(v.path("score").asInt() + " điểm", "subtitle"))));
-            dialog.getDialogPane().setContent(list); dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE); dialog.show();
-        }); });
-        show.setDisable(true); table.getSelectionModel().selectedItemProperty().addListener((o, old, value) -> show.setDisable(value == null));
+        var table=table();table.setId("history-matches");table.getStyleClass().add("history-table");table.setFixedCellSize(84);
+        var room=new TableColumn<JsonNode,JsonNode>("Phòng thi");room.setCellValueFactory(c->new ReadOnlyObjectWrapper<>(c.getValue()));room.setPrefWidth(310);room.setMinWidth(190);room.setSortable(false);
+        room.setCellFactory(ignored->new TableCell<>() {
+            private final Label title=text("","history-room-name"),subtitle=text("Kết quả đã lưu","history-room-meta");
+            private final VBox content=column(5,title,subtitle);
+            {getStyleClass().add("history-room-cell");title.setWrapText(false);title.setMaxWidth(Double.MAX_VALUE);content.prefWidthProperty().bind(widthProperty().subtract(30));}
+            @Override protected void updateItem(JsonNode item,boolean empty){super.updateItem(item,empty);setText(null);if(empty||item==null){setGraphic(null);return;}title.setText(item.path("room_name").asText());title.setTooltip(new Tooltip(title.getText()));setGraphic(content);}
+        });
+        var ended=new TableColumn<JsonNode,String>("Kết thúc");ended.setCellValueFactory(c->new ReadOnlyStringWrapper(HistoryResults.endedAt(c.getValue())));ended.setPrefWidth(220);ended.setMinWidth(175);ended.setSortable(false);
+        table.getColumns().addAll(room,ended,historyCountColumn("Số câu","question_count"),historyCountColumn("Thí sinh","player_count"));
+        var heading=column(6,text("Lịch sử của tôi","title"),text("Xem lại các ván bạn tổ chức và kết quả từng thí sinh.","muted"));
+        var top=row(16,heading,space(),button("Làm mới","quiet",app::historyView));top.setPadding(new Insets(0,0,20,0));
+        var monitoring=button("Nhật ký giám sát","quiet",()->proximityHistory(1));monitoring.setId("history-proximity-list-btn");top.getChildren().add(monitoring);
+        var count=text("Đang tải…","history-total");var hint=text("Chọn một ván thi để xem bảng điểm và bục vinh danh.","muted");
+        var layout=new BorderPane(table);layout.getStyleClass().add("history-view");
+        var show=button("Xem bảng điểm","ink-button",()->{});boolean[] loading={false};
+        Runnable open=()->{
+            JsonNode chosen=table.getSelectionModel().getSelectedItem();if(chosen==null||loading[0])return;
+            loading[0]=true;show.setDisable(true);show.setText("Đang tải…");hint.setText("Đang tải bảng điểm…");hint.getStyleClass().remove("error");
+            app.call("HISTORY_GET",object().put("session_id",chosen.path("session_id").asText()),details->{
+                if(layout.getScene()==null)return;loading[0]=false;show.setText("Xem bảng điểm");show.setDisable(table.getSelectionModel().getSelectedItem()==null);hint.setText("Chọn một ván thi để xem bảng điểm và bục vinh danh.");HistoryResults.dialog(app.ownerStage(),chosen,details,()->app.roomConfigFromHistory(details)).show();
+            },failure->{if(layout.getScene()==null)return;loading[0]=false;show.setText("Xem bảng điểm");show.setDisable(table.getSelectionModel().getSelectedItem()==null);hint.setText(ArcadeApplication.message(failure));hint.getStyleClass().add("error");});
+        };
+        show.setOnAction(event->open.run());show.setDisable(true);table.getSelectionModel().selectedItemProperty().addListener((o,old,value)->show.setDisable(loading[0]||value==null));
+        table.setRowFactory(ignored->{var line=new TableRow<JsonNode>();line.setOnMouseClicked(event->{if(event.getButton()==MouseButton.PRIMARY&&event.getClickCount()==2&&!line.isEmpty())open.run();});return line;});
+        table.setOnKeyPressed(event->{if(event.getCode()==KeyCode.ENTER){open.run();event.consume();}});
         var previous = button("← Trước", "quiet", () -> { app.setHistoryPage(page - 1); app.historyView(); }); previous.setDisable(page <= 1);
         var next = button("Sau →", "quiet", () -> { app.setHistoryPage(page + 1); app.historyView(); }); next.setDisable(true);
+        var footer=column(10,hint,row(10,count,space(),previous,next,show));footer.getStyleClass().add("history-footer");footer.setPadding(new Insets(14,0,0,0));
+        layout.setTop(top);layout.setBottom(footer);table.setPlaceholder(text("Đang tải lịch sử thi đấu…","muted"));app.showManagement("Lịch sử",layout);
+        app.call("HISTORY_LIST",object().put("page",page).put("page_size",10),response->{
+            if(layout.getScene()==null)return;var rows=new ArrayList<JsonNode>();response.path("items").forEach(rows::add);table.setItems(FXCollections.observableArrayList(rows));
+            var empty=column(8,text("Chưa có ván thi đã lưu","history-section-title"),text("Kết quả sẽ xuất hiện sau khi bạn tổ chức và hoàn thành một ván thi.","muted"));empty.setAlignment(Pos.CENTER);empty.setMaxWidth(400);table.setPlaceholder(empty);
+            count.setText(response.path("total").asInt()+" ván · Trang "+page);next.setDisable(!response.path("has_more").asBoolean());
+        },failure->{if(layout.getScene()==null)return;count.setText("Chưa tải được");table.setPlaceholder(column(12,text("Không tải được lịch sử","history-section-title"),button("Thử lại","quiet",app::historyView)));hint.setText(ArcadeApplication.message(failure));hint.getStyleClass().add("error");});
+    }
+    private TableColumn<JsonNode,String> historyCountColumn(String title,String key) {
+        var result=textColumn(title,key,96);result.setMinWidth(76);
+        result.setCellFactory(ignored->new TableCell<>(){
+            private final Label count=text("","history-count");
+            @Override protected void updateItem(String item,boolean empty){super.updateItem(item,empty);setText(null);if(empty||item==null){setGraphic(null);return;}count.setText(item);setGraphic(count);}
+        });return result;
+    }
+    void proximityHistory(int page) {
+        var table = table();
+        table.setId("proximity-history-table");
+        table.getColumns().addAll(
+            textColumn("Phòng thi", "room_name", 200),
+            textColumn("Giảng viên", "host_name", 150),
+            textColumn("Trạng thái", "status_label", 120),
+            textColumn("Điểm phát", "anchor_bssid", 150),
+            textColumn("Cảnh báo", "alert_count", 90),
+            textColumn("Cập nhật (UTC)", "updated_at_utc", 200)
+        );
+        var backBtn = button("← Bảng điểm", "quiet", app::historyView);
+        var heading = row(16, column(6, text("Lịch sử giám sát khoảng cách", "title"), text("Bao gồm lượt chơi hoàn tất, đã hủy và gián đoạn.", "muted")), space(), backBtn);
+        heading.setPadding(new Insets(0, 0, 20, 0));
+
+        var viewDetail = button("Xem giám sát", "ink-button", () -> {
+            JsonNode chosen = table.getSelectionModel().getSelectedItem();
+            if (chosen != null) {
+                app.call("PROXIMITY_HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()),
+                    detail -> new ProximityViews(app).showProximityHistoryDetail(detail));
+            }
+        });
+        viewDetail.setId("proximity-history-detail-btn");
+        viewDetail.setDisable(true);
+
+        var viewScore = button("Xem bảng điểm", "quiet", () -> {
+            JsonNode chosen = table.getSelectionModel().getSelectedItem();
+            if (chosen != null && chosen.path("has_scoreboard").asBoolean()) {
+                app.call("HISTORY_GET", object().put("session_id", chosen.path("session_id").asText()), details -> {
+                    HistoryResults.dialog(app.ownerStage(),details,details,()->app.roomConfigFromHistory(details)).show();
+                });
+            }
+        });
+        viewScore.setDisable(true);
+
+        table.getSelectionModel().selectedItemProperty().addListener((o, old, value) -> {
+            viewDetail.setDisable(value == null);
+            viewScore.setDisable(value == null || !value.path("has_scoreboard").asBoolean());
+        });
+
+        var previous = button("← Trước", "quiet", () -> proximityHistory(page - 1));
+        previous.setDisable(page <= 1);
+        var next = button("Sau →", "quiet", () -> proximityHistory(page + 1));
+        next.setDisable(true);
         var count = text("Đang tải…", "muted");
-        var layout = new BorderPane(table); layout.setTop(heading); layout.setBottom(column(12, text("Chỉ hiển thị kết quả đã lưu trên Server.", "muted"), row(12, count, space(), previous, next, show))); app.showManagement("Lịch sử", layout);
-        app.call("HISTORY_LIST", object().put("page", page).put("page_size", 10), response -> { if (layout.getScene() == null) return; var rows = new ArrayList<JsonNode>(); response.path("items").forEach(rows::add); table.setItems(FXCollections.observableArrayList(rows)); table.setPlaceholder(text("Chưa có ván thi đã lưu", "muted")); count.setText(response.path("total").asInt() + " ván · Trang " + page); next.setDisable(!response.path("has_more").asBoolean()); });
+        var layout = new BorderPane(table);
+        layout.setTop(heading);
+        layout.setBottom(row(12, count, space(), previous, next, viewScore, viewDetail));
+        app.showManagement("Lịch sử", layout);
+
+        app.call("PROXIMITY_HISTORY_LIST", object().put("page", page).put("page_size", 10), response -> {
+            if (layout.getScene() == null) return;
+            var rows = new ArrayList<JsonNode>();
+            response.path("items").forEach(rows::add);
+            table.setItems(FXCollections.observableArrayList(rows));
+            table.setPlaceholder(text("Chưa có nhật ký giám sát", "muted"));
+            count.setText(response.path("total").asInt() + " lượt chơi · Trang " + page);
+            next.setDisable(!response.path("has_more").asBoolean());
+        });
     }
     void password(boolean required) {
         var old = new PasswordField(); var fresh = new PasswordField(); var repeat = new PasswordField(); var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);

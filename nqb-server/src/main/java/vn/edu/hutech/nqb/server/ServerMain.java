@@ -39,6 +39,10 @@ public final class ServerMain {
         var done=new CountDownLatch(1);Runtime.getRuntime().addShutdownHook(new Thread(()->{server.close();done.countDown();},"server-shutdown"));
         server.start();System.out.println("NQB_SERVER_READY TLS "+config.bind()+":"+server.port()+" | SQLite: "+config.database());
         System.out.println("LAN Discovery UDP "+server.discoveryPort());
+        try {for(var link:vn.edu.hutech.nqb.shared.LanNetworks.current()) {
+            System.out.println("LAN_INTERFACE "+link.name()+" | "+link.address().getHostAddress()+"/"+link.prefixLength());
+        }} catch(java.net.SocketException unavailable){System.out.println("LAN_INTERFACE: Khong doc duoc danh sach card mang; Server van dang chay.");}
+        if(config.bind().equals("0.0.0.0"))System.out.println("LAN_AUTO: Client tu tim Server; khong can doi IP khi chuyen diem phat.");
         System.out.println("Chỉ dùng trong LAN; không forward cổng Internet. Ctrl+C để dừng.");done.await();
     }
     private static char[] secret(String environment,String prompt){String value=System.getenv(environment);if(value!=null&&!value.isEmpty())return value.toCharArray();var console=System.console();if(console!=null){char[] chars=console.readPassword(prompt);if(chars!=null&&chars.length>0)return chars;}throw new IllegalStateException("Thiếu secret "+environment+". Dùng script khởi chạy để nhập an toàn.");}

@@ -40,8 +40,16 @@ public final class ArcadeApplication extends Application {
     private record OpenedConnection(LanEntryPane.Target target,TlsQuizGateway gateway) { }
     private JsonNode user = object(), room = object(), question = object(), result = object();
     private String role = "", route = "", session = "", nickname = "";
+    private long answerElapsedMs=-1;
+    private int answerStreak;
+    private Label answerTimingLabel,answerStreakLabel;
     private volatile int connectionGeneration;
-    private int bankPage = 1, userPage = 1, historyPage = 1;
+    private record ProximityContext(int epoch, String sessionId) { }
+    private volatile ProximityContext proximityContext = new ProximityContext(1, "");
+    private boolean wifiReadPending;
+    private final Set<Dialog<?>> proximityDialogs = new HashSet<>();
+    private int bankPage = 1, userPage = 1, historyPage = 1,bankQuestionSet;
+    private final Set<Integer> bankSelectedQuestions=new LinkedHashSet<>();
     private String bankKeyword = "", bankCategory = "Tất cả chủ đề", bankStatus = "Tất cả trạng thái", bankSort = "Mới cập nhật";
     private String userKeyword = "", userStatus = "Tất cả trạng thái";
     private AnswerState answer;
@@ -65,10 +73,22 @@ public final class ArcadeApplication extends Application {
     private FlowPane avatarGrid;
     private Label avatarError;
     private boolean avatarPending, chooseAvatarAfterJoin;
+    private ProximityClientService proximityClient = new ProximityClientService();
+    private ProximityViews.LiveMonitorWindow monitorWindow;
+    private JsonNode proximitySnapshot = object();
+    private long measurementSnapshotAt;
+    private LanTopologyView lobbyTopology,projectionTopology;
+    private boolean proximityReportingActive;
+    private static SingleClientInstance clientInstance;
 
     public static void launchFor(String entry, String[] arguments) {
         var values = new ArrayList<String>(); values.add("--entry=" + entry); values.addAll(List.of(arguments));
-        Application.launch(ArcadeApplication.class, values.toArray(String[]::new));
+        if(qaDriver!=null){Application.launch(ArcadeApplication.class,values.toArray(String[]::new));}
+        else try(var instance=SingleClientInstance.acquire(SingleClientInstance.defaultDirectory())){
+            if(!instance.isPrimary())return;
+            clientInstance=instance;
+            Application.launch(ArcadeApplication.class,values.toArray(String[]::new));
+        }catch(java.io.IOException failure){throw new IllegalStateException(failure.getMessage(),failure);}finally{clientInstance=null;}
         if (qaFailure != null) throw new IllegalStateException("JavaFX UI QA failed", qaFailure);
     }
     @Override public void start(Stage stage) {
@@ -97,17 +117,56 @@ public final class ArcadeApplication extends Application {
             }
         });
         welcome(); stage.show();
+        if(clientInstance!=null)clientInstance.onActivation(()->Platform.runLater(this::activateExistingWindow));
         if (qaDriver != null) qaDriver.accept(this);
     }
-    @Override public void stop() { if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); }
-    private void closeGateway() { music.stop(); connectionGeneration++; if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
+    private void activateExistingWindow(){
+        stage.setIconified(false);if(!stage.isShowing())stage.show();stage.toFront();stage.requestFocus();
+        for(Window window:new ArrayList<>(Window.getWindows()))if(window instanceof Stage modal&&modal.isShowing()&&modal.getModality()!=Modality.NONE){
+            Window owner=modal.getOwner();while(owner instanceof Stage parent&&owner!=stage)owner=parent.getOwner();
+            if(owner==stage){modal.setIconified(false);modal.toFront();modal.requestFocus();}
+        }
+    }
+    @Override public void stop() { if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); proximityClient.close(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); if (monitorWindow != null) monitorWindow.close(); }
+    private void closeGateway() { music.stop(); if(monitorWindow!=null){monitorWindow.close();monitorWindow=null;}lobbyTopology=null;projectionTopology=null;proximitySnapshot=object();measurementSnapshotAt=0; answerElapsedMs=-1;answerStreak=0;updateAnswerMeta();connectionGeneration++; wifiReadPending=false; closeProximityDialogs(); proximityContext=new ProximityContext(1,""); proximityReportingActive = false; proximityClient.stopSession(); if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
+
+    void trackProximityDialog(Dialog<?> dialog) {
+        proximityDialogs.add(dialog);
+        dialog.showingProperty().addListener((o, was, showing) -> { if (!showing) proximityDialogs.remove(dialog); });
+    }
+    private void closeProximityDialogs() { for(var dialog : List.copyOf(proximityDialogs)) dialog.close(); proximityDialogs.clear(); }
+
+    void readWifi(Consumer<WifiSignalProvider.Reading> complete) {
+        if (wifiReadPending || disconnected) return;
+        wifiReadPending=true;
+        int token=connectionGeneration;
+        proximityClient.readNowAsync().whenComplete((reading,error)->Platform.runLater(()->{
+            if(token!=connectionGeneration)return;
+            wifiReadPending=false;
+            if(error==null&&!disconnected)complete.accept(reading);
+        }));
+    }
+
+    private void updateProximityContext(JsonNode state) {
+        if (!state.has("phase") || !state.has("proximity")) return;
+        int epoch=state.path("proximity").path("config_epoch").asInt(1);
+        if(epoch!=proximityContext.epoch())closeProximityDialogs();
+        String current=List.of("COUNTDOWN","QUESTION_ACTIVE","SHOW_RESULT","SHOW_RANKING").contains(state.path("phase").asText())
+            ?state.path("session_id").asText(""):"";
+        proximityContext=new ProximityContext(epoch,current);
+        if(proximityReportingActive&&!state.path("proximity").path("enabled").asBoolean()
+                &&!state.path("proximity").path("ap_tracking_supported").asBoolean()) {
+            proximityReportingActive=false; proximityClient.stopSession();
+        }
+    }
     private void welcome() {
         if (pulse != null) pulse.stop();
         if (projection != null) projection.close();
-        closeGateway(); user = object(); room = object(); question = object(); result = object();
+        if (monitorWindow != null) monitorWindow.close();
+        closeGateway(); user = object(); room = object(); question = object(); result = object(); proximitySnapshot = object();
         answer = null; session = ""; nickname = ""; role = ""; route = ""; passwordRequired = false;
         disconnected = false; chooseAvatarAfterJoin = false;
-        bankPage = userPage = historyPage = 1; bankKeyword = userKeyword = "";
+        bankPage = userPage = historyPage = 1;bankQuestionSet=0;bankSelectedQuestions.clear(); bankKeyword = userKeyword = "";
         bankCategory = "Tất cả chủ đề"; bankStatus = userStatus = "Tất cả trạng thái"; bankSort = "Mới cập nhật";
         previousRanking = object().putArray("ranking"); currentRanking = object().putArray("ranking"); rankedQuestion = -1;
         connectionLabel.setText("Chưa kết nối"); connectionLabel.setTooltip(null); navButtons.clear();
@@ -198,7 +257,7 @@ public final class ArcadeApplication extends Application {
                     password.clear(); confirmation.clear();
                     role = selectedRole.equals("STUDENT") ? "STUDENT" : response.path("role").asText();
                     if (!List.of("STUDENT", "TEACHER", "ADMIN").contains(role) || !role.equals(selectedRole)) { closeGateway(); showError(error, "Tài khoản không thuộc vai trò đã chọn. Hãy chọn đúng vai trò để đăng nhập."); connect.setDisable(false); connect.setText("Đăng nhập   →"); return; }
-                    user = response; nickname = selectedRole.equals("STUDENT") ? username : nickname;
+                    user = response;bankSelectedQuestions.clear();bankQuestionSet=0; nickname = selectedRole.equals("STUDENT") ? username : nickname;
                     sfx.configure(role, qa); music.configure(role, qa); sfx.play(SfxSlots.Cue.CONNECTION_UP);
                     chooseAvatarAfterJoin = selectedRole.equals("STUDENT");
                     passwordRequired = response.path("must_change_password").asBoolean();
@@ -228,7 +287,15 @@ public final class ArcadeApplication extends Application {
         root.setCenter(workspace); root.setBottom(null); root.setLeft(null); root.getStyleClass().removeAll("game", "welcome");
         feedback.setVisible(false); feedback.setManaged(false);
         var top = column(0);
-        var toolbar = row(16, text(role.equals("STUDENT") ? nickname : role.equals("ADMIN") ? "Quản trị" : "Giảng viên", "brand"), space(), connectionLabel, button("Tùy chọn", "quiet", this::settings));
+        var name=text(role.equals("STUDENT") ? nickname : role.equals("ADMIN") ? "Quản trị" : "Giảng viên", "brand");
+        name.setWrapText(false);name.setMaxWidth(290);name.setTooltip(new Tooltip(name.getText()));
+        var identity=row(10,name);answerTimingLabel=null;answerStreakLabel=null;
+        if(role.equals("STUDENT")){
+            answerTimingLabel=text("","answer-meta");answerTimingLabel.setId("answer-time");answerTimingLabel.setMinWidth(Region.USE_PREF_SIZE);
+            answerStreakLabel=text("","answer-streak");answerStreakLabel.setId("answer-streak");answerStreakLabel.setMinWidth(Region.USE_PREF_SIZE);
+            identity.getChildren().addAll(answerTimingLabel,answerStreakLabel);updateAnswerMeta();
+        }
+        var toolbar = row(16, identity, space(), connectionLabel, button("Tùy chọn", "quiet", this::settings));
         toolbar.setPadding(new Insets(14, 24, 14, 24)); top.getChildren().addAll(toolbar, feedback); root.setTop(top);
         workspace.setPadding(new Insets(20, 28, 20, 28));
         if (!role.equals("STUDENT") && !passwordRequired) {
@@ -253,7 +320,7 @@ public final class ArcadeApplication extends Application {
     void call(String type, ObjectNode payload, Consumer<JsonNode> success, Consumer<Throwable> failure) {
         if (gateway == null || disconnected) { failure.accept(new GatewayException("DISCONNECTED", "Chưa kết nối. Hãy kết nối lại.", object())); return; }
         int token = connectionGeneration;
-        gateway.request(type, payload).whenComplete((value, error) -> Platform.runLater(() -> { if (token != connectionGeneration) return; if (error != null) failure.accept(unwrap(error)); else success.accept(value); }));
+        gateway.request(type, payload).whenComplete((value, error) -> Platform.runLater(() -> { if (token != connectionGeneration) return; if (error != null) failure.accept(unwrap(error)); else { updateProximityContext(value); success.accept(value); } }));
     }
     private static Throwable unwrap(Throwable error) { while (error instanceof CompletionException && error.getCause() != null) error = error.getCause(); return error; }
     static String message(Throwable error) { error = unwrap(error); return error.getMessage() == null ? "Không hoàn thành yêu cầu. Hãy thử lại." : error.getMessage(); }
@@ -280,6 +347,13 @@ public final class ArcadeApplication extends Application {
     void historyView() { new ManagementViews(this).history(historyPage); }
     void setHistoryPage(int page) { historyPage = page; }
     void setBankFilter(String keyword, String category, String status, String sort, int page) { bankKeyword = keyword; bankCategory = category; bankStatus = status; bankSort = sort; bankPage = page; }
+    int bankQuestionSet(){return bankQuestionSet;}
+    void setBankQuestionSet(int id){bankQuestionSet=id;bankPage=1;}
+    List<Integer> bankSelectedQuestions(){return List.copyOf(bankSelectedQuestions);}
+    boolean bankQuestionSelected(int id){return bankSelectedQuestions.contains(id);}
+    void updateBankSelection(Collection<Integer> pageIds,Collection<Integer> selectedIds){bankSelectedQuestions.removeAll(pageIds);bankSelectedQuestions.addAll(selectedIds);}
+    void clearBankSelection(){bankSelectedQuestions.clear();}
+    void removeBankSelection(int id){bankSelectedQuestions.remove(id);}
     void setUserFilter(String keyword, String status, int page) { userKeyword = keyword; userStatus = status; userPage = page; }
     boolean editsAllowed() { return canEdit(); }
     Stage ownerStage() { return stage; }
@@ -309,14 +383,52 @@ public final class ArcadeApplication extends Application {
         boolean student = role.equals("STUDENT");
         if (student) root.getStyleClass().add("game");
         var header = row(12, text(student ? "Phòng chờ" : "Phòng thi", "title"), space());
-        if (!student) header.getChildren().add(button("Trình chiếu ↗", "quiet", this::showProjection));
-        else header.getChildren().add(button("Rời phòng", "quiet", this::logout));
+        if (!student) {
+            var monitorBtn = button("Giám sát", "quiet", this::openProximityMonitor);
+            monitorBtn.setId("open-proximity-monitor");
+            monitorBtn.setDisable(disconnected || room.path("room_code").asText().isBlank() || (!room.path("is_owner").asBoolean() && !role.equals("ADMIN")));
+            header.getChildren().addAll(monitorBtn, button("Trình chiếu ↗", "quiet", this::showProjection));
+        } else header.getChildren().add(button("Rời phòng", "quiet", this::logout));
         var roomCode = text(room.path("room_code").asText().isBlank() ? "— — —" : room.path("room_code").asText(), "room-code");
+        roomCode.setWrapText(false);if(!student)roomCode.setStyle("-fx-font-size: 46px;");
         var codeArea = column(4, text("MÃ PHÒNG", "caption"), roomCode, text(room.path("room_name").asText("Chưa có phòng"), "subtitle"));
-        var configSummary = column(16, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"));
+        JsonNode prox = room.path("proximity");
+        boolean proxEnabled = prox.path("enabled").asBoolean(false);
+        boolean apTracking = prox.path("ap_tracking_supported").asBoolean();
+        if (student && apTracking && !proximityReportingActive) startStudentProximityReporting(null);
+        String proxSummaryText;
+        if (!proxEnabled) {
+            proxSummaryText = "Giám sát khoảng cách: Đang tắt";
+        } else {
+            String bssid = prox.path("anchor_bssid").asText("");
+            String ssid = prox.path("anchor_ssid").asText("");
+            String band = prox.path("anchor_band").asText("");
+            int threshold = prox.path("threshold_meters").asInt(10);
+            String apText = bssid.isBlank() ? "Chưa chọn điểm phát làm mốc" : (ssid.isBlank() ? "Điểm phát đã chọn" : ssid) + " · " + band;
+            proxSummaryText = "Giám sát khoảng cách: Bật · Mốc " + apText + " · Ngưỡng " + threshold + " m (ước lượng)";
+        }
+        var proxSummaryLabel = text(proxSummaryText, "muted");
+        proxSummaryLabel.setId("lobby-proximity-summary");
+        var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"),text(room.path("question_source_name").asText("Toàn bộ ngân hàng"),"caption"),proxSummaryLabel);
+        if (student) {
+            JsonNode selfProx = prox.path("self");
+            String selfStatus = selfProx.path("status_label").asText("Chưa hiệu chuẩn");
+            String selfDist = selfProx.has("estimated_meters") ? " · " + selfProx.path("distance_label").asText("") + " (ước lượng)" : "";
+            var selfLabel = text("Trạng thái máy bạn: " + selfStatus + selfDist, "muted");
+            selfLabel.setId("student-proximity-status");
+            configSummary.getChildren().add(selfLabel);
+            if (apTracking) {
+                var ap = selfProx.path("access_point");
+                var apLabel = text("AP đang kết nối: " + ap.path("ap_label").asText("Đang đọc Wi-Fi…")
+                    + " · " + ap.path("direction_label").asText("Chưa xác định hướng di chuyển"), "muted");
+                apLabel.setId("student-access-point");
+                configSummary.getChildren().add(apLabel);
+            }
+        }
         if (!student) {
             var configure = button(room.path("room_code").asText().isBlank() ? "Tạo phòng" : "Cấu hình phòng", "quiet", this::roomConfig); configure.setDisable(disconnected || (!room.path("room_code").asText().isBlank() && !room.path("is_owner").asBoolean()));
-            configSummary.getChildren().add(row(12, configure, button("Sao chép mã", "quiet", () -> { ClipboardContent clipboard = new ClipboardContent(); clipboard.putString(room.path("room_code").asText()); Clipboard.getSystemClipboard().setContent(clipboard); notice("Đã sao chép mã phòng.", false); })));
+            var copy=button("Sao chép mã", "quiet", () -> { ClipboardContent clipboard = new ClipboardContent(); clipboard.putString(room.path("room_code").asText()); Clipboard.getSystemClipboard().setContent(clipboard); notice("Đã sao chép mã phòng.", false); });
+            configure.setMinWidth(Region.USE_PREF_SIZE);copy.setMinWidth(Region.USE_PREF_SIZE);configSummary.getChildren().add(new FlowPane(10,10,configure,copy));
         }
         var board = new GridPane(); board.setHgap(40); board.add(codeArea, 0, 0); board.add(configSummary, 1, 0); GridPane.setHgrow(configSummary, Priority.ALWAYS); board.getStyleClass().add("room-banner");
         var people = column(10, text("NGƯỜI CHƠI  ·  " + room.path("ready_count").asInt() + "/" + room.path("connected_player_count").asInt() + " sẵn sàng", "caption"));
@@ -328,14 +440,39 @@ public final class ArcadeApplication extends Application {
         }
         people.getChildren().add(tiles);
         var body = column(24, header, board, people); body.setPadding(new Insets(0, 0, 16, 0));
+        lobbyTopology=null;
+        if(!student){
+            lobbyTopology=new LanTopologyView(false,this::showTopologyPlayer);lobbyTopology.update(room,proximitySnapshot);
+            var details=column(18,codeArea,configSummary,new FreshMeasurementButton(this));details.getStyleClass().add("room-details-panel");
+            var dashboard=new AdaptiveColumns(lobbyTopology,details,.68);dashboard.setId("room-dashboard");body.getChildren().setAll(header,dashboard);
+            if(gateway!=null&&!room.path("room_code").asText().isBlank())refreshProximityMonitor();
+        }
         var actions = row(12);
         if (student) {
             boolean ready = false;
             for (JsonNode player : room.path("players")) if (player.path("player_id").asText().equals(user.path("player_id").asText())) ready = player.path("ready").asBoolean();
             final boolean wasReady = ready;
-            readyButton = button(ready ? "Đã sẵn sàng ✓" : "Sẵn sàng   →", "primary", () -> call("READY_SET", object().put("ready", !wasReady), value -> { room = value; if (!wasReady) sfx.play(SfxSlots.Cue.PLAYER_READY); lobby(); }));
+            readyButton = button(ready ? "Đã sẵn sàng ✓" : "Sẵn sàng   →", "primary", () -> studentReadyAction(wasReady));
             var changeAvatar = button("Đổi linh vật", "quiet", this::avatarPicker); changeAvatar.setDisable(ready || disconnected);
             actions.getChildren().addAll(readyButton, changeAvatar);
+            if (proxEnabled || apTracking) {
+                var calibrateBtn = button("Hiệu chuẩn Wi-Fi", "quiet", () -> new ProximityViews(this).openCalibrationFlow(proximityClient, room.path("proximity"), () -> startStudentProximityReporting(null)));
+                calibrateBtn.setId("student-calibrate-btn");
+                calibrateBtn.setDisable(ready || disconnected);
+                var measureBtn = button(proximityReportingActive ? "Đang đo Wi-Fi" : "Bật đo Wi-Fi", "quiet", () -> readWifi(r -> {
+                    if (!r.isConnected()) {
+                        new ProximityViews(this).showDiagnosticDialog(r, prox.path("anchor_ssid").asText(""), prox.path("anchor_bssid").asText(""), prox.path("anchor_band").asText(""), () -> studentReadyAction(false));
+                    } else {
+                        startStudentProximityReporting(null);
+                        notice("Đã bật đo tín hiệu Wi-Fi.", false);
+                        lobby();
+                    }
+                }));
+                measureBtn.setId("student-measure-btn");
+                measureBtn.setDisable(disconnected);
+                if (proxEnabled) actions.getChildren().add(calibrateBtn);
+                actions.getChildren().add(measureBtn);
+            }
         } else {
             boolean owner = room.path("is_owner").asBoolean();
             var start = button("Bắt đầu ván thi   →", "ink-button", () -> call("START_GAME", object(), ignored -> { }));
@@ -345,7 +482,7 @@ public final class ArcadeApplication extends Application {
             actions.getChildren().addAll(start, reset, close);
             if (!owner || room.path("ready_count").asInt() < room.path("connected_player_count").asInt()) body.getChildren().add(text(!owner ? "Phòng đang do giảng viên khác tổ chức." : "Chờ mọi người sẵn sàng.", "muted"));
         }
-        var layout = new BorderPane(scroll(body)); layout.setBottom(actions); navigate("Phòng thi", layout); updateProjection();
+        var layout = new BorderPane(scroll(body)); layout.setBottom(actions); navigate("Phòng thi", layout); updateStudentMeasurementText();updateProjection();
     }
     private void avatarPicker() {
         if (!role.equals("STUDENT") || !room.path("phase").asText().equals("WAITING") || disconnected) return;
@@ -390,41 +527,285 @@ public final class ArcadeApplication extends Application {
         }
         if (focused != null) avatarGrid.getChildren().stream().filter(n -> focused.equals(n.getId()) && !n.isDisabled()).findFirst().ifPresent(Node::requestFocus);
     }
-    private void roomConfig() {
-        TextField name = new TextField(room.path("room_name").asText("Mạng máy tính"));
-        Spinner<Integer> count = new Spinner<>(1, 20, room.path("question_count").asInt(3)); Spinner<Integer> seconds = new Spinner<>(5, 120, room.path("duration_seconds").asInt(15));
+    private void studentReadyAction(boolean wasReady) {
+        if (wasReady) {
+            sendReadySet(false);
+            return;
+        }
+        JsonNode prox = room.path("proximity");
+        if (!prox.path("enabled").asBoolean(false)) {
+            sendReadySet(true);
+            return;
+        }
+        if (prox.path("self").path("ready_eligible").asBoolean(false)) {
+            sendReadySet(true);
+            return;
+        }
+        String anchorSsid = prox.path("anchor_ssid").asText("");
+        String anchorBssid = prox.path("anchor_bssid").asText("");
+        String anchorBand = prox.path("anchor_band").asText("");
+
+        int expectedEpoch=prox.path("config_epoch").asInt();
+        readWifi(reading -> {
+        if(expectedEpoch!=room.path("proximity").path("config_epoch").asInt()||!room.path("phase").asText().equals("WAITING"))return;
+        startStudentProximityReporting(null);
+
+        if (!reading.isConnected() || (!anchorBssid.isBlank() && !reading.matchesAnchor(anchorBssid, anchorBand))) {
+            new ProximityViews(this).showDiagnosticDialog(reading, anchorSsid, anchorBssid, anchorBand, () -> studentReadyAction(false));
+            return;
+        }
+        if (anchorBssid.isBlank() || anchorBand.isBlank()) {
+            notice("Chủ phòng chưa chọn điểm phát làm mốc. Đã gửi thông tin điểm phát của máy bạn để chủ phòng chọn.", true);
+            return;
+        }
+        if (!prox.path("self").path("calibrated").asBoolean(false)) {
+            new ProximityViews(this).openCalibrationFlow(proximityClient, prox, () -> startStudentProximityReporting(() -> sendReadySet(true)));
+            return;
+        }
+        startStudentProximityReporting(() -> sendReadySet(true));
+        });
+    }
+
+    private void sendReadySet(boolean ready) {
+        call("READY_SET", object().put("ready", ready), value -> {
+            room = value;
+            if (ready) sfx.play(SfxSlots.Cue.PLAYER_READY);
+            lobby();
+        });
+    }
+
+    private void startStudentProximityReporting(Runnable onFirstAck) {
+        if (gateway == null || disconnected || !role.equals("STUDENT")) return;
+        proximityReportingActive = true;
+        var firstDone = new java.util.concurrent.atomic.AtomicBoolean(onFirstAck == null);
+        int token = connectionGeneration;
+        java.util.concurrent.atomic.AtomicInteger serviceGeneration = new java.util.concurrent.atomic.AtomicInteger();
+        proximityClient.startReporting(
+            gateway,
+            () -> proximityContext.epoch(),
+            () -> proximityContext.sessionId(),
+            selfNode -> Platform.runLater(() -> {
+                if(token!=connectionGeneration||!proximityReportingActive||serviceGeneration.get()!=proximityClient.currentGeneration()
+                    ||selfNode.path("config_epoch").asInt()!=proximityContext.epoch())return;
+                if (room.path("proximity") instanceof ObjectNode proxObj) {
+                    proxObj.set("self", selfNode);
+                }
+                if (selfNode.path("ready_eligible").asBoolean() && firstDone.compareAndSet(false, true) && onFirstAck != null
+                        && room.path("phase").asText().equals("WAITING")) {
+                    onFirstAck.run();
+                } else if (route.equals("Phòng thi") && room.path("phase").asText().equals("WAITING")) {
+                    lobby();
+                }
+            }),
+            null
+        );
+        serviceGeneration.set(proximityClient.currentGeneration());
+    }
+
+    void openProximityMonitor() {
+        if (role.equals("STUDENT") || gateway == null || disconnected) return;
+        if(!room.path("proximity").path("supported").asBoolean()) { notice("Máy chủ chưa hỗ trợ giám sát Wi-Fi. Hãy cập nhật Server.",true); return; }
+        if (monitorWindow == null) {
+            monitorWindow = new ProximityViews.LiveMonitorWindow(this);
+        }
+        monitorWindow.showAndRefresh();
+    }
+
+    void refreshProximityMonitor() {
+        if (role.equals("STUDENT") || gateway == null || disconnected) return;
+        call("PROXIMITY_GET", object(), snap -> {
+            acceptProximitySnapshot(snap);
+        });
+    }
+    void refreshProximitySamples(){if(!canRefreshMeasurements())return;call("PROXIMITY_REFRESH",object(),this::acceptProximitySnapshot);}
+    long measurementSnapshotAgeMs(){return measurementSnapshotAt==0?0:(System.nanoTime()-measurementSnapshotAt)/1_000_000;}
+    boolean canRefreshMeasurements(){return gateway!=null&&!disconnected&&(role.equals("ADMIN")||room.path("is_owner").asBoolean())&&!room.path("room_code").asText().isBlank()&&room.path("room_code").asText().equals(proximitySnapshot.path("room_code").asText())&&proximitySnapshot.path("topology_supported").asBoolean()&&proximitySnapshot.path("enabled").asBoolean()&&!proximitySnapshot.path("anchor_bssid").asText().isBlank();}
+    JsonNode managedRoomSnapshot(){return room;}
+    private void acceptProximitySnapshot(JsonNode snap){
+        proximitySnapshot=snap;measurementSnapshotAt=System.nanoTime();
+        if(lobbyTopology!=null&&lobbyTopology.getScene()!=null)lobbyTopology.update(room,snap);
+        if(projectionTopology!=null&&projectionTopology.getScene()!=null)projectionTopology.update(room,snap);
+        if(monitorWindow!=null&&monitorWindow.isShowing())monitorWindow.update(snap);
+    }
+    void showTopologyPlayer(String id){openProximityMonitor();if(monitorWindow!=null)monitorWindow.selectPlayer(id);}
+    private String lobbySignature(JsonNode value){var signature=new StringBuilder();for(String key:List.of("room_code","room_name","question_count","duration_seconds","question_source_name"))signature.append(value.path(key));signature.append(value.path("proximity").path("config_epoch")).append(value.path("proximity").path("enabled"));for(var p:value.path("players"))for(String key:List.of("player_id","nickname","avatar_id","ready","connected"))signature.append(p.path(key));return signature.toString();}
+    private void updateStudentMeasurementText(){
+        if(!role.equals("STUDENT")||!(scene.lookup("#student-proximity-status") instanceof Label label))return;
+        String ping="— ms";for(var player:room.path("players"))if(player.path("player_id").asText().equals(user.path("player_id").asText())&&player.has("ping_ms"))ping=(player.path("ping_ms").asLong()==0?"<1":player.path("ping_ms").asText())+" ms";
+        var self=room.path("proximity").path("self");label.setText("Máy bạn: "+ping+(self.has("estimated_meters")?" · "+self.path("distance_label").asText():"")+" · "+self.path("status_label").asText("Đang chuẩn bị"));
+        if (scene.lookup("#student-access-point") instanceof Label apLabel) {
+            var ap = self.path("access_point");
+            apLabel.setText("AP đang kết nối: " + ap.path("ap_label").asText("Đang đọc Wi-Fi…")
+                + " · " + ap.path("direction_label").asText("Chưa xác định hướng di chuyển"));
+        }
+    }
+
+    JsonNode latestProximitySnapshot() {
+        return proximitySnapshot;
+    }
+
+    void roomConfig() {
+        String source=room.path("history_session_id").asText();
+        if(source.isEmpty())roomConfig(null,false);
+        else call("HISTORY_GET",object().put("session_id",source),match->roomConfig(match,false));
+    }
+    void roomConfigFromHistory(JsonNode match) {
+        if(!match.path("reuse_available").asBoolean()){notice("Ván này chưa lưu đề để dùng lại.",true);return;}
+        var current=workspace.getCenter();
+        call("ROOM_STATE",object(),value->{
+            if(workspace.getCenter()!=current)return;room=value;
+            if(!List.of("WAITING","FINISHED").contains(room.path("phase").asText())){notice("Hãy kết thúc ván đang chạy trước khi dùng lại đề.",true);return;}
+            if(!room.path("room_code").asText().isEmpty()&&!room.path("is_owner").asBoolean()){notice("Phòng đang do giảng viên khác tổ chức.",true);return;}
+            roomConfig(match,true);
+        });
+    }
+    private void roomConfig(JsonNode historical,boolean fromHistory) {
+        boolean creatingNew = room.path("room_code").asText().isBlank();
+        JsonNode prox = room.path("proximity");
+        JsonNode defaults=fromHistory?historical:room;
+        String initialName=defaults.path("room_name").asText();
+        TextField name = new TextField(initialName.isBlank()?"Mạng máy tính":initialName);name.setId("room-name");
+        Spinner<Integer> count = new Spinner<>(1, 20, defaults.path("question_count").asInt(3));count.setId("room-question-count");
+        Spinner<Integer> seconds = new Spinner<>(5, 120, defaults.path("duration_seconds").asInt(15));seconds.setId("room-question-seconds");
+        var questionSource=new RoomQuestionSource(this,room,historical,count);
+
+        CheckBox proxEnabled = new CheckBox("Giám sát khoảng cách Wi-Fi (ước lượng)");
+        proxEnabled.setId("room-proximity-enabled");
+        boolean supported=prox.path("supported").asBoolean(false);
+        proxEnabled.setSelected(supported && (creatingNew || prox.path("enabled").asBoolean(false)));
+        proxEnabled.setDisable(!supported);
+
+        Spinner<Integer> threshold = new Spinner<>(
+            vn.edu.hutech.nqb.shared.ProximityRules.MIN_THRESHOLD_METERS,
+            vn.edu.hutech.nqb.shared.ProximityRules.MAX_THRESHOLD_METERS,
+            prox.path("threshold_meters").asInt(vn.edu.hutech.nqb.shared.ProximityRules.DEFAULT_THRESHOLD_METERS)
+        );
+        threshold.setId("room-threshold-spinner");
+
+        ComboBox<ProximityViews.AnchorOption> anchorCombo = new ComboBox<>();
+        anchorCombo.setId("room-anchor-combo");
+        anchorCombo.setMaxWidth(Double.MAX_VALUE);
+        anchorCombo.setPromptText("Chọn điểm phát làm mốc (BSSID và băng tần)");
+
+        Runnable populateAnchors = () -> { if(!supported)return; readWifi(reading -> {
+            if(anchorCombo.getScene()==null||!anchorCombo.getScene().getWindow().isShowing())return;
+            var selected=anchorCombo.getValue();
+            var options = new ProximityViews(this).collectAnchorOptions(reading, prox, proximitySnapshot);
+            anchorCombo.setItems(FXCollections.observableArrayList(options));
+            if (!options.isEmpty()) {
+                String currentBssid = selected==null?prox.path("anchor_bssid").asText(""):selected.bssid();
+                String currentBand = selected==null?prox.path("anchor_band").asText(""):selected.band();
+                ProximityViews.AnchorOption match = options.stream()
+                    .filter(o -> o.bssid().equals(currentBssid) && o.band().equals(currentBand))
+                    .findFirst()
+                    .orElse(options.getFirst());
+                anchorCombo.setValue(match);
+            }
+        }); };
+        populateAnchors.run();
+        if (!creatingNew) {
+            call("PROXIMITY_GET", object(), snap -> {
+                proximitySnapshot = snap;
+                populateAnchors.run();
+            }, ignored -> { });
+        }
+
+        Button rescanBtn = button("Quét lại điểm phát", "quiet", () -> {
+            if (!creatingNew) {
+                call("PROXIMITY_GET", object(), snap -> {
+                    proximitySnapshot = snap;
+                    populateAnchors.run();
+                }, ignored -> populateAnchors.run());
+            } else {
+                populateAnchors.run();
+            }
+        });
+        rescanBtn.setId("room-anchor-rescan");
+
+        CheckBox recalibrateAll = new CheckBox("Hiệu chuẩn lại cả phòng (chọn khi di chuyển điểm phát)");
+        recalibrateAll.setId("room-recalibrate-all");
+        recalibrateAll.setVisible(!creatingNew);
+        recalibrateAll.setManaged(!creatingNew);
+
+        VBox proxSection = column(12, field("Điểm phát làm mốc (BSSID · Băng tần)", anchorCombo), rescanBtn, field("Ngưỡng cảnh báo (mét ước lượng)", threshold), recalibrateAll);
+        proxSection.disableProperty().bind(proxEnabled.selectedProperty().not());
+
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); dialog.setHeaderText("Cấu hình phòng thi"); styleDialog(dialog);
         var error = text("", "feedback", "error"); error.setVisible(false); error.setManaged(false);
-        dialog.getDialogPane().setContent(column(16, field("Tên phòng", name), field("Số câu", count), field("Giây mỗi câu", seconds), text("Server chỉ chọn câu đang bật từ ngân hàng của bạn.", "muted"), error));
+        var form = column(14, field("Tên phòng", name),questionSource,row(16, field("Số câu", count), field("Giây mỗi câu", seconds)), new Separator(), proxEnabled, proxSection,error);
+        dialog.getDialogPane().setContent(scroll(form)); dialog.getDialogPane().setPrefSize(560, 560);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL, ButtonType.OK);
+        ((Button)dialog.getDialogPane().lookupButton(ButtonType.CANCEL)).setText("Hủy");
         Button save = (Button)dialog.getDialogPane().lookupButton(ButtonType.OK); save.setText("Lưu cấu hình"); save.getStyleClass().add("primary");
-        save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> { e.consume(); save.setDisable(true); call("ROOM_CONFIGURE", object().put("room_name", name.getText().strip()).put("question_count", count.getValue()).put("duration_seconds", seconds.getValue()), value -> { dialog.close(); room = value; lobby(); }, failure -> { save.setDisable(false); showError(error, message(failure)); }); });
+        save.addEventFilter(javafx.event.ActionEvent.ACTION, e -> {
+            e.consume();
+            ObjectNode req = object()
+                .put("room_name", name.getText().strip())
+                .put("question_count", count.getValue())
+                .put("duration_seconds", seconds.getValue())
+                .put("proximity_enabled", proxEnabled.isSelected())
+                .put("threshold_meters", threshold.getValue())
+                .put("recalibrate_all", recalibrateAll.isSelected());
+            ProximityViews.AnchorOption chosen = anchorCombo.getValue();
+            if (chosen != null) {
+                req.put("anchor_ssid", chosen.ssid())
+                   .put("anchor_bssid", chosen.bssid())
+                   .put("anchor_band", chosen.band());
+            }
+            try{questionSource.append(req);}catch(IllegalArgumentException invalid){showError(error,invalid.getMessage());return;}
+            save.setDisable(true);
+            call("ROOM_CONFIGURE", req, value -> { dialog.close(); room = value; lobby(); }, failure -> { save.setDisable(false); showError(error, message(failure)); });
+        });
         dialog.show();
+        questionSource.load(dialog::isShowing);
     }
     private void event(JsonNode event) {
         JsonNode p = event.path("payload");
         switch (event.path("type").asText()) {
             case "DISCONNECTED":
                 music.stop();
+                closeProximityDialogs(); wifiReadPending=false;
+                proximityReportingActive = false; proximityClient.stopSession();
                 disconnected = true; if (pulse != null) pulse.stop(); answerButtons.forEach(b -> b.setDisable(true));
                 if (avatarDialog != null) avatarDialog.close();
+                if (monitorWindow != null) monitorWindow.close();
                 connectionLabel.setText("Mất kết nối"); feedback.setText(role.equals("STUDENT") ? "Mất kết nối. Bạn có thể tham gia lại ở ván sau." : "Mất kết nối. Đăng nhập lại để tiếp tục quản lý phòng."); feedback.setManaged(true); feedback.setVisible(true); sfx.play(SfxSlots.Cue.CONNECTION_DOWN);
                 root.setBottom(button("Kết nối lại", "quiet", () -> auth(role)));
                 if (projection != null) projection.close(); break;
+            case "PROXIMITY_UPDATE":
+                acceptProximitySnapshot(p);
+                break;
+            case "PROXIMITY_REFRESH_REQUEST":
+                if(role.equals("STUDENT")&&gateway!=null&&p.path("room_code").asText().equals(room.path("room_code").asText())){
+                    int token=connectionGeneration;
+                    proximityClient.requestFreshSamples(gateway,p.path("refresh_id").asText(),p.path("config_epoch").asInt(),p.path("session_id").asText(),()->proximityContext.epoch(),()->proximityContext.sessionId(),self->Platform.runLater(()->{if(token==connectionGeneration&&room.path("proximity") instanceof ObjectNode data)data.set("self",self);}));
+                }
+                break;
             case "ROOM_CLOSED":
                 welcome(); root.setBottom(text(p.path("message").asText("Phòng thi đã đóng."), "subtitle")); sfx.play(SfxSlots.Cue.CONNECTION_DOWN); break;
             case "ROOM_STATE":
+                updateProximityContext(p);
+                boolean rebuildLobby=!lobbySignature(room).equals(lobbySignature(p));
                 if (p.path("phase").asText().equals("WAITING") && room.path("phase").asText().equals("WAITING")) {
                     if (p.path("players").size() > room.path("players").size()) sfx.play(SfxSlots.Cue.PLAYER_JOIN);
                     else if (p.path("ready_count").asInt() > room.path("ready_count").asInt()) sfx.play(SfxSlots.Cue.PLAYER_READY);
                 }
                 room = p;
+                if(role.equals("STUDENT")){
+                    for(var player:p.path("players"))if(player.path("player_id").asText().equals(user.path("player_id").asText())){
+                        answerElapsedMs=player.path("answer_elapsed_ms").asLong(-1);answerStreak=player.path("streak").asInt();break;
+                    }
+                    updateAnswerMeta();
+                }
                 if (avatarDialog != null && avatarDialog.isShowing()) { if (!room.path("phase").asText().equals("WAITING")) avatarDialog.close(); else refreshAvatars(); }
-                if ((route.equals("Phòng thi") || route.equals("GAME")) && room.path("phase").asText().equals("WAITING")) { if (pulse != null) pulse.stop(); answer = null; question = object(); result = object(); session = ""; lobby(); }
+                if ((route.equals("Phòng thi") || route.equals("GAME")) && room.path("phase").asText().equals("WAITING")) { if (pulse != null) pulse.stop(); answer = null; question = object(); result = object(); session = ""; if(rebuildLobby||!route.equals("Phòng thi"))lobby();else{if(lobbyTopology!=null)lobbyTopology.update(room,proximitySnapshot);updateStudentMeasurementText();} }
                 else if (progressLabel != null) progressLabel.setText(p.path("answered_count").asInt() + "/" + p.path("connected_player_count").asInt() + " đã nộp");
                 syncMusic();
                 break;
             case "GAME_START":
+                answerElapsedMs=-1;answerStreak=0;updateAnswerMeta();
+                closeProximityDialogs();
+                proximityContext=new ProximityContext(proximityContext.epoch(),p.path("session_id").asText());
                 currentRanking = object().putArray("ranking"); previousRanking = currentRanking; rankedQuestion = -1;
                 if (avatarDialog != null) avatarDialog.close();
                 session = p.path("session_id").asText(); room = ((ObjectNode)room).put("phase", "COUNTDOWN"); phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(3000) * 1_000_000L; question = object(); result = object(); answer = null; gameView(); startPulse(); break;
@@ -432,11 +813,13 @@ public final class ArcadeApplication extends Application {
                 if (!session.isEmpty() && !session.equals(p.path("session_id").asText(session))) return;
                 if (question.path("question_id").asLong(-1) == p.path("question_id").asLong() && question.path("session_id").asText().equals(session)) return;
                 session = p.path("session_id").asText(session); question = p; result = object(); room = ((ObjectNode)room).put("phase", "QUESTION_ACTIVE");
+                answerElapsedMs=-1;updateAnswerMeta();
                 answer = new AnswerState(p.path("question_id").asLong(), p.path("remaining_ms").asLong(), System.nanoTime()); gameView(); startPulse(); sfx.event(SfxSlots.Cue.ROUND_OPEN, session, answer.questionId()); break;
             case "QUESTION_RESULT":
                 if (!p.path("session_id").asText(session).equals(session) || p.path("question_id").asLong() != question.path("question_id").asLong()) return;
                 if (!room.path("phase").asText().equals("QUESTION_ACTIVE")) return;
                 result = p; room = ((ObjectNode)room).put("phase", "SHOW_RESULT"); phaseDeadline = System.nanoTime() + p.path("remaining_ms").asLong(3000) * 1_000_000L;
+                if(role.equals("STUDENT")){answerElapsedMs=p.path("answer_elapsed_ms").asLong(-1);answerStreak=p.path("streak").asInt();updateAnswerMeta();}
                 gameView(); startPulse(); sfx.event(role.equals("STUDENT") ? (p.path("correct").asBoolean() ? SfxSlots.Cue.ANSWER_CORRECT : SfxSlots.Cue.ANSWER_WRONG) : SfxSlots.Cue.ROUND_CLOSE, session, p.path("question_id").asLong()); break;
             case "ROUND_RANKING":
                 if (!p.path("session_id").asText().equals(session) || p.path("question_id").asLong() != question.path("question_id").asLong() || rankedQuestion == p.path("question_id").asLong()) return;
@@ -446,9 +829,11 @@ public final class ArcadeApplication extends Application {
                 gameView(); startPulse(); break;
             case "GAME_OVER":
                 if (!p.path("session_id").asText(session).equals(session)) return;
+                proximityContext=new ProximityContext(proximityContext.epoch(),"");
                 result = p; room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); sfx.stopPlaying(); gameView(); if (!music.enabled()) sfx.event(SfxSlots.Cue.MATCH_FINISH, session, 0); break;
             case "GAME_ABORTED":
                 if (!p.path("session_id").asText(session).equals(session)) return;
+                proximityContext=new ProximityContext(proximityContext.epoch(),"");
                 result = object().put("aborted", true); room = ((ObjectNode)room).put("phase", "FINISHED"); if (pulse != null) pulse.stop(); gameView(); break;
             default: break;
         }
@@ -471,6 +856,13 @@ public final class ArcadeApplication extends Application {
             answerButtons.forEach(b -> b.setDisable(answer.status() != AnswerState.Status.OPEN || disconnected));
         }
     }
+    private void updateAnswerMeta() {
+        if(answerTimingLabel==null)return;
+        answerTimingLabel.setText(AnswerMeta.time(answerElapsedMs));answerTimingLabel.setVisible(answerElapsedMs>=0);answerTimingLabel.setManaged(answerElapsedMs>=0);
+        answerTimingLabel.setAccessibleText(answerElapsedMs>=0?"Thời gian trả lời "+AnswerMeta.time(answerElapsedMs):"");
+        answerStreakLabel.setText(AnswerMeta.streak(answerStreak));answerStreakLabel.setVisible(answerStreak>=2);answerStreakLabel.setManaged(answerStreak>=2);
+        answerStreakLabel.setAccessibleText("Chuỗi "+answerStreak+" câu trả lời đúng liên tiếp");
+    }
     private void submitAnswer(String choice) {
         if (answer == null || disconnected || !answer.submit(choice, System.nanoTime())) return;
         long id = answer.questionId(); String capturedSession = session;
@@ -483,7 +875,7 @@ public final class ArcadeApplication extends Application {
         }
         tick();
         call("ANSWER", object().put("session_id", session).put("question_id", id).put("answer", choice).put("room_code", room.path("room_code").asText()), response -> {
-            if (answer != null && answer.questionId() == id && session.equals(capturedSession)) { answer.acknowledge(response.path("question_id").asLong(id), response.path("accepted").asBoolean()); tick(); if (answer.status() == AnswerState.Status.RECORDED) sfx.event(SfxSlots.Cue.ANSWER_ACK, session, id); }
+            if (answer != null && answer.questionId() == id && session.equals(capturedSession)) { answer.acknowledge(response.path("question_id").asLong(id), response.path("accepted").asBoolean()); tick(); if (answer.status() == AnswerState.Status.RECORDED) {answerElapsedMs=response.path("answer_elapsed_ms").asLong(-1);updateAnswerMeta();sfx.event(SfxSlots.Cue.ANSWER_ACK, session, id);} }
         }, error -> { if (answer != null && answer.questionId() == id && session.equals(capturedSession)) { answer.acknowledge(id, false); tick(); notice("Chưa xác nhận được đáp án. Không tự gửi lại một lựa chọn khác.", true); } });
     }
     void gameView() {
@@ -499,7 +891,12 @@ public final class ArcadeApplication extends Application {
     private Node deck(boolean publicView) {
         String phase = room.path("phase").asText();
         var heading = row(16, text("QUIZ BATTLE", "brand"), text(room.path("room_code").asText(), "status"), space(), text(phase.equals("FINISHED") ? "CHUNG CUỘC" : "CÂU " + question.path("number").asInt(result.path("number").asInt()) + "/" + room.path("question_count").asInt(3), "caption"));
-        if (!publicView && !role.equals("STUDENT") && !phase.equals("FINISHED")) heading.getChildren().add(button("Hủy ván", "danger", () -> { if (confirm("Hủy ván?", "Ván bị hủy không tạo kết quả hoàn thành.")) call("ABORT_GAME", object(), ignored -> { }); }));
+        if (!publicView && !role.equals("STUDENT")) {
+            var monitorBtn = button("Giám sát", "quiet", this::openProximityMonitor);
+            monitorBtn.setId("game-proximity-monitor");
+            heading.getChildren().add(monitorBtn);
+            if (!phase.equals("FINISHED")) heading.getChildren().add(button("Hủy ván", "danger", () -> { if (confirm("Hủy ván?", "Ván bị hủy không tạo kết quả hoàn thành.")) call("ABORT_GAME", object(), ignored -> { }); }));
+        }
         var body = column(20, heading); body.setPadding(new Insets(publicView ? 36 : 12));
         if (phase.equals("COUNTDOWN")) {
             var number = text("3", "score"); number.setStyle("-fx-font-size: 112px;");
@@ -551,6 +948,7 @@ public final class ArcadeApplication extends Application {
             if (!publicView && role.equals("STUDENT")) {
                 String ownAvatar = "quizling-1"; for (JsonNode p : result.path("ranking")) if (p.path("player_id").asText().equals(user.path("player_id").asText())) ownAvatar = p.path("avatar_id").asText();
                 reveal.getChildren().addAll(QuizlingArt.avatar(ownAvatar, 120), text(result.path("correct").asBoolean() ? "Chính xác!" : "Tiếc quá!", "game-title"), text("+" + result.path("points").asInt() + " điểm", "score"));
+                if(result.path("correct").asBoolean())reveal.getChildren().add(text("Tốc độ +"+result.path("speed_bonus").asInt()+(result.path("streak").asInt()>=2?"  ·  "+AnswerMeta.streak(result.path("streak").asInt())+" +"+result.path("streak_bonus").asInt():""),"caption"));
             }
             reveal.getChildren().addAll(text("Đáp án " + correct, "caption"), text(question.path("option_" + correct.toLowerCase(Locale.ROOT)).asText(correct), "subtitle"));
             body.getChildren().add(reveal);
@@ -565,17 +963,15 @@ public final class ArcadeApplication extends Application {
                 boolean first=!session.equals(publicView?celebratedProjectionSession:celebratedClientSession);
                 if(first&&!publicView)Platform.runLater(()->{if(finalTitle.getScene()!=null)finalTitle.requestFocus();});
                 if(publicView)celebratedProjectionSession=session;else celebratedClientSession=session;
-                var podium=new VictoryPodium(result.path("ranking"),!publicView&&scene.getHeight()<720,reducedMotion||!first);
-                var stage=new StackPane(podium);stage.setAlignment(Pos.BOTTOM_CENTER);body.getChildren().add(stage);
+                body.getChildren().add(ResultsLayout.create(result.path("ranking"),!publicView&&role.equals("STUDENT")?user.path("player_id").asText():"",!publicView&&scene.getHeight()<720,reducedMotion||!first,"final-ranking"));
             }
             if (!publicView) {
                 if (!result.path("result_saved").asBoolean() && !result.path("aborted").asBoolean()) body.getChildren().add(text("Chưa lưu được kết quả. Hãy báo giảng viên.", "feedback", "error"));
                 if (!role.equals("STUDENT")) body.getChildren().add(row(12, button("Chơi ván mới", "primary", () -> call("ROOM_RESET", object(), value -> { room = value; lobby(); })), button("Đóng phòng", "quiet", () -> call("ROOM_CLOSE", object(), value -> { room = value; lobby(); }))));
                 else body.getChildren().add(button("Rời phòng", "primary", this::logout));
             }
-            if(!result.path("aborted").asBoolean())body.getChildren().addAll(text("Bảng xếp hạng chung cuộc","subtitle"),ranking(result.path("ranking"),publicView));
-        } else { body.getChildren().addAll(text("CÙNG THAM GIA", "caption"), text(room.path("room_code").asText("— — —"), "room-code"), text(room.path("room_name").asText("Chưa có phòng"), "game-title")); for (JsonNode player : room.path("players")) body.getChildren().add(text(player.path("nickname").asText() + "  ·  " + (player.path("ready").asBoolean() ? "Sẵn sàng" : "Đang chuẩn bị"), "subtitle")); }
-        if (List.of("SHOW_RANKING", "FINISHED").contains(phase)) { body.setMaxWidth(1060); var centered = new StackPane(body); centered.setAlignment(Pos.TOP_CENTER); return scroll(centered); }
+        } else { body.getChildren().addAll(text("CÙNG THAM GIA", "caption"), text(room.path("room_code").asText("— — —"), "room-code"), text(room.path("room_name").asText("Chưa có phòng"), "game-title"));projectionTopology=new LanTopologyView(true,null);projectionTopology.update(room,proximitySnapshot);body.getChildren().add(projectionTopology); }
+        if (List.of("SHOW_RANKING", "FINISHED").contains(phase)) { body.setMaxWidth(phase.equals("FINISHED")?1320:1060); var centered = new StackPane(body); centered.setAlignment(Pos.TOP_CENTER); return scroll(centered); }
         return scroll(body);
     }
     private Node ranking(JsonNode values, boolean publicView) {
@@ -637,5 +1033,15 @@ public final class ArcadeApplication extends Application {
         if (node instanceof RankBoard board && !board.settled()) throw new AssertionError("Ranking did not settle");
         if (node instanceof Parent parent) parent.getChildrenUnmodifiable().forEach(this::assertRanksSettled);
     }
-    void qaCloseAuxiliary() { for (Window window : new ArrayList<>(Window.getWindows())) if (window != stage && window.isShowing()) window.hide(); }
+    void qaCloseAuxiliary() {
+        for (Window window : new ArrayList<>(Window.getWindows())) {
+            if (window != stage && (monitorWindow == null || window != monitorWindow.stage()) && window.isShowing()) window.hide();
+        }
+    }
+    void setProximityClientForTest(ProximityClientService service) {
+        if (this.proximityClient != null) this.proximityClient.close();
+        this.proximityClient = service;
+    }
+    ProximityClientService proximityClient() { return proximityClient; }
+    Stage qaMonitorStage() { return monitorWindow != null && monitorWindow.isShowing() ? monitorWindow.stage() : null; }
 }

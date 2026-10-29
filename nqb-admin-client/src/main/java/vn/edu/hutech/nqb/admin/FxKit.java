@@ -13,6 +13,19 @@ import java.util.List;
 final class FxKit {
     static final String CSS = FxKit.class.getResource("/ui/arcade.css").toExternalForm();
     private FxKit() { }
+    static void runWhenShowing(Node node,javafx.animation.Animation animation){
+        var current=new java.util.concurrent.atomic.AtomicReference<javafx.stage.Window>();
+        javafx.beans.value.ChangeListener<Boolean> visible=(o,b,a)->{if(a)animation.play();else animation.stop();};
+        javafx.beans.value.ChangeListener<javafx.stage.Window> window=(o,b,a)->{
+            var old=current.getAndSet(a);if(old!=null)old.showingProperty().removeListener(visible);
+            animation.stop();if(a!=null){a.showingProperty().addListener(visible);if(a.isShowing())animation.play();}
+        };
+        node.sceneProperty().addListener((o,b,a)->{
+            if(b!=null)b.windowProperty().removeListener(window);
+            window.changed(null,current.get(),null);
+            if(a!=null){a.windowProperty().addListener(window);window.changed(null,null,a.getWindow());}
+        });
+    }
     static void loadFonts() {
         for (String name : List.of("Regular", "SemiBold", "ExtraBold")) {
             try (var input = FxKit.class.getResourceAsStream("/ui/fonts/BeVietnamPro-" + name + ".ttf")) {

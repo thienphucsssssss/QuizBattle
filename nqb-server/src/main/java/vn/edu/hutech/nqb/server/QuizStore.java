@@ -18,23 +18,7 @@ public final class QuizStore implements AutoCloseable {
     public QuizStore(Path file) throws Exception {
         Files.createDirectories(file.toAbsolutePath().getParent());
         db=DriverManager.getConnection("jdbc:sqlite:"+file.toAbsolutePath());
-        try (var s=db.createStatement()) {
-            s.execute("PRAGMA foreign_keys=ON"); s.execute("PRAGMA busy_timeout=1000"); s.execute("PRAGMA journal_mode=WAL");
-            int version; try(var r=s.executeQuery("PRAGMA user_version")) { version=r.getInt(1); }
-            if(version!=0 && version!=1) throw new SQLException("Unsupported database version; back up and migrate explicitly");
-            if(version==0) {
-                try(var r=s.executeQuery("SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")) { if(r.getInt(1)>0) throw new SQLException("Unversioned database is not empty; refusing migration"); }
-                db.setAutoCommit(false);
-                try {
-                    s.execute("CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL UNIQUE,normalized_name TEXT NOT NULL,display_name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ADMIN','TEACHER')),salt TEXT NOT NULL,hash TEXT NOT NULL,iterations INTEGER NOT NULL,credential_version INTEGER NOT NULL DEFAULT 1,is_active INTEGER NOT NULL DEFAULT 1,must_change_password INTEGER NOT NULL DEFAULT 1,created_at_utc TEXT NOT NULL)");
-                    s.execute("CREATE TABLE questions(id INTEGER PRIMARY KEY,owner_user_id INTEGER NOT NULL REFERENCES users(id),content TEXT NOT NULL,normalized_content TEXT NOT NULL,option_a TEXT NOT NULL,option_b TEXT NOT NULL,option_c TEXT NOT NULL,option_d TEXT NOT NULL,correct_answer TEXT NOT NULL CHECK(correct_answer IN ('A','B','C','D')),category TEXT NOT NULL,is_active INTEGER NOT NULL,created_at_utc TEXT NOT NULL,updated_at_utc TEXT NOT NULL)");
-                    s.execute("CREATE INDEX questions_owner_content ON questions(owner_user_id,normalized_content)");
-                    s.execute("CREATE TABLE matches(session_id TEXT PRIMARY KEY,host_user_id INTEGER NOT NULL REFERENCES users(id),room_name TEXT NOT NULL,question_count INTEGER NOT NULL,player_count INTEGER NOT NULL,started_at_utc TEXT NOT NULL,ended_at_utc TEXT NOT NULL)");
-                    s.execute("CREATE TABLE match_results(session_id TEXT NOT NULL REFERENCES matches(session_id),player_id TEXT NOT NULL,nickname TEXT NOT NULL,avatar_id TEXT NOT NULL,score INTEGER NOT NULL,correct_count INTEGER NOT NULL,rank INTEGER NOT NULL,connected INTEGER NOT NULL,PRIMARY KEY(session_id,player_id))");
-                    s.execute("PRAGMA user_version=1"); db.commit();
-                } catch(SQLException error) { db.rollback(); throw error; } finally { db.setAutoCommit(true); }
-            }
-        } catch(Exception error) { db.close(); throw error; }
+        try { DatabaseSchema.migrate(db); } catch(Exception error){db.close();throw error;}
     }
     private PreparedStatement statement(String sql,Object... values) throws SQLException {
         var s=db.prepareStatement(sql); for(int i=0;i<values.length;i++) s.setObject(i+1,values[i]); return s;
@@ -83,13 +67,65 @@ public final class QuizStore implements AutoCloseable {
     }
     ObjectNode question(int owner,int id) throws SQLException {try(var s=statement("SELECT * FROM questions WHERE owner_user_id=? AND id=?",owner,id);var r=s.executeQuery()){if(!r.next())throw fail("NOT_FOUND","Không tìm thấy câu hỏi.");return question(r,false);}}
     ObjectNode questions(int owner,JsonNode p) throws SQLException {
-        String sql=" FROM questions WHERE owner_user_id=? AND instr(normalized_content,?)>0";List<Object> args=new ArrayList<>(List.of(owner,TextNormalizer.key(optional(p,"keyword","",2000))));
-        if(p.hasNonNull("category")){sql+=" AND category=?";args.add(text(p,"category",80));}
-        if(p.hasNonNull("is_active")){sql+=" AND is_active=?";args.add(bool(p,"is_active",true));}
+        List<Object> args=new ArrayList<>();String sql=questionFilter(owner,p,args);
         String sort=optional(p,"sort","UPDATED_DESC",20); if(!Set.of("ID_ASC","UPDATED_DESC").contains(sort))throw fail("INVALID_INPUT","Cách sắp xếp không hợp lệ.");
         int page=integer(p,"page",1,1,1_000_000),size=integer(p,"page_size",10,1,20),total=count("SELECT count(*)"+sql,args.toArray());args.add(size);args.add((page-1)*size);var items=array();
         try(var s=statement("SELECT *"+sql+" ORDER BY "+(sort.equals("ID_ASC")?"id ASC":"updated_at_utc DESC,id DESC")+" LIMIT ? OFFSET ?",args.toArray());var r=s.executeQuery()){while(r.next())items.add(question(r,true));}return page(items,page,size,total);
     }
+    private String questionFilter(int owner,JsonNode p,List<Object> args)throws SQLException {
+        args.add(owner);args.add(TextNormalizer.key(optional(p,"keyword","",2000)));
+        String sql=" FROM questions WHERE owner_user_id=? AND instr(normalized_content,?)>0";
+        if(p.hasNonNull("category")){sql+=" AND category=?";args.add(text(p,"category",80));}
+        if(p.hasNonNull("is_active")){sql+=" AND is_active=?";args.add(bool(p,"is_active",true));}
+        int set=integer(p,"question_set_id",0,0,Integer.MAX_VALUE);
+        if(set>0){questionSet(owner,set);sql+=" AND id IN (SELECT question_id FROM question_set_items WHERE set_id=?)";args.add(set);}
+        return sql;
+    }
+    private static final String SET_SELECT="SELECT s.id AS question_set_id,s.name,COUNT(q.id) AS question_count,COALESCE(SUM(CASE WHEN q.is_active=1 THEN 1 ELSE 0 END),0) AS active_count FROM question_sets s LEFT JOIN question_set_items i ON i.set_id=s.id LEFT JOIN questions q ON q.id=i.question_id";
+    private ObjectNode questionSet(ResultSet r)throws SQLException {
+        return obj().put("question_set_id",r.getInt("question_set_id")).put("name",r.getString("name")).put("question_count",r.getInt("question_count")).put("active_count",r.getInt("active_count"));
+    }
+    ObjectNode questionSet(int owner,int id)throws SQLException {
+        try(var s=statement(SET_SELECT+" WHERE s.owner_user_id=? AND s.id=? GROUP BY s.id",owner,id);var r=s.executeQuery()){
+            if(!r.next())throw fail("NOT_FOUND","Không tìm thấy bộ câu hỏi của bạn.");return questionSet(r);
+        }
+    }
+    ObjectNode questionSets(int owner,JsonNode p)throws SQLException {
+        int page=integer(p,"page",1,1,1_000_000),size=integer(p,"page_size",50,1,100);
+        var items=array();
+        try(var s=statement(SET_SELECT+" WHERE s.owner_user_id=? GROUP BY s.id ORDER BY s.normalized_name,s.id LIMIT ? OFFSET ?",owner,size,(page-1)*size);var r=s.executeQuery()){
+            while(r.next())items.add(questionSet(r));
+        }
+        return page(items,page,size,count("SELECT COUNT(*) FROM question_sets WHERE owner_user_id=?",owner));
+    }
+    ObjectNode createQuestionSet(int owner,JsonNode p)throws SQLException {
+        String name=text(p,"name",80);var ids=new ArrayList<Integer>();
+        if(p.has("question_ids")){
+            if(p.has("filters")||!p.path("question_ids").isArray()||p.path("question_ids").isEmpty()||p.path("question_ids").size()>500)throw fail("INVALID_INPUT","Chọn từ 1–500 câu hỏi để tạo bộ.");
+            var seen=new HashSet<Integer>();
+            for(var value:p.path("question_ids")){
+                if(!value.isIntegralNumber()||!value.canConvertToInt()||value.asInt()<=0||!seen.add(value.asInt()))throw fail("INVALID_INPUT","Danh sách câu hỏi không hợp lệ.");
+                question(owner,value.asInt());ids.add(value.asInt());
+            }
+        }else{
+            if(!p.path("filters").isObject())throw fail("INVALID_INPUT","Chọn câu hỏi hoặc bộ lọc để tạo bộ.");
+            List<Object> args=new ArrayList<>();String sql=questionFilter(owner,p.path("filters"),args);
+            try(var s=statement("SELECT id"+sql+" ORDER BY id LIMIT 501",args.toArray());var r=s.executeQuery()){while(r.next())ids.add(r.getInt(1));}
+            if(ids.isEmpty()||ids.size()>500)throw fail("INVALID_INPUT","Bộ lọc cần có từ 1–500 câu hỏi để tạo bộ.");
+        }
+        if(count("SELECT COUNT(*) FROM question_sets WHERE owner_user_id=? AND normalized_name=?",owner,TextNormalizer.key(name))>0)throw fail("QUESTION_SET_EXISTS","Tên bộ câu hỏi đã tồn tại. Chọn tên khác.");
+        db.setAutoCommit(false);
+        try{int id=attachQuestionSet(owner,name,ids);db.commit();return questionSet(owner,id);}catch(SQLException|RuntimeException error){db.rollback();throw error;}finally{db.setAutoCommit(true);}
+    }
+    private int attachQuestionSet(int owner,String name,List<Integer> ids)throws SQLException {
+        int id=0;
+        try(var s=statement("SELECT id FROM question_sets WHERE owner_user_id=? AND normalized_name=?",owner,TextNormalizer.key(name));var r=s.executeQuery()){if(r.next())id=r.getInt(1);}
+        if(id==0){update("INSERT INTO question_sets(owner_user_id,name,normalized_name,created_at_utc) VALUES(?,?,?,?)",owner,name,TextNormalizer.key(name),Instant.now().toString());id=count("SELECT last_insert_rowid()");}
+        if(count("SELECT COUNT(*) FROM question_set_items WHERE set_id=?",id)+ids.size()>500)throw fail("INVALID_INPUT","Mỗi bộ tối đa 500 câu. Hãy tạo bộ mới.");
+        for(int questionId:ids)update("INSERT INTO question_set_items(set_id,question_id) VALUES(?,?)",id,questionId);
+        return id;
+    }
+    void deleteQuestionSet(int owner,int id)throws SQLException {questionSet(owner,id);update("DELETE FROM question_sets WHERE owner_user_id=? AND id=?",owner,id);}
     ObjectNode categories(int owner) throws SQLException {var values=array();try(var s=statement("SELECT DISTINCT category FROM questions WHERE owner_user_id=? ORDER BY category",owner);var r=s.executeQuery()){while(r.next())values.add(r.getString(1));}return obj().set("categories",values);}
     ObjectNode duplicates(int owner,String content,int exclude) throws SQLException {
         if(exclude>0)question(owner,exclude); String key=TextNormalizer.key(content);var items=array();
@@ -109,6 +145,9 @@ public final class QuizStore implements AutoCloseable {
         return question(owner,id);
     }
     ObjectNode importQuestions(int owner,List<JsonNode> selected,boolean allowDuplicates)throws SQLException {
+        return importQuestions(owner,selected,allowDuplicates,"");
+    }
+    ObjectNode importQuestions(int owner,List<JsonNode> selected,boolean allowDuplicates,String setName)throws SQLException {
         if(selected.isEmpty()||selected.size()>500)throw fail("INVALID_INPUT","Số câu nhập không hợp lệ.");
         db.setAutoCommit(false);
         try {
@@ -118,7 +157,12 @@ public final class QuizStore implements AutoCloseable {
                 var row=vn.edu.hutech.nqb.shared.QuestionImportRules.normalize(source).put("allow_duplicate",allowDuplicates);
                 ids.add(saveQuestion(owner,row,false).path("question_id").asInt());
             }
-            db.commit();return obj().put("imported",ids.size()).set("question_ids",ids);
+            var result=obj().put("imported",ids.size());result.set("question_ids",ids);
+            if(!setName.isBlank()){
+                var values=new ArrayList<Integer>();for(var id:ids)values.add(id.asInt());
+                int set=attachQuestionSet(owner,setName,values);result.put("question_set_id",set).put("question_set_name",questionSet(owner,set).path("name").asText());
+            }
+            db.commit();return result;
         }catch(SQLException|RuntimeException failure){db.rollback();throw failure;}finally{db.setAutoCommit(true);}
     }
     void mutateQuestion(int owner,String type,JsonNode p) throws SQLException {
@@ -127,25 +171,59 @@ public final class QuizStore implements AutoCloseable {
         else update("UPDATE questions SET is_active=?,updated_at_utc=? WHERE id=? AND owner_user_id=?",bool(p,"is_active",true),Instant.now().toString(),id,owner);
     }
     List<ObjectNode> gameQuestions(int owner,int amount) throws SQLException {
-        var values=new ArrayList<ObjectNode>();try(var s=statement("SELECT * FROM questions WHERE owner_user_id=? AND is_active=1 ORDER BY random() LIMIT ?",owner,amount);var r=s.executeQuery()){while(r.next())values.add(question(r,false));}
-        if(values.size()!=amount)throw fail("NOT_ENOUGH_QUESTIONS","Ngân hàng chưa đủ câu đang bật.");return List.copyOf(values);
+        return gameQuestions(owner,amount,0);
     }
-    void saveMatch(String session,int owner,String roomName,int questionCount,String started,ArrayNode ranking) throws SQLException {
+    List<ObjectNode> gameQuestions(int owner,int amount,int set) throws SQLException {
+        if(set>0)questionSet(owner,set);
+        var p=obj().put("is_active",true).put("question_set_id",set);List<Object> args=new ArrayList<>();String sql=questionFilter(owner,p,args);args.add(amount);
+        var values=new ArrayList<ObjectNode>();try(var s=statement("SELECT *"+sql+" ORDER BY random() LIMIT ?",args.toArray());var r=s.executeQuery()){while(r.next())values.add(question(r,false));}
+        if(values.size()!=amount)throw fail("NOT_ENOUGH_QUESTIONS",set>0?"Bộ câu hỏi đã chọn chưa đủ câu đang bật. Hãy bật thêm câu hoặc giảm số câu.":"Ngân hàng chưa đủ câu đang bật.");return List.copyOf(values);
+    }
+    void saveMatch(String session,int owner,String roomName,int questionCount,String started,ArrayNode ranking,int durationSeconds,List<ObjectNode> questions) throws SQLException {
+        if(questions.size()!=questionCount)throw new SQLException("Match snapshot must contain every played question");
         db.setAutoCommit(false);
         try {
-            update("INSERT INTO matches VALUES(?,?,?,?,?,?,?)",session,owner,roomName,questionCount,ranking.size(),started,Instant.now().toString());
-            for(var p:ranking)update("INSERT INTO match_results VALUES(?,?,?,?,?,?,?,?)",session,p.path("player_id").asText(),p.path("nickname").asText(),p.path("avatar_id").asText(),p.path("score").asInt(),p.path("correct_count").asInt(),p.path("rank").asInt(),p.path("connected").asBoolean());db.commit();
-        }catch(SQLException failure){db.rollback();throw failure;}finally{db.setAutoCommit(true);}
+            update("INSERT INTO matches(session_id,host_user_id,room_name,question_count,player_count,started_at_utc,ended_at_utc,duration_seconds) VALUES(?,?,?,?,?,?,?,?)",session,owner,roomName,questionCount,ranking.size(),started,Instant.now().toString(),durationSeconds);
+            for(var p:ranking)update("INSERT INTO match_results VALUES(?,?,?,?,?,?,?,?)",session,p.path("player_id").asText(),p.path("nickname").asText(),p.path("avatar_id").asText(),p.path("score").asInt(),p.path("correct_count").asInt(),p.path("rank").asInt(),p.path("connected").asBoolean());
+            for(int i=0;i<questions.size();i++)update("INSERT INTO match_questions(session_id,position,question_json) VALUES(?,?,?)",session,i,questions.get(i).toString());
+            db.commit();
+        }catch(SQLException|RuntimeException failure){db.rollback();throw failure;}finally{db.setAutoCommit(true);}
+    }
+    public int schemaVersion() throws SQLException {try(var s=db.createStatement();var r=s.executeQuery("PRAGMA user_version")){return r.getInt(1);}}
+    private static final String MATCH_SELECT="SELECT m.*,(SELECT COUNT(*) FROM match_questions q WHERE q.session_id=m.session_id) AS saved_question_count,EXISTS(SELECT 1 FROM proximity_sessions p WHERE p.session_id=m.session_id) AS has_proximity FROM matches m";
+    private ObjectNode matchSummary(ResultSet r)throws SQLException {
+        int saved=r.getInt("saved_question_count"),total=r.getInt("question_count");
+        return obj().put("session_id",r.getString("session_id")).put("host_user_id",r.getInt("host_user_id")).put("room_name",r.getString("room_name")).put("question_count",total).put("player_count",r.getInt("player_count")).put("ended_at_utc",r.getString("ended_at_utc")).put("duration_seconds",r.getInt("duration_seconds")).put("saved_question_count",saved).put("reuse_available",saved>0&&saved==total).put("has_proximity",r.getBoolean("has_proximity"));
+    }
+    ObjectNode historyMatch(int owner,String session)throws SQLException {
+        try(var s=statement(MATCH_SELECT+" WHERE m.session_id=? AND m.host_user_id=?",session,owner);var r=s.executeQuery()){
+            if(!r.next())throw fail("NOT_FOUND","Không tìm thấy kết quả.");return matchSummary(r);
+        }
+    }
+    List<ObjectNode> historyQuestions(int owner,String session,int amount)throws SQLException {
+        var match=historyMatch(owner,session);
+        if(!match.path("reuse_available").asBoolean())throw fail("HISTORY_QUESTIONS_UNAVAILABLE","Ván này chưa lưu bộ câu hỏi để dùng lại. Các ván hoàn thành từ bản cập nhật mới sẽ có tính năng này.");
+        if(amount<1||amount>match.path("saved_question_count").asInt())throw fail("NOT_ENOUGH_QUESTIONS","Ván đã lưu chỉ có "+match.path("saved_question_count").asInt()+" câu hỏi. Hãy giảm số câu.");
+        var result=new ArrayList<ObjectNode>();
+        try(var s=statement("SELECT question_json FROM match_questions WHERE session_id=? ORDER BY position LIMIT ?",session,amount);var r=s.executeQuery()){
+            while(r.next())try{var value=JSON.readTree(r.getString(1));if(!(value instanceof ObjectNode question))throw new SQLException("Invalid saved question");result.add(question);}catch(java.io.IOException invalid){throw new SQLException("Cannot read saved question",invalid);}
+        }
+        return List.copyOf(result);
     }
     ObjectNode history(int owner,JsonNode p) throws SQLException {
         int page=integer(p,"page",1,1,1_000_000),size=integer(p,"page_size",10,1,20);var items=array();
-        try(var s=statement("SELECT * FROM matches WHERE host_user_id=? ORDER BY ended_at_utc DESC,session_id LIMIT ? OFFSET ?",owner,size,(page-1)*size);var r=s.executeQuery()){while(r.next())items.add(obj().put("session_id",r.getString("session_id")).put("room_name",r.getString("room_name")).put("question_count",r.getInt("question_count")).put("player_count",r.getInt("player_count")).put("ended_at_utc",r.getString("ended_at_utc")));}
+        try(var s=statement(MATCH_SELECT+" WHERE m.host_user_id=? ORDER BY m.ended_at_utc DESC,m.session_id LIMIT ? OFFSET ?",owner,size,(page-1)*size);var r=s.executeQuery()){while(r.next())items.add(matchSummary(r));}
         return page(items,page,size,count("SELECT count(*) FROM matches WHERE host_user_id=?",owner));
     }
-    ObjectNode historyDetail(int owner,String session) throws SQLException {
-        String name;try(var s=statement("SELECT room_name FROM matches WHERE session_id=? AND host_user_id=?",session,owner);var r=s.executeQuery()){if(!r.next())throw fail("NOT_FOUND","Không tìm thấy kết quả.");name=r.getString(1);}
+    ObjectNode historyDetail(int owner,String session) throws SQLException {return historyDetail(owner,false,session);}
+    ObjectNode historyDetail(int owner,boolean isAdmin,String session) throws SQLException {
+        ObjectNode match;
+        if(isAdmin)try(var s=statement(MATCH_SELECT+" WHERE m.session_id=?",session);var r=s.executeQuery()) {
+            if(!r.next())throw fail("NOT_FOUND","Không tìm thấy kết quả.");match=matchSummary(r);
+            if(match.path("host_user_id").asInt()!=owner)match.put("reuse_available",false);
+        }else match=historyMatch(owner,session);
         var ranks=array();try(var s=statement("SELECT * FROM match_results WHERE session_id=? ORDER BY rank,player_id",session);var r=s.executeQuery()){while(r.next())ranks.add(obj().put("player_id",r.getString("player_id")).put("nickname",r.getString("nickname")).put("avatar_id",r.getString("avatar_id")).put("score",r.getInt("score")).put("correct_count",r.getInt("correct_count")).put("rank",r.getInt("rank")).put("connected",r.getBoolean("connected")));}
-        return obj().put("session_id",session).put("room_name",name).set("ranking",ranks);
+        return match.set("ranking",ranks);
     }
     @Override public void close() throws SQLException { db.close(); }
 }

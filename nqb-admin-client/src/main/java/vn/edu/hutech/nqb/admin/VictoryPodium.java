@@ -41,6 +41,7 @@ final class VictoryPodium extends FlowPane {
         }
         if(columns.isEmpty())getChildren().add(text("Chưa có kết quả xếp hạng.","muted"));
         sceneProperty().addListener((o,before,after)->{if(after==null)settle();else if(!reducedMotion)entrance.playFromStart();});
+        widthProperty().addListener((o,before,after)->{double size=Math.clamp((after.doubleValue()-40)/3,180,220);columns.forEach(c->c.setPrefWidth(size));});
     }
     private static Node medal(int rank,String accessibleName) {
         var badge=new StackPane();badge.setMinSize(40,46);badge.setPrefSize(40,46);badge.setMaxSize(40,46);badge.setMouseTransparent(true);badge.setAccessibleText(accessibleName);
