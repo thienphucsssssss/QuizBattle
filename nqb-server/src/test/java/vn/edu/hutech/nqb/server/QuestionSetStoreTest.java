@@ -35,7 +35,7 @@ class QuestionSetStoreTest {
             assertEquals(123,store.historyDetail(owner,"old-session").path("ranking").get(0).path("score").asInt());
             var p=obj().put("name","Bộ được lưu");p.putArray("question_ids").add(1).add(2);store.createQuestionSet(owner,p);
         }
-        assertEquals(4,version());
+        assertEquals(5,version());
         try(var store=new QuizStore(database())){assertEquals(1,store.questionSets(owner,obj()).path("total").asInt());assertEquals(2,store.questionSets(owner,obj()).path("items").get(0).path("question_count").asInt());}
     }
     @Test void failedMigrationRollsBackNewTablesAndVersion()throws Exception {

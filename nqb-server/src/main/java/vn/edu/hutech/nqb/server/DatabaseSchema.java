@@ -5,7 +5,7 @@ import java.time.Instant;
 
 /** Combines local proximity schema v2 and Viet My's question-set v2/history v3 without version ambiguity. */
 final class DatabaseSchema {
-    static final int VERSION=4;
+    static final int VERSION=5;
     private DatabaseSchema() { }
     static void migrate(Connection db) throws SQLException {
         try(var s=db.createStatement()) {
@@ -40,6 +40,7 @@ final class DatabaseSchema {
                     s.executeQuery("SELECT session_id,position,question_json FROM match_questions LIMIT 0").close();
                     s.executeQuery("SELECT id,owner_user_id,name,normalized_name,created_at_utc FROM question_sets LIMIT 0").close();
                     s.executeQuery("SELECT set_id,question_id FROM question_set_items LIMIT 0").close();
+                    vn.edu.hutech.nqb.shared.SurveyRepository.createSchema(db);
                     s.execute("PRAGMA user_version="+VERSION);db.commit();
                 } catch(SQLException|RuntimeException failure){db.rollback();throw failure;}finally{db.setAutoCommit(true);}
             }

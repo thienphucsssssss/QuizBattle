@@ -18,6 +18,7 @@ public final class QuizServer implements AutoCloseable {
     private final ServerConfig config;
     private final QuizStore store;
     private final ProximityStore proximityStore;
+    private final SurveyRepository surveyStore;
     private final ProximityRoomTracker proximity = new ProximityRoomTracker();
     private final SSLServerSocket listener;
     private final LanDiscoveryServer discovery;
@@ -55,6 +56,7 @@ public final class QuizServer implements AutoCloseable {
     public QuizServer(ServerConfig config,SSLContext tls,QuizStore store) throws Exception {
         this.config=config;this.store=store;connectionSlots=new Semaphore(config.maxConnections());
         proximity.accessPoints.load(config.database());
+        this.surveyStore=new SurveyRepository(config.database(),false);
         this.proximityStore=new ProximityStore(config.database(),128,warning->{
             try{worker.execute(()->{proximity.setPersistenceWarning(warning);emitProximityUpdate();});}catch(Exception ignored){}
         });
@@ -62,7 +64,7 @@ public final class QuizServer implements AutoCloseable {
         try {
             listener.setEnabledProtocols(new String[]{"TLSv1.3","TLSv1.2"});listener.bind(new InetSocketAddress(config.bind(),config.port()));
             discovery=new LanDiscoveryServer(config.bind(),config.discoveryPort(),port());
-        } catch(Exception error){listener.close();proximityStore.close();throw error;}
+        } catch(Exception error){listener.close();proximityStore.close();surveyStore.close();throw error;}
     }
     ProximityRoomTracker proximityTracker(){return proximity;}
     ProximityStore proximityStore(){return proximityStore;}
@@ -89,7 +91,7 @@ public final class QuizServer implements AutoCloseable {
         volatile long lastSeen=connected; volatile boolean handshaken,closeAfterWrite;
         int userId,credentialVersion; String role="",playerId=""; boolean mustChange,authBusy; long rateStart; int rateCount;
         QuestionImportSession questionImport;
-        boolean proximityHistoryBusy;
+        boolean proximityHistoryBusy,surveyBusy;
         Peer(SSLSocket socket){this.socket=socket;}
         void send(ObjectNode data){
             if(gone.get()||closeAfterWrite)return;
@@ -131,6 +133,18 @@ public final class QuizServer implements AutoCloseable {
             if(p.userId==0&&p.playerId.isEmpty())throw fail("AUTH_REQUIRED","Hãy đăng nhập hoặc tham gia phòng.");
             if(type.equals("PASSWORD_CHANGE")){manager(p);changePassword(p,id,payload);return;}
             if(p.mustChange)throw fail("PASSWORD_CHANGE_REQUIRED","Hãy đổi mật khẩu tạm trước khi tiếp tục.");
+            if(type.startsWith("SURVEY_")){
+                manager(p);
+                if(p.surveyBusy)throw fail("SERVER_BUSY","Đang lưu dữ liệu khảo sát. Hãy chờ.");
+                p.surveyBusy=true;
+                surveyStore.handle(String.valueOf(p.userId),type,payload.deepCopy()).whenComplete((value,error)->{
+                    try{worker.execute(()->{p.surveyBusy=false;if(p.gone.get()||p.closeAfterWrite)return;
+                        if(error==null)p.send(envelope(type+"_OK",id,value));
+                        else {Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();
+                            p.send(envelope("ERROR",id,fail(cause instanceof IllegalArgumentException?"SURVEY_INVALID":"SURVEY_STORAGE_ERROR",cause instanceof IllegalArgumentException?cause.getMessage():"Không lưu được khảo sát. Mẫu trên client vẫn được giữ; hãy thử đồng bộ lại.").payload()));}
+                    });}catch(RejectedExecutionException ignored){}
+                });return;
+            }
             if(type.equals("ROOM_STATE")){p.send(envelope("ROOM_STATE_OK",id,state(p,true)));return;}
             if(type.equals("NETWORK_PROBE_REPLY")){var player=student(p);telemetry.reply(player.id,text(payload,"probe_id",80),System.nanoTime());p.send(envelope(type+"_OK",id,obj()));broadcastState();emitProximityUpdate();return;}
             if(type.startsWith("USER_")){admin(p);users(p,id,type,payload);return;}
@@ -267,7 +281,7 @@ public final class QuizServer implements AutoCloseable {
     }
     private ObjectNode publicDirectory()throws SQLException{
         var data=obj().put("server_id",serverId).put("server_name","Quiz Battle · "+serverId.substring(0,4).toUpperCase(Locale.ROOT));
-        data.putArray("capabilities").add(ProximityRules.CAPABILITY).add(ResumeRules.CAPABILITY);
+        data.putArray("capabilities").add(ProximityRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY);
         var rooms=array();
         if(owner!=0){
             int count=players.size(); // Includes temporarily reserved seats.
@@ -413,7 +427,7 @@ public final class QuizServer implements AutoCloseable {
             .put("question_count",questionCount).put("duration_seconds",questionSeconds).put("connected_player_count",connected).put("ready_count",ready).put("answered_count",answered).put("remaining_ms",remaining());
         state.put("question_set_id",questionSetId).put("question_set_name",questionSetName).put("question_source_name",historySessionId.isEmpty()?(questionSetId==0?"Toàn bộ ngân hàng":questionSetName):"Từ lịch sử: "+historyRoomName);
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
-        state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY).add(ResumeRules.CAPABILITY);
+        state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY);
         state.put("scoring_version",AnswerScoring.VERSION);
         state.set("proximity",proximity.buildRoomStateSection(viewer.playerId,running(),System.nanoTime()));
         state.set("players",list);
@@ -512,6 +526,6 @@ public final class QuizServer implements AutoCloseable {
     }
     @Override public void close(){
         if(!closed.compareAndSet(false,true))return;discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();
-        worker.shutdown();try{if(!worker.awaitTermination(5,TimeUnit.SECONDS))worker.shutdownNow();proximityStore.close();store.close();}catch(Exception ignored){}
+        worker.shutdown();try{if(!worker.awaitTermination(5,TimeUnit.SECONDS))worker.shutdownNow();proximityStore.close();surveyStore.close();store.close();}catch(Exception ignored){}
     }
 }

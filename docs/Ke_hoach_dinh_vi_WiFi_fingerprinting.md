@@ -1,6 +1,6 @@
 # Kế hoạch định vị Wi-Fi và giữ phiên khi roaming
 
-Trạng thái: đã triển khai phần mềm đợt A (kết nối máy chủ cụ thể, giữ phiên thí sinh, chẩn đoán quét nhiều BSSID), qua kiểm thử tự động và JavaFX/TLS thật trên cùng máy. Quét native trên HUTECH E1 đã đọc được nhiều BSSID; kết nối Tailscale giữa hai laptop và roaming thực tế còn cần nghiệm thu. Xem [hướng dẫn đợt A](Ket_noi_mang_rieng_va_chan_doan_WiFi.md). Đợt B–D chưa triển khai, cần dữ liệu và nghiệm thu thực địa.
+Trạng thái: đã triển khai phần mềm đợt A và luồng thu/lưu/nhập/xuất/đồng bộ khảo sát đợt B. Xem [hướng dẫn đợt A](Ket_noi_mang_rieng_va_chan_doan_WiFi.md) và [hướng dẫn khảo sát đợt B](Khao_sat_WiFi_fingerprinting.md). Quét native trong đợt A trên HUTECH E1 đã đọc được nhiều BSSID; kết nối Tailscale giữa hai laptop, roaming và bộ khảo sát pilot thật còn cần nghiệm thu. Đợt C–D chưa triển khai; test giả lập không thay thế đánh giá sai số thực địa.
 
 ## Mục tiêu đã thống nhất
 
@@ -22,13 +22,14 @@ BSSID thay đổi chỉ xác nhận đổi kết nối, không chứng minh đã
 
 | Thành phần | Hiện có | Phần cần bổ sung |
 |---|---|---|
-| `WindowsWifiSignalProvider` | JNA/Native Wi-Fi; đọc kết nối và dùng BSS list tra băng tần AP hiện tại | Quét nhiều BSSID, kết quả mới/cũ, thời điểm quét, xử lý driver/quyền |
-| `ProximityClientService` | Worker đọc Wi-Fi, lọc mẫu, báo cáo định kỳ | Điều phối với worker quét, không chồng scan/hiệu chuẩn; dữ liệu fingerprint riêng |
-| `LanDirectory`, `LanEntryPane`, `ClientConnectionProfile` | Dò UDP rồi xác minh TLS; địa chỉ cấu hình hiện bị lọc theo LAN IPv4 | Kết nối trực tiếp địa chỉ mạng riêng, lưu lựa chọn, hiển thị lỗi cụ thể |
-| `TlsQuizGateway`, `QuizServer` | TLS pin khóa công khai; mất socket báo mất kết nối | Kết nối lại có kiểm soát và phục hồi player/phiên bằng token |
-| `AccessPointTracker`, `AccessPointViews` | Danh mục BSSID thủ công, lịch sử đổi AP và hướng theo thứ tự đã nhập | Danh sách BSSID quan sát tự lưu; giữ lịch sử association độc lập định vị |
-| `DatabaseSchema` | SQLite schema phiên bản 4 | Migration thêm khảo sát, mẫu, phiên bản bản đồ và kết quả định vị |
-| `ProximityViews`, màn hình phòng | Giám sát khoảng cách và AP, UI JavaFX hiện tại | Màn Khảo sát, màn xem vị trí, khoảng cách Client–Server và chất lượng dữ liệu |
+| `WindowsWifiSignalProvider` | Quét native nhiều BSSID, phân biệt timestamp mới/cache, xử lý timeout/quyền | Nghiệm thu thêm driver/laptop và dữ liệu tại các điểm thật |
+| `ProximityClientService`, `SurveyCaptureService` | Worker quét nối tiếp, giữ riêng lượt khảo sát offline, không chồng hiệu chuẩn | Điều phối báo cáo định vị trực tiếp ở đợt D |
+| `LanDirectory`, `LanEntryPane`, `ClientConnectionProfile` | Dò LAN hoặc kết nối trực tiếp IP/hostname qua TLS, lưu lựa chọn | Nghiệm thu kết nối mạng riêng giữa hai laptop |
+| `ResumingQuizGateway`, `QuizServer` | Khôi phục phiên bằng token, giữ chỗ có giới hạn, phục hồi đáp án Server đã nhận | Nghiệm thu roaming/mất mạng thật |
+| `AccessPointTracker`, `AccessPointViews` | Danh mục AP vật lý xác nhận thủ công, lịch sử association; BSSID quan sát tự lưu riêng | Kết hợp với kết quả vị trí nhưng giữ hai ý nghĩa độc lập |
+| `SurveyRepository`, `SurveyViews` | Khu/điểm/tọa độ có phiên bản, mẫu raw, SQLite, import/export và upload TLS | Thu bộ pilot thật cho mô hình KNN/WKNN |
+| `DatabaseSchema` | SQLite schema phiên bản 5, dữ liệu khảo sát và phiên bản tọa độ | Bổ sung model đã đánh giá và kết quả định vị ở đợt C–D |
+| `ProximityViews`, màn hình phòng | Giám sát khoảng cách tới AP và lịch sử AP, UI JavaFX hiện tại | Màn xem vị trí theo khảo sát, khoảng cách Client–Server và chất lượng dữ liệu |
 
 Giữ phong cách và luồng chính của UI theo `.cursor/rules/preserve-existing-ui-ux.mdc`. Thêm các lựa chọn vào luồng hiện có, thực hiện scan/ghi dữ liệu/tính toán ngoài JavaFX thread.
 
@@ -110,6 +111,8 @@ Giữ phong cách và luồng chính của UI theo `.cursor/rules/preserve-exist
 | D | Giám sát trực tiếp, hồi quy và bộ cài đồng bộ | Nghiệm thu đi thực tế, roaming và phục hồi phiên |
 
 Trong lúc chưa có mẫu thực địa, có thể hoàn thành luồng phần mềm và kiểm thử tổng hợp; chưa coi việc định vị đạt yêu cầu. Không cài hoặc đăng nhập Tailscale thay người dùng trong bước lập kế hoạch này.
+
+Đợt B hiện gửi dữ liệu lên Server theo tài khoản; tải/trao đổi khu giữa laptop dùng file JSON. Phiên bản tọa độ bất biến, chỉnh sửa tạo bản mới; chưa có model để chọn hoặc khóa trong ván thi (thuộc đợt C–D).
 
 ## Nguồn tham khảo
 

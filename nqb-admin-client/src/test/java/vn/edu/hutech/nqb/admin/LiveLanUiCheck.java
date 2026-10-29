@@ -32,6 +32,7 @@ public final class LiveLanUiCheck {
         System.setProperty("nqb.client.config",profile.toString());
         System.setProperty("nqb.connection.settings",temp.resolve("connection.properties").toString());
         System.setProperty("nqb.wifi.catalog",temp.resolve("wifi-observed.json").toString());
+        System.setProperty("nqb.survey.database",temp.resolve("wifi-surveys.db").toString());
         var store = new QuizStore(temp.resolve("qa.db")); store.bootstrap("admin", "Giảng viên QA", SECRET.toCharArray());
         var config = new ServerConfig("auto", 0, temp.resolve("qa.db"), key, 10, 32, 1500, 1600, 1800);
         try (var server = new QuizServer(config, config.tls(SECRET.toCharArray()), store)) {
@@ -39,6 +40,7 @@ public final class LiveLanUiCheck {
             Files.writeString(profile,"server.host=auto\nserver.port=1\ndiscovery.port="+server.discoveryPort()+"\ntls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
             ArcadeApplication.qaDriver = app -> Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
                 try { if(args.length>3&&args[3].equals("phase-a")){checkPhaseA(app);System.out.println("PHASE_A_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("phase-b")){checkPhaseB(app);System.out.println("PHASE_B_UI_PASS");}
                     else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
                     else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, optional direct endpoint, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
@@ -46,7 +48,43 @@ public final class LiveLanUiCheck {
                 finally { Platform.runLater(Platform::exit); }
             });
             ArcadeApplication.launchFor("STUDENT", new String[]{"--width="+(args.length>1?args[1]:"1366"), "--height="+(args.length>2?args[2]:"768")});
-        } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config");System.clearProperty("nqb.connection.settings");System.clearProperty("nqb.wifi.catalog"); }
+        } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config");System.clearProperty("nqb.connection.settings");System.clearProperty("nqb.wifi.catalog");System.clearProperty("nqb.survey.database"); }
+    }
+    private static void checkPhaseB(ArcadeApplication app)throws Exception {
+        class Fixture implements WifiSignalProvider,WifiScanProvider {
+            public Reading readSignal(){return Reading.failure(WifiSignalProvider.Status.DISCONNECTED,"QA",System.currentTimeMillis());}
+            public List<Adapter> scanAdapters(){return List.of(new Adapter("qa","Card Wi-Fi QA giả lập",true));}
+            public WifiScanSnapshot scan(String adapter,String ssid){long now=System.currentTimeMillis();return new WifiScanSnapshot(UUID.randomUUID().toString(),"qa","Card Wi-Fi QA giả lập",ssid,"02:00:00:00:00:01",now,now,WifiScanSnapshot.Status.COMPLETE,"KIỂM THỬ UI · DỮ LIỆU GIẢ LẬP",0,List.of(
+                new WifiObservation(ssid,"02:00:00:00:00:01",-50,5180000,(now+vn.edu.hutech.nqb.shared.WifiSurvey.WINDOWS_EPOCH_MS)*10000,0,true,true),new WifiObservation(ssid,"02:00:00:00:00:02",-66,5220000,(now+vn.edu.hutech.nqb.shared.WifiSurvey.WINDOWS_EPOCH_MS)*10000,0,true,false),new WifiObservation(ssid,"02:00:00:00:00:03",-80,5240000,(now-30000+vn.edu.hutech.nqb.shared.WifiSurvey.WINDOWS_EPOCH_MS)*10000,30000,false,false)));}
+            public void cancelScan(){}public void close(){}
+        }
+        fx(()->{app.setProximityClientForTest(new ProximityClientService(new Fixture(),new ProximityCalibrationStore(output.resolve("qa-calibration.json")),1000,5000,30));app.openSurvey();});
+        await(()->!auxiliary("#survey-dialog").lookup("#survey-new-area").isDisabled());
+        fx(()->((javafx.scene.control.Button)auxiliary("#survey-dialog").lookup("#survey-new-area")).fire());
+        fx(()->{
+            var scene=auxiliary("#survey-area-editor");((TextField)scene.lookup("#survey-area-name")).setText("Khu QA giả lập · hành lang thẳng");((TextField)scene.lookup("#survey-collector")).setText("Nhóm kiểm thử UI");((TextField)scene.lookup("#survey-server-x")).setText("2");((TextField)scene.lookup("#survey-server-y")).setText("4");
+            ((javafx.scene.control.TextArea)scene.lookup("#survey-point-entries")).setText("Cửa phòng; Hành lang; 0; 0\nBàn Server; Phòng; 2; 4\nMốc 5 m; Hành lang; 5; 0");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-b-01-area-editor");((javafx.scene.control.Button)scene.lookup("#survey-area-save")).fire();
+        });
+        await(()->((javafx.scene.control.ComboBox<?>)auxiliary("#survey-dialog").lookup("#survey-area")).getValue()!=null);
+        fx(()->{
+            var scene=auxiliary("#survey-dialog");((TextField)scene.lookup("#survey-device")).setText("Laptop QA · dữ liệu giả lập");((TextField)scene.lookup("#survey-orientation")).setText("Nhìn theo X tăng");((javafx.scene.control.ComboBox<Integer>)scene.lookup("#survey-duration")).setValue(20);((javafx.scene.control.Button)scene.lookup("#survey-start")).fire();
+        });
+        await(()->((javafx.scene.control.Label)auxiliary("#survey-dialog").lookup("#survey-status")).getText().contains("scan mới hợp lệ"));
+        fx(()->{var scene=auxiliary("#survey-dialog");if(!scene.lookup("#survey-point").isDisabled()||!scene.lookup("#survey-adapter").isDisabled())throw new AssertionError("Capture context is editable");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-b-02-capturing");});
+        long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(28);boolean[] finished={false};while(!finished[0]&&System.nanoTime()<end){Thread.sleep(100);fx(()->finished[0]=!auxiliary("#survey-dialog").lookup("#survey-start").isDisabled());}if(!finished[0])throw new AssertionError("Survey capture did not finish");
+        await(()->((javafx.scene.control.TableView<?>)auxiliary("#survey-dialog").lookup("#survey-runs")).getItems().size()==1);
+        fx(()->{var scene=auxiliary("#survey-dialog");((javafx.scene.control.ToggleButton)scene.lookup("#survey-saved-tab")).fire();((javafx.scene.control.TableView<?>)scene.lookup("#survey-runs")).getSelectionModel().selectFirst();if(scene.lookup("#survey-accept").isDisabled())throw new AssertionError("Valid sample cannot be accepted");});
+        Platform.runLater(()->((javafx.scene.control.Button)auxiliary("#survey-dialog").lookup("#survey-accept")).fire());
+        await(()->javafx.stage.Window.getWindows().stream().anyMatch(w->w.isShowing()&&w.getScene().getRoot() instanceof javafx.scene.control.DialogPane d&&d.getHeaderText()!=null&&d.getHeaderText().equals("Xác nhận lượt thu")));
+        fx(()->{for(var w:List.copyOf(javafx.stage.Window.getWindows()))if(w.isShowing()&&w.getScene().getRoot() instanceof javafx.scene.control.DialogPane d&&"Xác nhận lượt thu".equals(d.getHeaderText()))((javafx.scene.control.Button)d.lookupButton(javafx.scene.control.ButtonType.OK)).fire();});
+        await(()->((javafx.scene.control.Label)auxiliary("#survey-dialog").lookup("#survey-status")).getText().startsWith("Đã xác nhận"));
+        fx(()->{var scene=auxiliary("#survey-dialog");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-b-03-accepted");((javafx.scene.control.Button)((javafx.scene.control.DialogPane)scene.getRoot()).lookupButton(javafx.scene.control.ButtonType.CLOSE)).fire();app.openSurvey();});
+        await(()->((javafx.scene.control.TableView<?>)auxiliary("#survey-dialog").lookup("#survey-runs")).getItems().size()==1);
+        fx(()->{var scene=auxiliary("#survey-dialog");var table=(javafx.scene.control.TableView<?>)scene.lookup("#survey-runs");var run=(vn.edu.hutech.nqb.shared.WifiSurvey.Run)table.getItems().getFirst();if(run.state()!=vn.edu.hutech.nqb.shared.WifiSurvey.State.ACCEPTED||run.scans().size()<3)throw new AssertionError("Reopen lost accepted data");
+            ((TextField)scene.lookup("#survey-device")).setText("Laptop QA");((TextField)scene.lookup("#survey-orientation")).setText("Quay lại");((javafx.scene.control.Button)scene.lookup("#survey-start")).fire();});
+        await(()->!auxiliary("#survey-dialog").lookup("#survey-cancel").isDisabled());fx(()->((javafx.scene.control.Button)auxiliary("#survey-dialog").lookup("#survey-cancel")).fire());
+        await(()->((javafx.scene.control.TableView<?>)auxiliary("#survey-dialog").lookup("#survey-runs")).getItems().size()==2);
+        fx(()->{var scene=auxiliary("#survey-dialog");((javafx.scene.control.ToggleButton)scene.lookup("#survey-saved-tab")).fire();var table=(javafx.scene.control.TableView<?>)scene.lookup("#survey-runs");table.getSelectionModel().selectFirst();if(((vn.edu.hutech.nqb.shared.WifiSurvey.Run)table.getItems().getFirst()).state()!=vn.edu.hutech.nqb.shared.WifiSurvey.State.DISCARDED)throw new AssertionError("Cancelled run not discarded");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-b-04-cancelled");app.qaCloseAuxiliary();});
     }
     private static TlsQuizGateway connect() throws Exception { return TlsQuizGateway.connect(new Endpoint("127.0.0.1", port), trust, SECRET.toCharArray()); }
     private static void checkPhaseA(ArcadeApplication app)throws Exception {

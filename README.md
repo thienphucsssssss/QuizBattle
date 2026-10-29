@@ -1,5 +1,7 @@
 # Network Quiz Battle Java LAN
 
+**Đợt B — thu mẫu khảo sát có tọa độ:** thêm **Tùy chọn → Khảo sát Wi-Fi**, tạo khu/điểm và tọa độ server, thu nhiều scan tại mỗi điểm, xác nhận hoặc loại lượt, lưu SQLite offline và nhập/xuất JSON. Giảng viên/Admin có thể đồng bộ dữ liệu lên Server qua TLS, thử lại sau mất mạng không tạo bản sao. Xem [hướng dẫn khảo sát](docs/Khao_sat_WiFi_fingerprinting.md). Chưa triển khai KNN/WKNN hoặc hiển thị khoảng cách client–server từ khảo sát; cần bộ dữ liệu thực địa tiếp theo.
+
 **Đợt A — mạng riêng và chuẩn bị fingerprinting:** thêm chọn máy chủ bằng IP/hostname (dùng được với Tailscale), tự khôi phục phiên thí sinh khi mất mạng ngắn và **Tùy chọn → Chẩn đoán quét Wi-Fi** để đọc nhiều BSSID, phân biệt dữ liệu mới/cũ, tự lưu danh mục quan sát và xuất JSON. Xem [hướng dẫn đợt A và phần cần nghiệm thu tại trường](docs/Ket_noi_mang_rieng_va_chan_doan_WiFi.md). Chưa triển khai định vị theo tọa độ khảo sát.
 
 **Theo dõi AP và hướng di chuyển:** nhận diện BSSID khi client đi qua các AP cùng SSID, cấu hình tên/vị trí AP tại **Giám sát → Cấu hình AP**, xem lịch sử và hướng suy đoán trong tab **AP & hướng di chuyển**. Xem [hướng dẫn thiết lập và demo](docs/Nhan_dien_AP_va_huong_di_chuyen.md).

@@ -542,7 +542,7 @@ class ProximityServerIntegrationTest {
              ProximityStore reopenedProxStore = new ProximityStore(dbFile, 64, w -> {});
              Connection c = DriverManager.getConnection("jdbc:sqlite:" + dbFile);
              Statement s = c.createStatement()) {
-            assertEquals(4, countRows(s, "PRAGMA user_version"));
+            assertEquals(5, countRows(s, "PRAGMA user_version"));
             assertEquals(usersBefore, countRows(s, "SELECT COUNT(*) FROM users"));
             assertEquals(questionsBefore, countRows(s, "SELECT COUNT(*) FROM questions"));
             assertEquals(matchesBefore, countRows(s, "SELECT COUNT(*) FROM matches"));

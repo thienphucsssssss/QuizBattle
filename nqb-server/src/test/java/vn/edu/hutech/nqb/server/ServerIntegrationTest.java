@@ -5,11 +5,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import vn.edu.hutech.nqb.client.*;
+import vn.edu.hutech.nqb.shared.WifiSurvey;
+import static vn.edu.hutech.nqb.shared.WifiSurvey.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static vn.edu.hutech.nqb.server.Wire.*;
+import static vn.edu.hutech.nqb.server.Wire.JSON;
 
 /** Production server + production TLS gateway + real temporary SQLite, not Preview. */
 class ServerIntegrationTest {
@@ -51,6 +54,27 @@ class ServerIntegrationTest {
         long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);JsonNode state;
         do {state=host.request("ROOM_STATE",obj());if(condition.test(state))return state;Thread.sleep(30);}while(System.nanoTime()<until);
         throw new AssertionError("Room condition not reached: "+state.path("phase"));
+    }
+    @Test void surveyUploadUsesAuthenticatedOwnerAndCanRetryAfterReconnectWithoutDuplicateRows()throws Exception {
+        var host=admin();String code=room(host,1);var student=guest(code,"Khảo sát không có quyền");
+        long now=System.currentTimeMillis();var point=new Point(id(),"Cửa",Zone.CORRIDOR,0,0);
+        var area=new Area(id(),1,"Khu TLS QA","QA","HUTECH E1","m","X hành lang; Y phòng",1,5,now,List.of(point));
+        var scans=new ArrayList<Scan>();for(int i=0;i<3;i++){long start=now+i*100;scans.add(new Scan(id(),"qa","Card QA",area.ssid(),"",start,start+10,"COMPLETE","QA",0,List.of(
+            new Observation(area.ssid(),"02:00:00:00:00:01",-50,5180000,(start+5+WINDOWS_EPOCH_MS)*10000,5,true,false),new Observation(area.ssid(),"02:00:00:00:00:02",-65,5220000,(start+5+WINDOWS_EPOCH_MS)*10000,5,true,false))));}
+        var run=new Run(id(),area.id(),1,point.id(),"qa","Card QA","Laptop QA","Windows QA","Theo X",now,now+210,State.ACCEPTED,"Đứng đúng điểm",scans);
+        var definition=obj().put("owner_id","999");definition.set("area",JSON.valueToTree(area));error(student,"FORBIDDEN","SURVEY_PUT_AREA",definition);host.request("SURVEY_PUT_AREA",definition);
+        var header=run.withScans(List.of()).finish(State.REVIEW,run.note(),run.endedAtMillis());var begin=obj().put("scan_count",3).put("digest",digest(run)).put("final_state","ACCEPTED");begin.set("run",JSON.valueToTree(header));host.request("SURVEY_UPLOAD_BEGIN",begin);
+        var first=obj().put("run_id",run.id()).put("sequence",0);first.set("scan",JSON.valueToTree(scans.getFirst()));host.request("SURVEY_UPLOAD_SCAN",first);
+        var other=new Client();other.request("REGISTER",obj().put("username","survey.teacher").put("display_name","Other").put("password","Survey-test-only-1"));other.request("LOGIN",obj().put("username","survey.teacher").put("password","Survey-test-only-1"));error(other,"SURVEY_INVALID","SURVEY_UPLOAD_SCAN",first);
+        host.request("LOGOUT",obj());host.event("DISCONNECTED");host=admin();
+        var batch=new ArrayList<Run>();batch.add(run);
+        for(int j=1;j<13;j++){long shift=j*3000;var more=new ArrayList<Scan>();for(var s:run.scans())more.add(new Scan(id(),s.adapterId(),s.adapterName(),s.ssidFilter(),s.associatedBssid(),s.startedAtMillis()+shift,s.completedAtMillis()+shift,s.status(),s.diagnostic(),0,s.observations().stream().map(o->new Observation(o.ssid(),o.bssid(),o.rssiDbm(),o.frequencyKhz(),o.hostTimestamp100ns()+shift*10000,o.ageMillis(),o.fresh(),o.associated())).toList()));batch.add(new Run(id(),area.id(),1,point.id(),run.adapterId(),run.adapterName(),run.deviceLabel(),run.platform(),run.orientation(),run.startedAtMillis()+shift,run.endedAtMillis()+shift,run.state(),run.note(),more));}
+        var bundle=Bundle.of(List.of(area),batch);assertEquals(13,SurveySync.upload(host.gateway,bundle,null).get(18,TimeUnit.SECONDS));assertEquals(13,SurveySync.upload(host.gateway,bundle,null).get(8,TimeUnit.SECONDS));
+        try(var db=java.sql.DriverManager.getConnection("jdbc:sqlite:"+data.resolve("quiz.db"));var s=db.createStatement()){
+            try(var r=s.executeQuery("SELECT owner_id,count(*) FROM wifi_survey_runs GROUP BY owner_id")){assertTrue(r.next());assertEquals("1",r.getString(1));assertEquals(13,r.getInt(2));assertFalse(r.next());}
+            try(var r=s.executeQuery("SELECT count(*) FROM wifi_survey_scans")){assertEquals(39,r.getInt(1));}
+        }
+        assertFalse(student.request("ROOM_STATE",obj()).toString().contains(area.id()));assertFalse(student.request("ROOM_BROWSE",obj()).toString().contains(area.id()));
     }
     @Test void resumeRotatesSecretKeepsSeatAndRejectsOldWrongAndForeignTokens()throws Exception {
         var host=admin();String code=room(host,1);var original=new Client();var credential=resumableJoin(original,code,"Roaming");

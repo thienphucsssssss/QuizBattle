@@ -45,7 +45,7 @@ class HistoryQuestionStoreTest {
             assertEquals("HISTORY_QUESTIONS_UNAVAILABLE",assertThrows(Wire.Failure.class,()->store.historyQuestions(owner,"saved",1)).code);
             assertEquals(2,store.questions(owner,obj()).path("total").asInt());assertTrue(store.hasAdmin());
         }
-        try(var db=DriverManager.getConnection("jdbc:sqlite:"+file());var sql=db.createStatement();var rows=sql.executeQuery("PRAGMA user_version")){assertEquals(4,rows.getInt(1));}
+        try(var db=DriverManager.getConnection("jdbc:sqlite:"+file());var sql=db.createStatement();var rows=sql.executeQuery("PRAGMA user_version")){assertEquals(5,rows.getInt(1));}
     }
     @Test void privateIncompleteAndOversizedSourcesCannotBeUsed()throws Exception {
         try(var store=new QuizStore(file())){
