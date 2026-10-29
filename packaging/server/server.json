@@ -7,6 +7,7 @@
   },
   "registration": { "enabled": true },
   "discovery": { "port": 5051 },
+  "session": { "resumeGraceSeconds": 60 },
   "database": {
     "path": "data/quiz.db"
   },

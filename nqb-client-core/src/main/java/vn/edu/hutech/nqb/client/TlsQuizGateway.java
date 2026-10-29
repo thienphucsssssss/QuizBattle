@@ -146,7 +146,7 @@ public final class TlsQuizGateway implements QuizGateway {
             listener.accept(object().put("type", "DISCONNECTED").set("payload", object()));
         }
     }
-    @Override public void onEvent(Consumer<JsonNode> listener) { this.listener = listener; }
+    @Override public synchronized void onEvent(Consumer<JsonNode> listener) { this.listener = listener; if(closed.get())listener.accept(object().put("type","DISCONNECTED").set("payload",object())); }
     @Override public boolean isPreview() { return false; }
     @Override public void close() { fail(); }
 }

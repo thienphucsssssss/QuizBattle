@@ -42,6 +42,86 @@ class ServerIntegrationTest {
     String room(Client host,int count)throws Exception{return host.request("ROOM_CONFIGURE",obj().put("room_name","Lớp LAN").put("question_count",count).put("duration_seconds",5)).path("room_code").asText();}
     Client guest(String code,String name)throws Exception{var c=new Client();c.request("JOIN",obj().put("room_code",code).put("nickname",name));return c;}
     void error(Client c,String code,String type,ObjectNode p){var ex=assertThrows(ExecutionException.class,()->c.request(type,p));assertEquals(code,assertInstanceOf(GatewayException.class,ex.getCause()).code());}
+    JsonNode resumableJoin(Client client,String code,String name)throws Exception {
+        var payload=obj().put("room_code",code).put("nickname",name);payload.putArray("client_capabilities").add(vn.edu.hutech.nqb.shared.ResumeRules.CAPABILITY);
+        return client.request("JOIN",payload).path("resume");
+    }
+    ObjectNode resumePayload(JsonNode credential,String next){return ((ObjectNode)credential).deepCopy().put("next_token",next);}
+    JsonNode waitRoom(Client host,java.util.function.Predicate<JsonNode> condition)throws Exception {
+        long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);JsonNode state;
+        do {state=host.request("ROOM_STATE",obj());if(condition.test(state))return state;Thread.sleep(30);}while(System.nanoTime()<until);
+        throw new AssertionError("Room condition not reached: "+state.path("phase"));
+    }
+    @Test void resumeRotatesSecretKeepsSeatAndRejectsOldWrongAndForeignTokens()throws Exception {
+        var host=admin();String code=room(host,1);var original=new Client();var credential=resumableJoin(original,code,"Roaming");
+        original.request("READY_SET",obj().put("ready",true));original.close();
+        var waiting=waitRoom(host,s->s.path("players").path(0).path("reconnecting").asBoolean());
+        assertEquals(1,waiting.path("players").size());assertFalse(waiting.path("players").path(0).path("ready").asBoolean());
+        String next=vn.edu.hutech.nqb.shared.ResumeRules.token();var resumed=new Client();
+        error(resumed,"RESUME_REJECTED","RESUME",resumePayload(credential,next).put("token",vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        error(resumed,"RESUME_REJECTED","RESUME",resumePayload(credential,next).put("room_generation","foreign"));
+        var state=resumed.request("RESUME",resumePayload(credential,next));
+        assertEquals(credential.path("player_id").asText(),state.path("player_id").asText());assertEquals(waiting.path("players").path(0).path("avatar_id"),state.path("players").path(0).path("avatar_id"));
+        var attacker=new Client();error(attacker,"RESUME_REJECTED","RESUME",resumePayload(credential,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        var browse=attacker.request("ROOM_BROWSE",obj());assertFalse(browse.toString().contains(next));assertFalse(host.request("ROOM_STATE",obj()).toString().contains(next));
+        resumed.request("LEAVE",obj());var invalidated=((ObjectNode)credential).deepCopy().put("token",next);
+        error(attacker,"RESUME_REJECTED","RESUME",resumePayload(invalidated,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        waitRoom(host,s->s.path("players").isEmpty());
+    }
+    @Test void allStudentsCanRecoverDuringQuestionWithoutReplayingAcceptedAnswer()throws Exception {
+        var host=admin();String code=room(host,1);var a=new Client();var b=new Client();var ca=resumableJoin(a,code,"Resume A");var cb=resumableJoin(b,code,"Resume B");
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());var question=a.event("QUESTION");
+        var sent=obj().put("session_id",question.path("session_id").asText()).put("question_id",question.path("question_id").asInt()).put("answer","A");
+        a.request("ANSWER",sent);a.close();b.close();
+        var lost=waitRoom(host,s->s.path("connected_player_count").asInt()==0);assertEquals("QUESTION_ACTIVE",lost.path("phase").asText());
+        var resumed=new Client();var state=resumed.request("RESUME",resumePayload(ca,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        assertEquals(question.path("session_id"),state.path("session_id"));assertEquals("A",state.path("self_answer").path("answer").asText());assertTrue(state.path("self_answer").path("recorded").asBoolean());
+        assertTrue(state.path("remaining_ms").asLong()<question.path("remaining_ms").asLong());
+        assertEquals("DUPLICATE_ANSWER",resumed.request("ANSWER",sent).path("reason").asText());
+        var end=resumed.event("GAME_OVER");assertFalse(end.path("aborted").asBoolean());assertEquals(2,end.path("ranking").size());
+        var late=new Client();var finalState=late.request("RESUME",resumePayload(cb,vn.edu.hutech.nqb.shared.ResumeRules.token()));assertEquals("FINISHED",finalState.path("phase").asText());
+    }
+    @Test void resetAndExpirationInvalidateHeldSessions()throws Exception {
+        server.close();var config=new ServerConfig("127.0.0.1",0,data.resolve("quiz.db"),key,10,32,100,120,180,true,0,1);
+        server=new QuizServer(config,config.tls(KEY_PASSWORD),new QuizStore(data.resolve("quiz.db")));server.start();port=server.port();
+        var host=admin();String code=room(host,1);var a=new Client();var credential=resumableJoin(a,code,"Expiring");a.close();
+        waitRoom(host,s->s.path("players").isEmpty());var retry=new Client();error(retry,"RESUME_REJECTED","RESUME",resumePayload(credential,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        var live=new Client();credential=resumableJoin(live,code,"Reset");host.request("ROOM_RESET",obj());
+        var renewed=live.event("SESSION_CREDENTIALS");assertNotEquals(credential.path("room_generation"),renewed.path("room_generation"));
+        error(retry,"RESUME_REJECTED","RESUME",resumePayload(credential,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        live.close();var resumed=retry.request("RESUME",resumePayload(renewed,vn.edu.hutech.nqb.shared.ResumeRules.token()));assertEquals(renewed.path("player_id"),resumed.path("player_id"));
+    }
+    @Test void explicitDestinationDoesNotSilentlyJoinADifferentDiscoveredServer()throws Exception {
+        var profile=new ClientConnectionProfile("127.0.0.1",1,trust,new String(KEY_PASSWORD),server.discoveryPort());
+        assertThrows(IllegalStateException.class,()->LanDirectory.scan(profile));
+    }
+    @Test void resumingGatewayRecoversAcrossActualTcpCutWithRealTls()throws Exception {
+        var host=admin();String code=room(host,1);
+        try(var proxy=new CuttingProxy(port);var gateway=ResumingQuizGateway.connect(new Endpoint("127.0.0.1",proxy.listener.getLocalPort()),new ClientConnectionProfile("127.0.0.1",port,trust,new String(KEY_PASSWORD)))){
+            var restored=new CompletableFuture<JsonNode>();gateway.onEvent(e->{if(e.path("type").asText().equals("RECONNECTED"))restored.complete(e.path("payload"));});
+            var joined=gateway.request("JOIN",obj().put("room_code",code).put("nickname","TCP roaming")).get(5,TimeUnit.SECONDS);
+            gateway.request("READY_SET",obj().put("ready",true)).get(5,TimeUnit.SECONDS);proxy.cut();
+            var snapshot=restored.get(8,TimeUnit.SECONDS);assertEquals(joined.path("player_id"),snapshot.path("player_id"));assertEquals(1,snapshot.path("players").size());
+            assertFalse(snapshot.path("players").path(0).path("ready").asBoolean());
+            assertEquals(code,gateway.request("ROOM_STATE",obj()).get(3,TimeUnit.SECONDS).path("room_code").asText());
+            gateway.request("LEAVE",obj()).get(3,TimeUnit.SECONDS);
+        }
+        waitRoom(host,s->s.path("players").isEmpty());
+    }
+    static final class CuttingProxy implements AutoCloseable {
+        final java.net.ServerSocket listener;final Set<java.net.Socket> sockets=ConcurrentHashMap.newKeySet();volatile boolean closed;
+        CuttingProxy(int target)throws Exception{
+            listener=new java.net.ServerSocket(0,16,java.net.InetAddress.getLoopbackAddress());
+            Thread.ofVirtual().start(()->{while(!closed)try{
+                var client=listener.accept();var server=new java.net.Socket("127.0.0.1",target);sockets.add(client);sockets.add(server);
+                Thread.ofVirtual().start(()->copy(client,server));Thread.ofVirtual().start(()->copy(server,client));
+            }catch(Exception ignored){}});
+        }
+        void copy(java.net.Socket from,java.net.Socket to){try{from.getInputStream().transferTo(to.getOutputStream());}catch(Exception ignored){}finally{shutdown(from);shutdown(to);}}
+        void shutdown(java.net.Socket socket){sockets.remove(socket);try{socket.close();}catch(Exception ignored){}}
+        void cut(){for(var socket:List.copyOf(sockets))shutdown(socket);}
+        public void close(){closed=true;try{listener.close();}catch(Exception ignored){}cut();}
+    }
     private ObjectNode importRow(String content){return obj().put("content",content).put("option_a","TCP").put("option_b","UDP").put("option_c","IP").put("option_d","ARP").put("correct_answer","A").put("category","Mạng LAN");}
     private ObjectNode preview(String token,int offset,boolean complete,ObjectNode... rows){var p=obj().put("offset",offset).put("complete",complete);if(token!=null)p.put("import_id",token);var data=p.putArray("rows");for(var row:rows)data.add(row);return p;}
     private ObjectNode commit(String token,boolean allow,int... indexes){var p=obj().put("import_id",token).put("allow_duplicates",allow);var selected=p.putArray("selected_indexes");for(int index:indexes)selected.add(index);return p;}
@@ -160,7 +240,7 @@ class ServerIntegrationTest {
         assertEquals(2,host.request("HISTORY_GET",obj().put("session_id",q.path("session_id").asText())).path("ranking").size());
     }
     @Test void udpDiscoveryFindsServerWithoutCorrectConfiguredTcpPortAndTlsDirectoryIsPublicOnly()throws Exception {
-        var profile=new ClientConnectionProfile("127.0.0.1",1,trust,new String(KEY_PASSWORD),server.discoveryPort());
+        var profile=new ClientConnectionProfile("auto",1,trust,new String(KEY_PASSWORD),server.discoveryPort());
         assertTrue(LanDiscovery.find(profile,300).contains(new Endpoint("127.0.0.1",port)));
         var directory=LanDirectory.scan(profile);assertEquals(1,directory.size());assertTrue(directory.getFirst().rooms().isEmpty());
         var host=admin();String code=room(host,1);var anon=new Client();var browse=anon.request("ROOM_BROWSE",obj());
@@ -178,7 +258,9 @@ class ServerIntegrationTest {
         var known=new ClientConnectionProfile("127.0.0.1",port,trust,new String(KEY_PASSWORD),1);
         assertEquals(1,LanDirectory.scan(known).size());
         Path empty=certs.resolve("empty-directory-trust.p12");var store=java.security.KeyStore.getInstance("PKCS12");store.load(null,KEY_PASSWORD);try(var out=Files.newOutputStream(empty)){store.store(out,KEY_PASSWORD);}
-        assertTrue(LanDirectory.scan(new ClientConnectionProfile("127.0.0.1",port,empty,new String(KEY_PASSWORD),server.discoveryPort())).isEmpty());
+        assertTrue(LanDirectory.scan(new ClientConnectionProfile("auto",port,empty,new String(KEY_PASSWORD),server.discoveryPort())).isEmpty());
+        var refused=assertThrows(IllegalStateException.class,()->LanDirectory.scan(new ClientConnectionProfile("127.0.0.1",port,empty,new String(KEY_PASSWORD),server.discoveryPort())));
+        assertTrue(refused.getMessage().contains("chứng chỉ"));
     }
     @Test void automaticBindingAndPinnedIdentityWorkAtANewIpAndAfterRestartWithoutChangingClientProfile()throws Exception {
         server.close();

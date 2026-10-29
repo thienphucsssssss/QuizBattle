@@ -58,7 +58,7 @@ final class LanTopologyView extends VBox {
             boolean pending=p.path("refresh_status").asText().equals("PENDING");boolean failed=Set.of("FAILED","TIMEOUT").contains(p.path("refresh_status").asText());
             try{if(java.time.Instant.parse(p.path("updated_at_utc").asText()).isAfter(java.time.Instant.parse(p.path("refreshed_at_utc").asText())))failed=false;}catch(java.time.format.DateTimeParseException ignored){}
             node.metrics.setText(ping+" · "+distance);node.metrics.setOpacity(pending||failed?.55:1);
-            String state=!live?"Ngắt kết nối":pending?"Đang đo…":p.path("refresh_status").asText().equals("UNSUPPORTED")?"Cần cập nhật Client":failed?reason(p.path("refresh_reason").asText()):!fresh&&p.has("estimated_meters")?"Số đo đã cũ":p.path("ready").asBoolean()?"Sẵn sàng":p.path("status_label").asText("Đang chuẩn bị");
+            String state=!live?(p.path("reconnecting").asBoolean()?"Đang giữ chỗ…":"Ngắt kết nối"):pending?"Đang đo…":p.path("refresh_status").asText().equals("UNSUPPORTED")?"Cần cập nhật Client":failed?reason(p.path("refresh_reason").asText()):!fresh&&p.has("estimated_meters")?"Số đo đã cũ":p.path("ready").asBoolean()?"Sẵn sàng":p.path("status_label").asText("Đang chuẩn bị");
             node.status.setText(state);node.button.setAccessibleText(node.name+", "+node.metrics.getText()+", "+state);
             node.line.getStyleClass().removeAll("lost","warning","missing");if(!live)node.line.getStyleClass().add("lost");else if(p.path("over_threshold").asBoolean()||p.path("status").asText().equals("FLUCTUATING"))node.line.getStyleClass().add("warning");else if(!fresh||!p.has("estimated_meters"))node.line.getStyleClass().add("missing");
         }

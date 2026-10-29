@@ -30,22 +30,74 @@ public final class LiveLanUiCheck {
         Path profile=temp.resolve("client.properties");
         Files.writeString(profile,"tls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
         System.setProperty("nqb.client.config",profile.toString());
+        System.setProperty("nqb.connection.settings",temp.resolve("connection.properties").toString());
+        System.setProperty("nqb.wifi.catalog",temp.resolve("wifi-observed.json").toString());
         var store = new QuizStore(temp.resolve("qa.db")); store.bootstrap("admin", "Giảng viên QA", SECRET.toCharArray());
         var config = new ServerConfig("auto", 0, temp.resolve("qa.db"), key, 10, 32, 1500, 1600, 1800);
         try (var server = new QuizServer(config, config.tls(SECRET.toCharArray()), store)) {
             server.start(); liveServer=server; port = server.port();
             Files.writeString(profile,"server.host=auto\nserver.port=1\ndiscovery.port="+server.discoveryPort()+"\ntls.truststore="+trust.toString().replace('\\','/')+"\ntls.truststorePassword="+SECRET+"\n");
             ArcadeApplication.qaDriver = app -> Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
-                try { if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
+                try { if(args.length>3&&args[3].equals("phase-a")){checkPhaseA(app);System.out.println("PHASE_A_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
-                    else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, no Client IP/port, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
+                    else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, optional direct endpoint, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
                 catch (Throwable failure) { ArcadeApplication.qaFailed(failure); failure.printStackTrace(); }
                 finally { Platform.runLater(Platform::exit); }
             });
             ArcadeApplication.launchFor("STUDENT", new String[]{"--width="+(args.length>1?args[1]:"1366"), "--height="+(args.length>2?args[2]:"768")});
-        } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config"); }
+        } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config");System.clearProperty("nqb.connection.settings");System.clearProperty("nqb.wifi.catalog"); }
     }
     private static TlsQuizGateway connect() throws Exception { return TlsQuizGateway.connect(new Endpoint("127.0.0.1", port), trust, SECRET.toCharArray()); }
+    private static void checkPhaseA(ArcadeApplication app)throws Exception {
+        try(var host=connect();var opponent=connect();var proxy=new UiProxy(port)){
+            request(host,"LOGIN",object().put("username","admin").put("password",SECRET));
+            request(host,"QUESTION_CREATE",object().put("content","Kết nối lại có giữ đáp án đã nộp?").put("option_a","Có").put("option_b","Không").put("option_c","Chỉ đổi IP").put("option_d","Không rõ").put("correct_answer","A").put("category","QA"));
+            String code=request(host,"ROOM_CONFIGURE",object().put("room_name","Kiểm thử phục hồi phiên · TLS thật").put("question_count",1).put("duration_seconds",20)).path("room_code").asText();
+            request(opponent,"JOIN",object().put("room_code",code).put("nickname","Bạn kiểm thử"));request(opponent,"READY_SET",object().put("ready",true));
+            fx(()->{
+                app.qaStudentAuth();var root=app.qaScene().getRoot();root.applyCss();root.layout();
+                ((javafx.scene.control.CheckBox)root.lookup("#direct-server-mode")).setSelected(true);
+                ((TextField)root.lookup("#server-host")).setText("127.0.0.1");((TextField)root.lookup("#server-port")).setText(String.valueOf(proxy.listener.getLocalPort()));
+                ((javafx.scene.control.Button)root.lookup("#server-apply")).fire();
+            });
+            await(()->app.qaScene().lookup("#lan-rooms") instanceof javafx.scene.control.ListView<?> list&&!list.getItems().isEmpty());
+            fx(()->{snapshot(app,"phase-a-01-direct-address");fillForm(app,"Thí sinh roaming",code);app.qaClick("Tham gia phòng   →");});
+            await(()->app.qaConnected()&&app.qaPhase().equals("WAITING"));
+            fx(()->{app.qaCloseAuxiliary();app.qaClick("Sẵn sàng   →");});
+            long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(request(host,"ROOM_STATE",object()).path("ready_count").asInt()<2){if(System.nanoTime()>until)throw new AssertionError("Ready missing");Thread.sleep(50);}
+            request(host,"START_GAME",object());await(()->app.qaPhase().equals("QUESTION_ACTIVE"));fx(()->app.qaAnswer("A"));
+            await(()->hasLabel(app,"Đã nhận đáp án A"));
+            String id=request(host,"ROOM_STATE",object()).path("players").get(1).path("player_id").asText();
+            proxy.down=true;proxy.cut();await(()->!app.qaConnected());
+            fx(()->{if(!hasLabel(app,"Đang kết nối lại"))throw new AssertionError("Missing recovery status");snapshot(app,"phase-a-02-reconnecting");});
+            proxy.down=false;await(app::qaConnected);await(()->hasLabel(app,"Đã nhận đáp án A"));
+            var restored=request(host,"ROOM_STATE",object());if(!id.equals(restored.path("players").get(1).path("player_id").asText()))throw new AssertionError("Changed student identity");
+            fx(()->snapshot(app,"phase-a-03-answer-restored"));request(host,"ABORT_GAME",object());await(()->app.qaPhase().equals("FINISHED"));
+            fx(app::qaWelcome);
+        }
+        // UI fixture is explicitly labelled; native scan accuracy is tested separately.
+        class Fixture implements WifiSignalProvider,WifiScanProvider {
+            public Reading readSignal(){return Reading.failure(WifiSignalProvider.Status.DISCONNECTED,"QA",System.currentTimeMillis());}
+            public List<Adapter> scanAdapters(){return List.of(new Adapter("qa","Card Wi-Fi QA giả lập",true));}
+            public WifiScanSnapshot scan(String adapter,String ssid){long now=System.currentTimeMillis();return new WifiScanSnapshot("qa-scan","qa","Card QA",ssid,"02:00:00:00:00:01",now-100,now,WifiScanSnapshot.Status.COMPLETE,"KIỂM THỬ UI · DỮ LIỆU GIẢ LẬP",0,List.of(new WifiObservation("HUTECH E1","02:00:00:00:00:01",-51,5180000,0,50,true,true),new WifiObservation("HUTECH E1","02:00:00:00:00:02",-67,5220000,0,30000,false,false)));}
+            public void cancelScan(){}public void close(){}
+        }
+        fx(()->{app.setProximityClientForTest(new ProximityClientService(new Fixture(),new ProximityCalibrationStore(output.resolve("qa-calibration.json")),1000,5000,30));WifiScanViews.open(app,app.proximityClient());});
+        await(()->!auxiliary("#wifi-scan-dialog").lookup("#wifi-scan-start").isDisabled());
+        fx(()->((javafx.scene.control.Button)auxiliary("#wifi-scan-dialog").lookup("#wifi-scan-start")).fire());
+        await(()->((javafx.scene.control.TableView<?>)auxiliary("#wifi-scan-dialog").lookup("#wifi-scan-table")).getItems().size()==2);
+        fx(()->{var scene=auxiliary("#wifi-scan-dialog");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-a-04-scan-diagnostic");app.qaCloseAuxiliary();});
+    }
+    private static boolean hasLabel(ArcadeApplication app,String value){return app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains(value));}
+    private static final class UiProxy implements AutoCloseable {
+        final java.net.ServerSocket listener;final Set<java.net.Socket> sockets=ConcurrentHashMap.newKeySet();volatile boolean closed,down;
+        UiProxy(int target)throws Exception{listener=new java.net.ServerSocket(0,16,java.net.InetAddress.getLoopbackAddress());Thread.ofVirtual().start(()->{while(!closed)try{var client=listener.accept();if(down){client.close();continue;}var server=new java.net.Socket("127.0.0.1",target);sockets.add(client);sockets.add(server);Thread.ofVirtual().start(()->copy(client,server));Thread.ofVirtual().start(()->copy(server,client));}catch(Exception ignored){}});}
+        void copy(java.net.Socket a,java.net.Socket b){try{a.getInputStream().transferTo(b.getOutputStream());}catch(Exception ignored){}finally{shutdown(a);shutdown(b);}}
+        void shutdown(java.net.Socket socket){sockets.remove(socket);try{socket.close();}catch(Exception ignored){}}
+        void cut(){for(var socket:List.copyOf(sockets))shutdown(socket);}
+        public void close(){closed=true;try{listener.close();}catch(Exception ignored){}cut();}
+    }
     private static void checkAccessPoints(ArcadeApplication app) throws Exception {
         fx(() -> { app.qaAuth(); fillForm(app, "admin", ""); app.qaClick("Đăng nhập   →"); });
         await(app::qaConnected);
@@ -115,7 +167,7 @@ public final class LiveLanUiCheck {
             for(int i=1;i<=20;i++)request(host,"QUESTION_CREATE",object().put("content","Test-only question "+i).put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA"));
             request(host,"USER_CREATE",object().put("username","teacher.qa").put("display_name","Teacher QA").put("temporary_password",SECRET));
             fx(app::qaStudentAuth);
-            await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().equals("Chờ giảng viên mở phòng.")));
+            await(()->app.qaScene().getRoot().lookupAll(".label").stream().anyMatch(n->n instanceof javafx.scene.control.Label l&&l.getText().contains("Chờ giảng viên mở phòng.")));
             fx(()->snapshot(app,"00-empty-room-list"));
             try(var teacher=connect()) {
                 if(!request(teacher,"LOGIN",object().put("username","teacher.qa").put("password",SECRET)).path("must_change_password").asBoolean())throw new AssertionError("New teacher must change password");
@@ -189,7 +241,6 @@ public final class LiveLanUiCheck {
     private static void assertMusic(ArcadeApplication app, MusicSlots.Track track) { if (app.qaMusicTrack() != track) throw new AssertionError("Wrong music for " + app.qaPhase() + ": " + app.qaMusicTrack()); }
     private static void assertLogin(ArcadeApplication app) {
         if(app.qaConnected())throw new AssertionError("Unauthenticated screen has a session");
-        if(app.qaScene().lookup("#server-host")!=null||app.qaScene().lookup("#server-port")!=null)throw new AssertionError("Client still exposes IP/port setup");
         var role=(javafx.scene.control.ComboBox<?>)app.qaScene().lookup("#login-role");
         if(role==null || role.getValue()!=null || !((javafx.scene.control.Button)app.qaScene().lookup("#login-submit")).isDisabled())throw new AssertionError("Startup/logout did not reset role");
         if(app.qaScene().getRoot().lookupAll(".button").stream().anyMatch(n -> n instanceof javafx.scene.control.Button b && (b.getText().contains("Xem thử") || b.getText().equals("Người dùng"))))throw new AssertionError("Unauthenticated mock/Admin entry remains");
@@ -469,7 +520,6 @@ public final class LiveLanUiCheck {
     private static int tableSize(ArcadeApplication app) { var table = app.qaScene().getRoot().lookup(".table-view"); return table instanceof javafx.scene.control.TableView<?> t ? t.getItems().size() : -1; }
     private static void fillForm(ArcadeApplication app, String identity, String code) {
         var root = app.qaScene().getRoot(); root.applyCss(); root.layout();
-        if(root.lookup("#server-host")!=null || root.lookup("#server-port")!=null)throw new AssertionError("IP/port fields remain in Client");
         ((TextField)root.lookup("#identity")).setText(identity);
         if(root.lookup("#truststore-path")!=null || root.lookup("#trust-password")!=null)throw new AssertionError("Normal user is still asked to configure TLS");
         if (code.isEmpty()) ((TextField)root.lookup("#login-password")).setText(SECRET);

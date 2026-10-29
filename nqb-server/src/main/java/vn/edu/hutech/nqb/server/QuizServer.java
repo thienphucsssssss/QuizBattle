@@ -36,6 +36,7 @@ public final class QuizServer implements AutoCloseable {
     private int owner, questionCount=10, questionSeconds=15, questionIndex,questionSetId;
     private String questionSetName="",historySessionId="",historyRoomName="";
     private String roomCode="",roomName="",session="",started="";
+    private String roomGeneration=UUID.randomUUID().toString();
     private long deadline,questionOpenedAt;
     private final RoomTelemetry telemetry=new RoomTelemetry();
     private List<ObjectNode> questions=List.of();
@@ -43,7 +44,8 @@ public final class QuizServer implements AutoCloseable {
     private static ThreadPoolExecutor pool(String name,int count,int size) {return new ThreadPoolExecutor(count,count,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(size),Thread.ofPlatform().daemon().name(name+"-",0).factory(),new ThreadPoolExecutor.AbortPolicy());}
     private record Attempts(long start,int count) { }
     private static final class Player {
-        final String id,nickname,avatarAtJoin,ipAddress; Peer peer; boolean ready; String answer="",avatar; int score,correct,streak,bestStreak,lastPoints,speedBonus,streakBonus;
+        final String id,nickname,avatarAtJoin; String ipAddress; Peer peer; boolean ready; String answer="",avatar; int score,correct,streak,bestStreak,lastPoints,speedBonus,streakBonus;
+        byte[] resumeHash; long resumeUntil; boolean resumable,telemetrySupported;
         long answerElapsedMs=-1;
         void resetRound(){answer="";answerElapsedMs=-1;lastPoints=speedBonus=streakBonus=0;}
         void resetGame(){score=correct=streak=bestStreak=0;resetRound();}
@@ -74,7 +76,8 @@ public final class QuizServer implements AutoCloseable {
     private void accept(){
         while(!closed.get())try{
             var socket=(SSLSocket)listener.accept();socket.setSoTimeout(5000);socket.setTcpNoDelay(true);
-            if(!DiscoveryProtocol.localAddress(socket.getInetAddress())){socket.close();continue;}
+            // Directed TLS also supports overlay addresses (e.g. Tailscale 100.64/10).
+            // Inbound reachability is controlled by the bind address and OS firewall.
             if(!connectionSlots.tryAcquire()){socket.close();continue;}
             var peer=new Peer(socket);peers.add(peer);
             try{handshakes.execute(()->{try{socket.startHandshake();socket.setSoTimeout(1000);peer.handshaken=true;Thread.ofVirtual().name("tls-writer").start(peer::write);Thread.ofVirtual().name("tls-reader").start(peer::read);}catch(Exception e){peer.close();}});}catch(RejectedExecutionException busy){peer.close();}
@@ -119,11 +122,12 @@ public final class QuizServer implements AutoCloseable {
             if(++p.rateCount>60)throw fail("RATE_LIMITED","Gửi quá nhiều yêu cầu. Hãy chờ một chút.");
             if(type.equals("PING")){p.send(envelope("PONG",id,obj()));return;}
             if(type.equals("ROOM_BROWSE")){p.send(envelope("ROOM_BROWSE_OK",id,publicDirectory()));return;}
-            if(type.equals("LOGOUT")||type.equals("LEAVE")){p.send(envelope(type+"_OK",id,obj()));p.closeAfterWrite=true;detach(p);return;}
+            if(type.equals("LOGOUT")||type.equals("LEAVE")){var leaving=players.get(p.playerId);if(leaving!=null){leaving.resumeHash=null;leaving.resumeUntil=0;}p.send(envelope(type+"_OK",id,obj()));p.closeAfterWrite=true;detach(p);return;}
             if(p.authBusy)throw fail("SERVER_BUSY","Đang xử lý xác thực. Hãy chờ.");
             if(type.equals("LOGIN")){login(p,id,payload);return;}
             if(type.equals("REGISTER")){register(p,id,payload);return;}
             if(type.equals("JOIN")){join(p,id,request);return;}
+            if(type.equals("RESUME")){resume(p,id,request);return;}
             if(p.userId==0&&p.playerId.isEmpty())throw fail("AUTH_REQUIRED","Hãy đăng nhập hoặc tham gia phòng.");
             if(type.equals("PASSWORD_CHANGE")){manager(p);changePassword(p,id,payload);return;}
             if(p.mustChange)throw fail("PASSWORD_CHANGE_REQUIRED","Hãy đổi mật khẩu tạm trước khi tiếp tục.");
@@ -263,10 +267,10 @@ public final class QuizServer implements AutoCloseable {
     }
     private ObjectNode publicDirectory()throws SQLException{
         var data=obj().put("server_id",serverId).put("server_name","Quiz Battle · "+serverId.substring(0,4).toUpperCase(Locale.ROOT));
-        data.putArray("capabilities").add(ProximityRules.CAPABILITY);
+        data.putArray("capabilities").add(ProximityRules.CAPABILITY).add(ResumeRules.CAPABILITY);
         var rooms=array();
         if(owner!=0){
-            int count=(int)players.values().stream().filter(v->v.peer!=null&&!v.peer.gone.get()).count();
+            int count=players.size(); // Includes temporarily reserved seats.
             var host=store.account(owner);
             rooms.add(obj().put("room_code",roomCode).put("room_name",roomName).put("teacher_name",host==null?"Giảng viên":host.name()).put("phase",phase.name()).put("player_count",count).put("max_players",config.maxPlayers()).put("joinable",phase==GamePhase.WAITING&&count<config.maxPlayers()).put("proximity_enabled",proximity.isEnabled()).put("proximity_supported",true));
         }
@@ -354,8 +358,29 @@ public final class QuizServer implements AutoCloseable {
         String playerId=UUID.randomUUID().toString(),avatar=avatars.join(playerId);players.put(playerId,new Player(playerId,nickname,avatar,p));p.playerId=playerId;
         proximity.onPlayerJoin(playerId,nickname,avatar);
         boolean supports=false;for(var cap:request.path("payload").path("client_capabilities"))if(cap.asText().equals(LanTelemetryRules.CAPABILITY))supports=true;
-        telemetry.join(playerId,supports);
-        p.send(envelope("JOIN_OK",id,obj().put("player_id",playerId).put("nickname",nickname).put("avatar_id",avatar).put("room_code",roomCode)));broadcastState();emitProximityUpdate();
+        var player=players.get(playerId);player.telemetrySupported=supports;telemetry.join(playerId,supports);
+        for(var cap:request.path("payload").path("client_capabilities"))if(cap.asText().equals(ResumeRules.CAPABILITY))player.resumable=true;
+        var joined=obj().put("player_id",playerId).put("nickname",nickname).put("avatar_id",avatar).put("room_code",roomCode);
+        if(player.resumable)joined.set("resume",issueCredential(player));
+        p.send(envelope("JOIN_OK",id,joined));broadcastState();emitProximityUpdate();
+    }
+    private ObjectNode issueCredential(Player player){
+        String token=ResumeRules.token();player.resumeHash=ResumeRules.hash(token);player.resumeUntil=0;
+        return obj().put("token",token).put("player_id",player.id).put("room_generation",roomGeneration).put("room_code",roomCode).put("grace_seconds",config.resumeGraceSeconds());
+    }
+    private void resume(Peer p,String id,JsonNode request){
+        unauthenticated(p);var body=request.path("payload");var player=players.get(body.path("player_id").asText());long now=System.nanoTime();
+        String token=body.path("token").asText(),next=body.path("next_token").asText();
+        if(player==null||!roomGeneration.equals(body.path("room_generation").asText())||!roomCode.equals(request.path("room_code").asText())
+            ||!ResumeRules.matches(player.resumeHash,token)||(player.resumeUntil!=0&&now>=player.resumeUntil)||!ResumeRules.valid(next)||next.equals(token))
+            throw fail("RESUME_REJECTED","Phiên giữ chỗ không còn hợp lệ. Hãy tham gia lại khi phòng cho phép.");
+        var previous=player.peer;
+        if(previous!=null){previous.playerId="";previous.close();}
+        player.peer=p;p.playerId=player.id;player.ready=false;player.resumeUntil=0;player.resumeHash=ResumeRules.hash(next);
+        player.ipAddress=p.socket.getInetAddress().getHostAddress();
+        telemetry.join(player.id,player.telemetrySupported);proximity.onPlayerResume(player.id,player.nickname,player.avatar);
+        var restored=state(p,true);restored.put("player_id",player.id);
+        p.send(envelope("RESUME_OK",id,restored));broadcastState();emitProximityUpdate();
     }
     private String newCode(){String chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";var r=new java.security.SecureRandom();var b=new StringBuilder();for(int i=0;i<6;i++)b.append(chars.charAt(r.nextInt(chars.length())));return b.toString();}
     private void answer(Peer p,String id,JsonNode request){
@@ -378,6 +403,8 @@ public final class QuizServer implements AutoCloseable {
         boolean canTrack=viewer.userId!=0&&(viewer.userId==owner||viewer.role.equals("ADMIN"));
         for(var v:players.values()){boolean live=v.peer!=null&&!v.peer.gone.get();if(live){connected++;if(v.ready)ready++;if(!v.answer.isEmpty())answered++;}
             var entry=obj().put("player_id",v.id).put("nickname",v.nickname).put("avatar_id",v.avatar).put("ready",v.ready).put("connected",live);
+            entry.put("reconnecting",!live&&v.resumeHash!=null&&v.resumeUntil>System.nanoTime());
+            if(canTrack)entry.put("resume_remaining_ms",Math.max(0,TimeUnit.NANOSECONDS.toMillis(v.resumeUntil-System.nanoTime())));
             if(canTrack)entry.put("ip_address",v.ipAddress).put("answered",!v.answer.isEmpty()).put("score",v.score).put("correct_count",v.correct);
             if(canTrack||v.id.equals(viewer.playerId))entry.put("answer_elapsed_ms",v.answerElapsedMs).put("streak",v.streak).put("best_streak",v.bestStreak);
             if(canTrack||v.id.equals(viewer.playerId))telemetry.decorate(v.id,entry,live,System.nanoTime());
@@ -386,10 +413,12 @@ public final class QuizServer implements AutoCloseable {
             .put("question_count",questionCount).put("duration_seconds",questionSeconds).put("connected_player_count",connected).put("ready_count",ready).put("answered_count",answered).put("remaining_ms",remaining());
         state.put("question_set_id",questionSetId).put("question_set_name",questionSetName).put("question_source_name",historySessionId.isEmpty()?(questionSetId==0?"Toàn bộ ngân hàng":questionSetName):"Từ lịch sử: "+historyRoomName);
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
-        state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY);
+        state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY).add(ResumeRules.CAPABILITY);
         state.put("scoring_version",AnswerScoring.VERSION);
         state.set("proximity",proximity.buildRoomStateSection(viewer.playerId,running(),System.nanoTime()));
         state.set("players",list);
+        var self=players.get(viewer.playerId);
+        if(self!=null)state.set("self_answer",obj().put("answer",self.answer).put("recorded",!self.answer.isEmpty()).put("answer_elapsed_ms",self.answerElapsedMs));
         if(includeGame&&(viewer.userId==owner||!viewer.playerId.isEmpty())){
             if(!questions.isEmpty()){state.set("question",publicQuestion());if(phase==GamePhase.SHOW_RESULT||phase==GamePhase.SHOW_RANKING)state.set("result",roundResult(viewer));if(phase==GamePhase.FINISHED)state.set("result",finalResult(viewer));}
         }return state;
@@ -417,23 +446,30 @@ public final class QuizServer implements AutoCloseable {
         syncTelemetryContext();long now=System.nanoTime();
         var snapshot=proximity.buildMonitoringSnapshot(roomCode,roomName,phase.name(),session,running(),System.nanoTime());
         snapshot.put("topology_supported",true);snapshot.set("refresh",telemetry.refresh(now));
-        for(var value:snapshot.path("players")){var player=players.get(value.path("player_id").asText());if(player!=null&&value instanceof ObjectNode node){node.put("ip_address",player.ipAddress).put("ready",player.ready);telemetry.decorate(player.id,node,player.peer!=null&&!player.peer.gone.get(),now);}}
+        for(var value:snapshot.path("players")){var player=players.get(value.path("player_id").asText());if(player!=null&&value instanceof ObjectNode node){node.put("ip_address",player.ipAddress).put("ready",player.ready).put("reconnecting",player.peer==null&&player.resumeHash!=null&&player.resumeUntil>now);telemetry.decorate(player.id,node,player.peer!=null&&!player.peer.gone.get(),now);}}
         return snapshot;
     }
     private void syncTelemetryContext(){telemetry.context(roomCode+"|"+proximity.configEpoch()+"|"+(running()?session:""));}
     private void detach(Peer p){
         var v=players.get(p.playerId);if(v==null||v.peer!=p)return;v.peer=null;v.ready=false;
         telemetry.disconnect(v.id);
-        proximity.onPlayerDisconnect(v.id,running(),session,System.nanoTime());
-        if(!running()){players.remove(v.id);avatars.leave(v.id);telemetry.remove(v.id);}p.playerId="";
-        if(running()&&players.values().stream().noneMatch(player->player.peer!=null&&!player.peer.gone.get()))abort();else{broadcastState();emitProximityUpdate();}
+        long now=System.nanoTime();if(v.resumeHash!=null)v.resumeUntil=now+TimeUnit.SECONDS.toNanos(config.resumeGraceSeconds());
+        proximity.onPlayerDisconnect(v.id,running(),session,now,v.resumeHash!=null);
+        if(!running()&&v.resumeHash==null){players.remove(v.id);avatars.leave(v.id);telemetry.remove(v.id);}p.playerId="";
+        if(running()&&!hasLiveOrReserved(now))abort();else{broadcastState();emitProximityUpdate();}
     }
+    private boolean hasLiveOrReserved(long now){return players.values().stream().anyMatch(v->(v.peer!=null&&!v.peer.gone.get())||(v.resumeHash!=null&&(v.peer!=null||v.resumeUntil>now)));}
     private void tick()throws SQLException{
         long now=System.nanoTime();boolean changed=false;
         syncTelemetryContext();boolean netChanged=telemetry.tick(now);
         for(var v:players.values())if(v.peer!=null&&!v.peer.gone.get()){var probe=telemetry.probe(v.id,now);if(probe!=null)v.peer.send(envelope("NETWORK_PROBE",null,probe));}
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;
         for(var p:peers){if(now-p.lastSeen>TimeUnit.SECONDS.toNanos(20)||(p.userId==0&&p.playerId.isEmpty()&&now-p.connected>TimeUnit.SECONDS.toNanos(10)))p.close();if(p.gone.get()){detach(p);peers.remove(p);changed=true;}}
+        for(var it=players.values().iterator();it.hasNext();){var v=it.next();if(v.peer==null&&v.resumeHash!=null&&now>=v.resumeUntil){
+            v.resumeHash=null;v.resumeUntil=0;changed=true;
+            if(!running()){it.remove();avatars.leave(v.id);telemetry.remove(v.id);proximity.onPlayerDisconnect(v.id,false,session,now);}
+        }}
+        if(running()&&!hasLiveOrReserved(now)){abort();return;}
         boolean proxChanged=proximity.tick(running(),session,owner,roomName,roomCode,started,proximityStore,now);
         if(phase==GamePhase.WAITING&&proximity.isEnabled()){
             for(var v:players.values())if(v.ready&&!proximity.isReadyEligible(v.id,now)){v.ready=false;changed=true;proxChanged=true;}
@@ -466,10 +502,11 @@ public final class QuizServer implements AutoCloseable {
     private void resetRoom(){
         players.values().removeIf(v->{if(v.peer!=null&&!v.peer.gone.get()&&!v.peer.closeAfterWrite)return false;
             if(v.peer!=null){v.peer.playerId="";v.peer=null;}avatars.leave(v.id);telemetry.remove(v.id);proximity.onPlayerDisconnect(v.id,false,"",System.nanoTime());return true;});
-        phase=GamePhase.WAITING;roomCode=newCode();session="";questions=List.of();proximity.resetForNewMatchInSameRoom();
-        players.values().forEach(v->{v.ready=false;v.resetGame();});
+        phase=GamePhase.WAITING;roomCode=newCode();roomGeneration=UUID.randomUUID().toString();session="";questions=List.of();proximity.resetForNewMatchInSameRoom();
+        players.values().forEach(v->{v.ready=false;v.resetGame();if(v.resumable)v.peer.send(envelope("SESSION_CREDENTIALS",null,issueCredential(v)));});
     }
     private void closeRoom(){
+        roomGeneration=UUID.randomUUID().toString();
         for(var v:players.values())if(v.peer!=null){v.peer.send(envelope("ROOM_CLOSED",null,obj().put("message","Giảng viên đã đóng phòng.")));v.peer.closeAfterWrite=true;}
         players.clear();avatars.clear();proximity.resetAll();telemetry.clear();owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";historySessionId="";historyRoomName="";
     }

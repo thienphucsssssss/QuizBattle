@@ -211,6 +211,14 @@ final class ProximityRoomTracker {
     void onPlayerJoin(String playerId, String nickname, String avatarId) {
         players.put(playerId, new PlayerProximity(playerId, nickname, avatarId));
     }
+    void onPlayerResume(String playerId,String nickname,String avatarId) {
+        var p=players.get(playerId);
+        if(p==null){onPlayerJoin(playerId,nickname,avatarId);return;}
+        p.connected=true;p.apTrack.breakContinuity();p.apTrack.deviceStatus="NONE";
+        p.lastValidReportNano=0;p.lastDeviceStatus="NONE";p.rssiWindow.clear();
+        p.currentDistanceMeters=null;p.currentMedianRssi=null;p.currentMadDb=null;
+        // Old measurements remain stale until a new authenticated report arrives.
+    }
 
     void onPlayerUpdateAvatar(String playerId, String avatarId) {
         PlayerProximity p = players.get(playerId);
@@ -220,14 +228,20 @@ final class ProximityRoomTracker {
     }
 
     void onPlayerDisconnect(String playerId, boolean running, String sessionId, long nowNano) {
+        onPlayerDisconnect(playerId,running,sessionId,nowNano,false);
+    }
+    void onPlayerDisconnect(String playerId, boolean running, String sessionId, long nowNano, boolean keepSeat) {
         PlayerProximity p = players.get(playerId);
         if (p == null) return;
         p.connected = false;
         p.apTrack.breakContinuity();
-        if (!running) {
+        p.apTrack.deviceStatus="DISCONNECTED";
+        p.lastValidReportNano=0;p.lastDeviceStatus="NONE";
+        p.currentDistanceMeters=null;p.currentMedianRssi=null;p.currentMadDb=null;
+        if (!running && !keepSeat) {
             players.remove(playerId);
         } else {
-            markMissingData(p, true, sessionId, "Người chơi mất kết nối với phòng thi.", nowNano);
+            markMissingData(p, running, sessionId, "Người chơi mất kết nối với phòng thi.", nowNano);
         }
     }
 

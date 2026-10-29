@@ -130,6 +130,8 @@ class WindowsWifiSignalProviderTest {
     }
 
     private static final class FakeWlanApi implements WindowsWifiSignalProvider.WlanApi {
+        @Override public int WlanScan(Pointer h,Pointer g,Pointer s,Pointer ie,Pointer r){return 50;}
+        @Override public int WlanRegisterNotification(Pointer h,int source,boolean ignore,WindowsWifiSignalProvider.ScanCallback callback,Pointer context,Pointer reserved,IntByReference previous){return 50;}
         FakeMode mode = FakeMode.CONNECTED_5GHZ;
         final AtomicInteger opens = new AtomicInteger();
         final AtomicInteger closes = new AtomicInteger();

@@ -1,7 +1,5 @@
 package vn.edu.hutech.nqb.client;
 
-import vn.edu.hutech.nqb.shared.DiscoveryProtocol;
-import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -14,9 +12,14 @@ public final class LanDirectory {
     }
     public static List<Server> scan(ClientConnectionProfile profile) throws Exception {
         if(!java.nio.file.Files.isRegularFile(profile.truststore()))throw new IllegalStateException("Bộ cài chưa có chứng chỉ máy chủ. Nhận bộ cài Client từ Admin.");
+        if(!profile.automaticLan()) {
+            try {
+                var server=probe(profile,new Endpoint(profile.host(),profile.port()));
+                if(server==null)throw new IllegalStateException("Máy chủ trả về danh sách phòng không hợp lệ.");
+                return List.of(server);
+            } catch(Exception failure){throw new IllegalStateException(connectionError(failure),failure);}
+        }
         var endpoints=new LinkedHashSet<Endpoint>();
-        // Explicit legacy destinations are hints only. Automatic profiles carry no hotspot IP.
-        if(!profile.automaticLan())try { if(DiscoveryProtocol.localAddress(InetAddress.getByName(profile.host())))endpoints.add(new Endpoint(profile.host(),profile.port())); } catch(Exception ignored) { }
         try { endpoints.addAll(LanDiscovery.find(profile,650)); } catch(Exception ignored) { /* Directed TLS fallback remains available. */ }
         var pool=Executors.newFixedThreadPool(4,Thread.ofPlatform().daemon().name("lan-probe-",0).factory());
         var completion=new ExecutorCompletionService<Server>(pool);int submitted=0;
@@ -30,10 +33,19 @@ public final class LanDirectory {
             return servers.values().stream().sorted(Comparator.comparing(Server::name)).toList();
         } finally {pool.shutdownNow();}
     }
+    public static String connectionError(Throwable failure) {
+        for(Throwable e=failure;e!=null;e=e.getCause()) {
+            if(e instanceof javax.net.ssl.SSLException||e instanceof java.security.GeneralSecurityException)return "Không xác minh được chứng chỉ Server. Hãy dùng bộ cài Client được cấp cho đúng Server.";
+            if(e instanceof java.net.UnknownHostException||e instanceof java.nio.channels.UnresolvedAddressException)return "Không tìm được địa chỉ IP của hostname. Kiểm tra địa chỉ và kết nối mạng riêng.";
+            if(e instanceof java.net.SocketTimeoutException||e instanceof TimeoutException)return "Máy chủ phản hồi quá hạn. Kiểm tra mạng riêng, firewall và cổng TCP.";
+            if(e instanceof java.net.ConnectException||e instanceof java.net.NoRouteToHostException)return "Không mở được kết nối TCP. Kiểm tra Server đã chạy, địa chỉ, cổng và firewall.";
+        }
+        return failure instanceof IllegalStateException?failure.getMessage():"Không liên lạc được máy chủ. Kiểm tra cấu hình kết nối.";
+    }
     private static Server probe(ClientConnectionProfile profile,Endpoint endpoint)throws Exception {
         char[] secret=profile.truststorePassword().toCharArray();
-        try(var gateway=TlsQuizGateway.connect(endpoint,profile.truststore(),secret,1500)) {
-            var response=gateway.request("ROOM_BROWSE",QuizGateway.object()).get(1500,TimeUnit.MILLISECONDS);
+        try(var gateway=TlsQuizGateway.connect(endpoint,profile.truststore(),secret,profile.automaticLan()?1500:5000)) {
+            var response=gateway.request("ROOM_BROWSE",QuizGateway.object()).get(profile.automaticLan()?1500:5000,TimeUnit.MILLISECONDS);
             String id=response.path("server_id").asText(),name=response.path("server_name").asText();
             if(!id.matches("[a-f0-9-]{36}")||name.isBlank()||name.length()>80||!response.path("rooms").isArray()||response.path("rooms").size()>1)return null;
             var rooms=new ArrayList<Room>();

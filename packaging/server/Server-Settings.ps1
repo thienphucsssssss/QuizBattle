@@ -45,6 +45,8 @@ function Read-NqbSettings {
     if($null -eq $nqbSettings.PSObject.Properties['registration']){$nqbSettings | Add-Member -NotePropertyName registration -NotePropertyValue ([pscustomobject]@{enabled=$true})}
     if($nqbSettings.registration.enabled -isnot [bool]){throw 'registration.enabled must be true or false.'}
     if($null -eq $nqbSettings.PSObject.Properties['discovery']){$nqbSettings | Add-Member -NotePropertyName discovery -NotePropertyValue ([pscustomobject]@{port=5051})}
+    if($null -eq $nqbSettings.PSObject.Properties['session']){$nqbSettings | Add-Member -NotePropertyName session -NotePropertyValue ([pscustomobject]@{resumeGraceSeconds=60})}
+    if([int]$nqbSettings.session.resumeGraceSeconds -lt 1 -or [int]$nqbSettings.session.resumeGraceSeconds -gt 300){throw 'session.resumeGraceSeconds must be between 1 and 300.'}
     $nqbDiscoveryPort=[int]$nqbSettings.discovery.port
     if($nqbDiscoveryPort -lt 1 -or $nqbDiscoveryPort -gt 65535){throw 'discovery.port must be between 1 and 65535.'}
     return $nqbSettings
@@ -55,7 +57,7 @@ function Write-NqbRuntimeConfig($Settings) {
     if(-not $nqbAuto) {
         if(-not [Net.IPAddress]::TryParse([string]$Settings.server.bind,[ref]$nqbAddress) -or $nqbAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork){throw 'server.bind must be auto or a private LAN IPv4 address.'}
         $nqbIpBytes=$nqbAddress.GetAddressBytes()
-        if(-not($nqbIpBytes[0] -eq 10 -or $nqbIpBytes[0] -eq 127 -or ($nqbIpBytes[0] -eq 172 -and $nqbIpBytes[1] -ge 16 -and $nqbIpBytes[1] -le 31) -or ($nqbIpBytes[0] -eq 192 -and $nqbIpBytes[1] -eq 168))){throw 'server.bind must be auto or a private LAN/loopback IPv4 address.'}
+        if(-not($nqbIpBytes[0] -eq 10 -or $nqbIpBytes[0] -eq 127 -or ($nqbIpBytes[0] -eq 172 -and $nqbIpBytes[1] -ge 16 -and $nqbIpBytes[1] -le 31) -or ($nqbIpBytes[0] -eq 192 -and $nqbIpBytes[1] -eq 168) -or ($nqbIpBytes[0] -eq 100 -and $nqbIpBytes[1] -ge 64 -and $nqbIpBytes[1] -le 127))){throw 'server.bind must be auto, private LAN, overlay or loopback IPv4.'}
     }
     $nqbPort=[int]$Settings.server.port;$nqbPlayers=[int]$Settings.server.maxPlayers;$nqbConnections=[int]$Settings.server.maxConnections
     if($nqbPort -lt 0 -or $nqbPort -gt 65535 -or $nqbPlayers -lt 2 -or $nqbPlayers -gt 10 -or $nqbConnections -lt ($nqbPlayers+1) -or $nqbConnections -gt 128){throw 'Invalid port/player/connection limits in config/server.json.'}
@@ -63,6 +65,7 @@ function Write-NqbRuntimeConfig($Settings) {
     $nqbLines=@('# Generated public settings. Edit server.json instead.',"server.bind=$($Settings.server.bind)","server.port=$nqbPort","server.maxPlayers=$nqbPlayers","server.maxConnections=$nqbConnections",('database.path='+$Settings.database.path.Replace('\','/')),('tls.keystore='+$Settings.tls.keyStore.Replace('\','/')))
     $nqbLines+=('registration.enabled='+([string]$Settings.registration.enabled).ToLowerInvariant())
     $nqbLines+=('discovery.port='+[int]$Settings.discovery.port)
+    $nqbLines+=('session.resumeGraceSeconds='+[int]$Settings.session.resumeGraceSeconds)
     [IO.File]::WriteAllLines((Join-Path $nqbRoot 'config/server.runtime.properties'),[string[]]$nqbLines,[Text.UTF8Encoding]::new($false))
 }
 function Protect-NqbPassword([string]$Password) {

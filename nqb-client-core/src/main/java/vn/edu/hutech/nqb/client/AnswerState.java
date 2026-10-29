@@ -23,6 +23,11 @@ public final class AnswerState {
             status = accepted ? Status.RECORDED : Status.REJECTED;
         }
     }
+    /** Only an authoritative Server snapshot can restore an already recorded choice. */
+    public void restoreRecorded(String choice){
+        if(choice==null||!choice.matches("[ABCD]"))throw new IllegalArgumentException("Invalid recorded answer");
+        answer=choice;status=Status.RECORDED;
+    }
     public void expire(long now) {
         if (now >= deadline && status == Status.OPEN) status = Status.EXPIRED;
     }

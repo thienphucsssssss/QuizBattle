@@ -37,13 +37,14 @@ public final class ArcadeApplication extends Application {
     private final Preferences prefs = Preferences.userNodeForPackage(ArcadeApplication.class);
     private QuizGateway gateway;
     private LanEntryPane lanEntry;
-    private record OpenedConnection(LanEntryPane.Target target,TlsQuizGateway gateway) { }
+    private record OpenedConnection(LanEntryPane.Target target,QuizGateway gateway) { }
     private JsonNode user = object(), room = object(), question = object(), result = object();
     private String role = "", route = "", session = "", nickname = "";
     private long answerElapsedMs=-1;
     private int answerStreak;
     private Label answerTimingLabel,answerStreakLabel;
     private volatile int connectionGeneration;
+    private int requestGeneration;
     private record ProximityContext(int epoch, String sessionId) { }
     private volatile ProximityContext proximityContext = new ProximityContext(1, "");
     private boolean wifiReadPending;
@@ -220,7 +221,7 @@ public final class ArcadeApplication extends Application {
             }
             if (identity.getText().isBlank() || (!selectedRole.equals("STUDENT") && password.getText().isEmpty())) { showError(error, "Điền đầy đủ thông tin trước khi kết nối."); return; }
             String loginSecret = password.getText(); String username = identity.getText().strip(), name = displayName.getText().strip();
-            error.setVisible(false); error.setManaged(false); connect.setDisable(true); connect.setText("Đang kết nối…");
+            error.setVisible(false); error.setManaged(false); connect.setDisable(true); connect.setText("Đang kết nối…");lanEntry.setDisable(true);
             int token = ++connectionGeneration;
             lanEntry.resolveTarget().thenCompose(target->CompletableFuture.supplyAsync(() -> {
                 char[] secret = null;
@@ -228,14 +229,14 @@ public final class ArcadeApplication extends Application {
                     var profile = ClientConnectionProfile.load();
                     if (!java.nio.file.Files.isRegularFile(profile.truststore())) throw new IllegalStateException("Bộ cài chưa có chứng chỉ của máy chủ. Nhận bộ cài Client từ Admin.");
                     secret = profile.truststorePassword().toCharArray();
-                    return new OpenedConnection(target,TlsQuizGateway.connect(target.endpoint(), profile.truststore(), secret));
+                    return new OpenedConnection(target,ResumingQuizGateway.connect(target.endpoint(),profile));
                 }
                 catch (Exception failure) { throw new CompletionException(failure); }
                 finally { if (secret != null) Arrays.fill(secret, '\0'); }
             })).whenComplete((opened, failure) -> Platform.runLater(() -> {
                 var newGateway=opened==null?null:opened.gateway();
                 if (token != connectionGeneration) { if (newGateway != null) newGateway.close(); return; }
-                if (failure != null) { connect.setDisable(false); connect.setText(selectedRole.equals("STUDENT")?"Tham gia phòng   →":"Thử kết nối lại"); showError(error, unwrap(failure) instanceof IllegalStateException ? message(failure) : "Không kết nối được máy chủ. Kiểm tra Server đã bật, cùng mạng và dùng đúng bộ cài Client."); return; }
+                if (failure != null) { lanEntry.setDisable(false);connect.setDisable(false); connect.setText(selectedRole.equals("STUDENT")?"Tham gia phòng   →":"Thử kết nối lại"); showError(error, LanDirectory.connectionError(unwrap(failure))); return; }
                 gateway = newGateway; attachEvents(); disconnected = false;
                 ObjectNode payload = object(); if (selectedRole.equals("STUDENT")) payload.put("nickname", username).put("room_code", opened.target().roomCode()); else payload.put("username", username).put("password", loginSecret);
                 var accountCreated = new java.util.concurrent.atomic.AtomicBoolean();
@@ -247,7 +248,7 @@ public final class ArcadeApplication extends Application {
                     payload.remove("password");
                     if (token != connectionGeneration) return;
                     if (loginFailure != null) {
-                        closeGateway(); connect.setDisable(false);
+                        closeGateway();lanEntry.setDisable(false);connect.setDisable(false);
                         if (accountCreated.get()) {
                             password.clear(); confirmation.clear(); showError(error, "Đã tạo tài khoản. Hãy quay lại đăng nhập để tiếp tục.");
                             connect.setText("Đăng nhập   →"); connect.setOnAction(retry -> auth("TEACHER"));
@@ -256,7 +257,7 @@ public final class ArcadeApplication extends Application {
                     }
                     password.clear(); confirmation.clear();
                     role = selectedRole.equals("STUDENT") ? "STUDENT" : response.path("role").asText();
-                    if (!List.of("STUDENT", "TEACHER", "ADMIN").contains(role) || !role.equals(selectedRole)) { closeGateway(); showError(error, "Tài khoản không thuộc vai trò đã chọn. Hãy chọn đúng vai trò để đăng nhập."); connect.setDisable(false); connect.setText("Đăng nhập   →"); return; }
+                    if (!List.of("STUDENT", "TEACHER", "ADMIN").contains(role) || !role.equals(selectedRole)) { closeGateway();lanEntry.setDisable(false);showError(error, "Tài khoản không thuộc vai trò đã chọn. Hãy chọn đúng vai trò để đăng nhập."); connect.setDisable(false); connect.setText("Đăng nhập   →"); return; }
                     user = response;bankSelectedQuestions.clear();bankQuestionSet=0; nickname = selectedRole.equals("STUDENT") ? username : nickname;
                     sfx.configure(role, qa); music.configure(role, qa); sfx.play(SfxSlots.Cue.CONNECTION_UP);
                     chooseAvatarAfterJoin = selectedRole.equals("STUDENT");
@@ -320,7 +321,8 @@ public final class ArcadeApplication extends Application {
     void call(String type, ObjectNode payload, Consumer<JsonNode> success, Consumer<Throwable> failure) {
         if (gateway == null || disconnected) { failure.accept(new GatewayException("DISCONNECTED", "Chưa kết nối. Hãy kết nối lại.", object())); return; }
         int token = connectionGeneration;
-        gateway.request(type, payload).whenComplete((value, error) -> Platform.runLater(() -> { if (token != connectionGeneration) return; if (error != null) failure.accept(unwrap(error)); else { updateProximityContext(value); success.accept(value); } }));
+        int requestToken=requestGeneration;
+        gateway.request(type, payload).whenComplete((value, error) -> Platform.runLater(() -> { if (token != connectionGeneration||requestToken!=requestGeneration) return; if (error != null) failure.accept(unwrap(error)); else { updateProximityContext(value); success.accept(value); } }));
     }
     private static Throwable unwrap(Throwable error) { while (error instanceof CompletionException && error.getCause() != null) error = error.getCause(); return error; }
     static String message(Throwable error) { error = unwrap(error); return error.getMessage() == null ? "Không hoàn thành yêu cầu. Hãy thử lại." : error.getMessage(); }
@@ -371,7 +373,11 @@ public final class ArcadeApplication extends Application {
                 question = room.path("question").isObject() ? room.path("question") : object();
                 result = room.path("result").isObject() ? room.path("result") : object();
                 phaseDeadline = System.nanoTime() + room.path("remaining_ms").asLong() * 1_000_000L;
-                if (room.path("phase").asText().equals("QUESTION_ACTIVE") && (answer == null || answer.questionId() != question.path("question_id").asLong())) answer = new AnswerState(question.path("question_id").asLong(), room.path("remaining_ms").asLong(), System.nanoTime());
+                if (room.path("phase").asText().equals("QUESTION_ACTIVE")) {
+                    answer = new AnswerState(question.path("question_id").asLong(), room.path("remaining_ms").asLong(), System.nanoTime());
+                    var saved=room.path("self_answer");
+                    if(saved.path("recorded").asBoolean()){answer.restoreRecorded(saved.path("answer").asText());answerElapsedMs=saved.path("answer_elapsed_ms").asLong(-1);updateAnswerMeta();}
+                }
                 if (result.has("ranking")) currentRanking = result.path("ranking").deepCopy();
                 gameView(); if (isRunning()) startPulse();
             } else { lobby(); if (chooseAvatarAfterJoin) { chooseAvatarAfterJoin = false; avatarPicker(); } }
@@ -435,7 +441,7 @@ public final class ArcadeApplication extends Application {
         var tiles = new FlowPane(12, 12);
         for (JsonNode player : room.path("players")) {
             String n = player.path("nickname").asText();
-            var entry = column(4, QuizlingArt.avatar(player.path("avatar_id").asText(), 108), text(n, "subtitle"), text(player.path("ready").asBoolean() ? "✓ Sẵn sàng" : "Đang chuẩn bị", "muted"));
+            var entry = column(4, QuizlingArt.avatar(player.path("avatar_id").asText(), 108), text(n, "subtitle"), text(player.path("reconnecting").asBoolean()?"Đang kết nối lại…":!player.path("connected").asBoolean()?"Ngắt kết nối":player.path("ready").asBoolean() ? "✓ Sẵn sàng" : "Đang chuẩn bị", "muted"));
             entry.setAlignment(Pos.CENTER); entry.setPrefWidth(185); entry.getStyleClass().add("player-seat"); tiles.getChildren().add(entry);
         }
         people.getChildren().add(tiles);
@@ -762,6 +768,20 @@ public final class ArcadeApplication extends Application {
     private void event(JsonNode event) {
         JsonNode p = event.path("payload");
         switch (event.path("type").asText()) {
+            case "RECONNECTING":
+                requestGeneration++;
+                disconnected=true;music.stop();closeProximityDialogs();wifiReadPending=false;
+                proximityReportingActive=false;proximityClient.stopSession();
+                if(avatarDialog!=null)avatarDialog.close();
+                answerButtons.forEach(b->b.setDisable(true));if(readyButton!=null)readyButton.setDisable(true);
+                connectionLabel.setText("Đang kết nối lại…");
+                notice("Đang giữ chỗ tối đa "+p.path("grace_seconds").asInt(60)+" giây. Đồng hồ thi vẫn chạy trên Server.",false);
+                root.setBottom(button("Rời phòng", "quiet",this::welcome));break;
+            case "RECONNECTED":
+                disconnected=false;connectionLabel.setText("Đã khôi phục kết nối");root.setBottom(null);
+                feedback.setVisible(false);feedback.setManaged(false);
+                answer=null;room=p;session=p.path("session_id").asText();updateProximityContext(p);
+                startStudentProximityReporting(null);roomView();break;
             case "DISCONNECTED":
                 music.stop();
                 closeProximityDialogs(); wifiReadPending=false;
@@ -1004,7 +1024,8 @@ public final class ArcadeApplication extends Application {
         var musicVolume = new Slider(0, 100, music.volume() * 100); musicVolume.setId("music-volume"); musicVolume.setAccessibleText("Âm lượng nhạc nền"); musicVolume.setShowTickLabels(true); musicVolume.setMajorTickUnit(25); musicVolume.setBlockIncrement(5); musicVolume.disableProperty().bind(background.selectedProperty().not());
         var musicStatus = text(music.status(), "muted"); musicStatus.setId("music-status");
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));
-        var content = column(16, reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
+        var scanWifi=button("Chẩn đoán quét Wi-Fi", "quiet",()->WifiScanViews.open(this,proximityClient));scanWifi.setId("wifi-scan-open");
+        var content = column(16, scanWifi, new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
         var scroller = scroll(content); scroller.setPrefViewportWidth(460); scroller.setPrefViewportHeight(Math.min(410, Math.max(240, stage.getHeight() - 240)));
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); styleDialog(dialog); dialog.setHeaderText("Tùy chọn"); dialog.setResizable(true);
         dialog.getDialogPane().setContent(scroller);

@@ -9,6 +9,8 @@ public record Endpoint(String host, int port) {
             throw new IllegalArgumentException("Host is required");
         }
         host = host.trim();
+        if(host.length()>253||host.chars().anyMatch(c->Character.isWhitespace(c)||Character.isISOControl(c))||host.contains("/")||host.contains("@")||host.contains("\\"))
+            throw new IllegalArgumentException("Nhập IP hoặc hostname máy chủ, không nhập URL.");
         if (host.equals("0.0.0.0") || host.equals("::")) {
             throw new IllegalArgumentException("Use the server LAN IP, not a bind address");
         }

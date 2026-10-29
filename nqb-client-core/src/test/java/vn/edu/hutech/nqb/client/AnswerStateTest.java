@@ -4,6 +4,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AnswerStateTest {
+    @Test void serverSnapshotRestoresRecordedAnswerEvenAtDeadlineWithoutSubmittingAgain(){
+        var state=new AnswerState(8,0,0);state.restoreRecorded("C");
+        assertEquals(AnswerState.Status.RECORDED,state.status());assertEquals("C",state.answer());
+        assertFalse(state.submit("A",1));assertThrows(IllegalArgumentException.class,()->state.restoreRecorded("X"));
+    }
     @Test void locksFirstChoiceAndOnlyAckRecordsIt() {
         var state = new AnswerState(25, 1000, 0);
         assertTrue(state.submit("B", 1));

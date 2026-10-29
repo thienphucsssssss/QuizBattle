@@ -8,6 +8,31 @@ import java.util.Properties;
 public record ClientConnectionProfile(String host, int port, Path truststore, String truststorePassword, int discoveryPort) {
     public ClientConnectionProfile(String host,int port,Path truststore,String truststorePassword){this(host,port,truststore,truststorePassword,5051);}
     public boolean automaticLan() { return host.equalsIgnoreCase("auto"); }
+    public ClientConnectionProfile destination(String host,int port) {
+        var endpoint=new Endpoint(host,port);
+        return new ClientConnectionProfile(endpoint.host(),endpoint.port(),truststore,truststorePassword,discoveryPort);
+    }
+    private static Path selectionFile() {
+        return Path.of(System.getProperty("nqb.connection.settings",Path.of(System.getProperty("user.home"),".quizbattle","connection.properties").toString()));
+    }
+    /** Only the destination is persisted; trust always comes from the distributed profile. */
+    public static ClientConnectionProfile loadSelected() throws IOException {
+        var base=load();var path=selectionFile();
+        if(!Files.isRegularFile(path))return base;
+        var p=new Properties();try(var in=Files.newBufferedReader(path)){p.load(in);}
+        try{return base.destination(p.getProperty("host","auto"),Integer.parseInt(p.getProperty("port","5050")));}
+        catch(IllegalArgumentException invalid){throw new IOException("Địa chỉ máy chủ đã lưu không hợp lệ. Hãy nhập lại.",invalid);}
+    }
+    public void saveSelection() throws IOException {
+        var target=selectionFile().toAbsolutePath();Files.createDirectories(target.getParent());
+        var temp=Files.createTempFile(target.getParent(),"connection-",".tmp");
+        try {
+            var p=new Properties();p.setProperty("host",host);p.setProperty("port",String.valueOf(port));
+            try(var out=Files.newBufferedWriter(temp)){p.store(out,"QuizBattle destination (no credentials)");}
+            try{Files.move(temp,target,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);}
+            catch(AtomicMoveNotSupportedException e){Files.move(temp,target,StandardCopyOption.REPLACE_EXISTING);}
+        } finally {Files.deleteIfExists(temp);}
+    }
     public static ClientConnectionProfile load() throws IOException {
         Path directory = Path.of(System.getProperty("nqb.app.dir", ".")).toAbsolutePath();
         Path file = Path.of(System.getProperty("nqb.client.config", directory.resolve("client.properties").toString())).toAbsolutePath();

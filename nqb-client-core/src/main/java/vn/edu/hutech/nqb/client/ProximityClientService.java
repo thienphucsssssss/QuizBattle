@@ -59,6 +59,7 @@ public final class ProximityClientService implements AutoCloseable {
     private final AtomicInteger calibrationGeneration = new AtomicInteger();
     private final AtomicLong reportSequence = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean scanQueued = new AtomicBoolean();
     private final Deque<Integer> recentSamples = new ArrayDeque<>(ProximityRules.MEDIAN_WINDOW_SIZE);
 
     private ScheduledFuture<?> reportingTask;
@@ -187,6 +188,30 @@ public final class ProximityClientService implements AutoCloseable {
             });
         } catch (RejectedExecutionException stopped) { future.cancel(false); }
         return future;
+    }
+    public CompletableFuture<List<WifiScanProvider.Adapter>> scanAdaptersAsync(){
+        var result=new CompletableFuture<List<WifiScanProvider.Adapter>>();
+        try{worker.execute(()->{try{result.complete(provider instanceof WifiScanProvider scanner?scanner.scanAdapters():List.of());}catch(Exception e){result.completeExceptionally(e);}});}
+        catch(RejectedExecutionException e){result.completeExceptionally(e);}return result;
+    }
+    /** Runs on the same native worker as RSSI/calibration; only one scan may be queued. */
+    public CompletableFuture<WifiScanSnapshot> scanAsync(String adapter,String ssid){
+        var result=new CompletableFuture<WifiScanSnapshot>();int gen=generation.get();
+        if(!scanQueued.compareAndSet(false,true))return CompletableFuture.failedFuture(new IllegalStateException("Đang có lượt quét Wi-Fi."));
+        try{worker.execute(()->{
+            try {
+                if(closed.get()||gen!=generation.get()||result.isCancelled()){result.cancel(false);return;}
+                if(calibrationTask!=null||freshCapture!=null)throw new IllegalStateException("Hoàn tất hoặc hủy lượt hiệu chuẩn/đo hiện tại trước khi quét.");
+                if(!(provider instanceof WifiScanProvider scanner)){result.complete(WifiScanSnapshot.failure(WifiScanSnapshot.Status.UNSUPPORTED,"Thiết bị chưa hỗ trợ quét nhiều BSSID."));return;}
+                var value=scanner.scan(adapter,ssid);
+                // Do not mix pre-scan and post-scan readings into one median window.
+                recentSamples.clear();lastSampleKey="";
+                if(closed.get()||gen!=generation.get()||result.isCancelled()){result.cancel(false);return;}
+                if(value.freshCount()>0)new WifiObservationCatalog().record(value);
+                result.complete(value);
+            }catch(Exception e){result.completeExceptionally(e);}finally{scanQueued.set(false);}
+        });}catch(RejectedExecutionException e){scanQueued.set(false);result.completeExceptionally(e);}
+        result.whenComplete((v,e)->{if(result.isCancelled()&&provider instanceof WifiScanProvider scanner)scanner.cancelScan();});return result;
     }
 
     public synchronized void startReporting(
@@ -395,6 +420,7 @@ public final class ProximityClientService implements AutoCloseable {
 
     public synchronized void stopSession() {
         generation.incrementAndGet();
+        if(provider instanceof WifiScanProvider scanner)scanner.cancelScan();
         cancelTasksOnly();
         latestReading = null;
         try { worker.execute(() -> {

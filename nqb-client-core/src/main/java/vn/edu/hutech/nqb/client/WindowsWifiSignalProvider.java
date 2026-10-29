@@ -1,21 +1,21 @@
 package vn.edu.hutech.nqb.client;
 
-import com.sun.jna.Library;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.*;
+import java.util.concurrent.*;
+import com.sun.jna.win32.StdCallLibrary;
 
 /**
  * Windows Native Wi-Fi (wlanapi.dll) signal provider using JNA.
  * Opens WLAN handle lazily on first readSignal() call and frees all native buffers deterministically.
  */
-public final class WindowsWifiSignalProvider implements WifiSignalProvider {
+public final class WindowsWifiSignalProvider implements WifiSignalProvider, WifiScanProvider {
 
     static final int ERROR_SUCCESS = 0;
     static final int ERROR_ACCESS_DENIED = 5;
@@ -36,7 +36,10 @@ public final class WindowsWifiSignalProvider implements WifiSignalProvider {
     private static final int INTERFACE_INFO_SIZE = 532;
     private static final int BSS_ENTRY_SIZE = 360;
 
-    interface WlanApi extends Library {
+    interface ScanCallback extends StdCallLibrary.StdCallCallback { void invoke(Pointer notification,Pointer context); }
+    interface WlanApi extends StdCallLibrary {
+        int WlanScan(Pointer handle,Pointer guid,Pointer ssid,Pointer ieData,Pointer reserved);
+        int WlanRegisterNotification(Pointer handle,int source,boolean ignoreDuplicate,ScanCallback callback,Pointer context,Pointer reserved,IntByReference previous);
         int WlanOpenHandle(
             int dwClientVersion,
             Pointer pReserved,
@@ -81,13 +84,128 @@ public final class WindowsWifiSignalProvider implements WifiSignalProvider {
     private final Map<String, CachedBssInfo> bssCache = new ConcurrentHashMap<>();
     private Pointer clientHandle;
     private boolean closed;
+    private volatile CompletableFuture<Integer> scanCompletion;
+    private final Map<String,Long> seenTimestamps=new LinkedHashMap<>();
+    private long lastScanNano;
+    private final long scanTimeoutMillis,scanCooldownMillis;
 
     public WindowsWifiSignalProvider() {
         this(loadWlanApi());
     }
 
     WindowsWifiSignalProvider(WlanApi api) {
-        this.api = api;
+        this(api,5000,5000);
+    }
+    WindowsWifiSignalProvider(WlanApi api,long timeoutMillis,long cooldownMillis) {
+        this.api=api;this.scanTimeoutMillis=timeoutMillis;this.scanCooldownMillis=cooldownMillis;
+    }
+
+    @Override public synchronized List<WifiScanProvider.Adapter> scanAdapters() {
+        if(closed||api==null)return List.of();
+        int code=ensureHandle();if(code!=0)throw new IllegalStateException("Không mở được Wi-Fi Windows (code="+code+").");
+        var ref=new PointerByReference();code=api.WlanEnumInterfaces(clientHandle,null,ref);var ptr=ref.getValue();
+        try {
+            if(code!=0)throw new IllegalStateException("Không đọc được card Wi-Fi (code="+code+").");
+            if(ptr==null)return List.of();int count=ptr.getInt(0);
+            if(count<0||count>64)throw new IllegalStateException("Danh sách card Wi-Fi không hợp lệ.");
+            var result=new ArrayList<WifiScanProvider.Adapter>();
+            for(int i=0;i<count;i++){long offset=8L+i*INTERFACE_INFO_SIZE;
+                result.add(new WifiScanProvider.Adapter(formatGuid(ptr.getByteArray(offset,16)),readWideString(ptr,offset+16,256),ptr.getInt(offset+528)==1));}
+            return List.copyOf(result);
+        }finally{if(ptr!=null)api.WlanFreeMemory(ptr);}
+    }
+    @Override public void cancelScan(){var pending=scanCompletion;if(pending!=null)pending.cancel(false);}
+
+    @Override public synchronized WifiScanSnapshot scan(String adapterId,String ssid) {
+        var status=WifiScanSnapshot.Status.ERROR;
+        long started=System.currentTimeMillis();
+        if(closed)return WifiScanSnapshot.failure(WifiScanSnapshot.Status.CANCELLED,"Bộ quét đã đóng.");
+        if(api==null)return WifiScanSnapshot.failure(WifiScanSnapshot.Status.UNSUPPORTED,"Quét nhiều BSSID yêu cầu Windows Native Wi-Fi.");
+        if(lastScanNano!=0&&System.nanoTime()-lastScanNano<TimeUnit.MILLISECONDS.toNanos(scanCooldownMillis))
+            return WifiScanSnapshot.failure(WifiScanSnapshot.Status.THROTTLED,"Chờ ít nhất 5 giây giữa hai yêu cầu quét.");
+        WifiScanProvider.Adapter adapter;
+        try{adapter=scanAdapters().stream().filter(a->a.id().equals(adapterId)).findFirst().orElse(null);}
+        catch(RuntimeException error){return WifiScanSnapshot.failure(status,error.getMessage());}
+        if(adapter==null)return WifiScanSnapshot.failure(WifiScanSnapshot.Status.NO_ADAPTER,"Chọn card Wi-Fi đang dùng để quét.");
+        if(ssid==null)ssid="";
+        if(ssid.getBytes(StandardCharsets.UTF_8).length>32)return WifiScanSnapshot.failure(status,"SSID dài tối đa 32 byte.");
+        try(var guid=guidMemory(adapterId)) {
+            String associated=associatedBssid(guid);
+            var completion=new CompletableFuture<Integer>();scanCompletion=completion;
+            ScanCallback callback=(data,context)->{
+                if(data==null)return;
+                if((data.getInt(0)&8)!=0&&formatGuid(data.getByteArray(8,16)).equals(adapterId)){
+                    int event=data.getInt(4);if(event==7||event==8)completion.complete(event);
+                }
+            };
+            int registered=api.WlanRegisterNotification(clientHandle,8,false,callback,null,null,new IntByReference());
+            if(registered!=0){scanCompletion=null;return scanError(registered,"Đăng ký thông báo quét");}
+            try {
+                started=System.currentTimeMillis();lastScanNano=System.nanoTime();
+                int code=api.WlanScan(clientHandle,guid,null,null,null);
+                if(code!=0)return scanError(code,"Yêu cầu quét");
+                try{if(completion.get(scanTimeoutMillis,TimeUnit.MILLISECONDS)!=7)return WifiScanSnapshot.failure(status,"Driver báo quét thất bại. Thử lại sau.");}
+                catch(TimeoutException timeout){return WifiScanSnapshot.failure(WifiScanSnapshot.Status.TIMEOUT,"Chưa nhận được thông báo quét hoàn tất; không dùng cache làm mẫu mới.");}
+                catch(CancellationException cancelled){return WifiScanSnapshot.failure(WifiScanSnapshot.Status.CANCELLED,"Đã hủy quét.");}
+                catch(InterruptedException interrupted){Thread.currentThread().interrupt();return WifiScanSnapshot.failure(WifiScanSnapshot.Status.CANCELLED,"Đã dừng quét.");}
+                catch(ExecutionException failed){return WifiScanSnapshot.failure(status,"Quét Wi-Fi thất bại.");}
+                var ref=new PointerByReference();code=api.WlanGetNetworkBssList(clientHandle,guid,null,3,false,null,ref);var ptr=ref.getValue();
+                try {
+                    if(code!=0)return scanError(code,"Đọc kết quả quét");
+                    long completed=System.currentTimeMillis();String after=associatedBssid(guid);
+                    if(!associated.equals(after))associated=""; // Association changed during scan.
+                    var all=parseScanEntries(ptr,adapterId,ssid,associated,started,completed,seenTimestamps);
+                    int omitted=Math.max(0,all.size()-64);var observations=all.stream().limit(64).toList();
+                    status=all.isEmpty()?WifiScanSnapshot.Status.NO_RESULTS:all.stream().anyMatch(WifiObservation::fresh)?WifiScanSnapshot.Status.COMPLETE:WifiScanSnapshot.Status.STALE;
+                    return new WifiScanSnapshot(UUID.randomUUID().toString(),adapter.id(),adapter.name(),ssid,associated,started,completed,status,
+                        status==WifiScanSnapshot.Status.STALE?"Driver chỉ trả dữ liệu cũ; chưa có mẫu mới.":status==WifiScanSnapshot.Status.NO_RESULTS?"Không thấy BSSID phù hợp SSID đã chọn.":"Đã nhận thông báo quét hoàn tất.",omitted,observations);
+                }finally{if(ptr!=null)api.WlanFreeMemory(ptr);}
+            }finally{
+                scanCompletion=null;
+                // Unregister outside the callback; callbacks never acquire this provider's lock.
+                int unregister=api.WlanRegisterNotification(clientHandle,0,false,null,null,null,new IntByReference());
+                if(unregister!=0)closeHandleInternal();
+                java.lang.ref.Reference.reachabilityFence(callback);
+            }
+        }catch(RuntimeException error){return WifiScanSnapshot.failure(status,"Dữ liệu hoặc driver quét Wi-Fi không hợp lệ: "+error.getClass().getSimpleName());}
+    }
+    private WifiScanSnapshot scanError(int code,String operation){
+        var status=switch(code){case ERROR_ACCESS_DENIED->WifiScanSnapshot.Status.PERMISSION_DENIED;case ERROR_SERVICE_NOT_ACTIVE,0x80342002->WifiScanSnapshot.Status.WIFI_DISABLED;default->WifiScanSnapshot.Status.ERROR;};
+        return WifiScanSnapshot.failure(status,status==WifiScanSnapshot.Status.PERMISSION_DENIED?"Windows chặn quyền vị trí. Bật Location và quyền cho ứng dụng desktop, rồi thử lại.":operation+" thất bại (code="+Integer.toUnsignedString(code)+").");
+    }
+    private String associatedBssid(Pointer guid){
+        var size=new IntByReference();var ref=new PointerByReference();int code=api.WlanQueryInterface(clientHandle,guid,OPCODE_CURRENT_CONNECTION,null,size,ref,new IntByReference());var ptr=ref.getValue();
+        try{return code==0&&ptr!=null&&size.getValue()>=588&&ptr.getInt(0)==1?formatMac(ptr.getByteArray(560,6)):"";}
+        finally{if(ptr!=null)api.WlanFreeMemory(ptr);}
+    }
+    private static Memory guidMemory(String id){
+        var uuid=UUID.fromString(id);var mem=new Memory(16);
+        long most=uuid.getMostSignificantBits(),least=uuid.getLeastSignificantBits();
+        mem.setInt(0,(int)(most>>>32));mem.setShort(4,(short)(most>>>16));mem.setShort(6,(short)most);
+        for(int i=0;i<8;i++)mem.setByte(8+i,(byte)(least>>>(56-i*8)));return mem;
+    }
+    static List<WifiObservation> parseScanEntries(Pointer ptr,String adapter,String filter,String associated,long started,long completed,Map<String,Long> seen){
+        if(ptr==null)throw new IllegalArgumentException("Missing BSS buffer");
+        int bytes=ptr.getInt(0),count=ptr.getInt(4);
+        if(bytes<8||bytes>16*1024*1024||count<0||count>4096||8L+count*BSS_ENTRY_SIZE>bytes)throw new IllegalArgumentException("Invalid BSS bounds");
+        var unique=new LinkedHashMap<String,WifiObservation>();
+        for(int i=0;i<count;i++){
+            long offset=8L+i*BSS_ENTRY_SIZE;int length=ptr.getInt(offset);if(length<0||length>32)continue;
+            String ssid=new String(ptr.getByteArray(offset+4,length),StandardCharsets.UTF_8);if(!filter.isEmpty()&&!filter.equals(ssid))continue;
+            String bssid=formatMac(ptr.getByteArray(offset+40,6));int rssi=ptr.getInt(offset+56),frequency=ptr.getInt(offset+92);
+            if(bssid.equals("00:00:00:00:00:00")||bssid.equals("ff:ff:ff:ff:ff:ff")||rssi< -110||rssi> -10||WifiSignalProvider.bandFromFrequencyKhz(frequency).isEmpty())continue;
+            long stamp=ptr.getLong(offset+80),millis=stamp/10000L-11644473600000L;
+            String key=adapter+"|"+bssid+"|"+frequency;
+            boolean valid=stamp>0&&millis<=completed;
+            boolean fresh=valid&&millis>=started&&stamp>seen.getOrDefault(key,0L);
+            long age=valid?completed-millis:-1;
+            var observation=new WifiObservation(ssid,bssid,rssi,frequency,stamp,age,fresh,bssid.equals(associated));
+            var previous=unique.get(key);if(previous==null||stamp>previous.hostTimestamp100ns())unique.put(key,observation);
+        }
+        // Update after deduplication, so duplicate BSS records cannot consume a fresh timestamp.
+        unique.forEach((key,value)->{if(value.fresh())seen.put(key,value.hostTimestamp100ns());});
+        while(seen.size()>4096)seen.remove(seen.keySet().iterator().next());
+        return unique.values().stream().sorted(Comparator.comparing(WifiObservation::fresh).reversed().thenComparing(Comparator.comparingInt(WifiObservation::rssiDbm).reversed())).toList();
     }
 
     private static WlanApi loadWlanApi() {
@@ -153,7 +271,7 @@ public final class WindowsWifiSignalProvider implements WifiSignalProvider {
                 return Reading.failure(Status.NO_ADAPTER, "Danh sách card Wi-Fi trống.", now);
             }
             int count = listPtr.getInt(0);
-            if (count <= 0) {
+            if (count <= 0 || count > 64) {
                 return Reading.failure(Status.NO_ADAPTER, "Không có card Wi-Fi trên thiết bị.", now);
             }
 
@@ -352,6 +470,7 @@ public final class WindowsWifiSignalProvider implements WifiSignalProvider {
             }
             int totalSize = bssPtr.getInt(0);
             int count = bssPtr.getInt(4);
+            if(totalSize<8||totalSize>16*1024*1024||count<0||count>4096||8L+count*BSS_ENTRY_SIZE>totalSize)return new BssLookup(null,null,ERROR_INVALID_PARAMETER);
             for (int i = 0; i < count; i++) {
                 long entryOffset = 8L + (long) i * BSS_ENTRY_SIZE;
                 if (entryOffset + BSS_ENTRY_SIZE > totalSize && totalSize > 0) {
