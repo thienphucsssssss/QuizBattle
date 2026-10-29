@@ -1,6 +1,8 @@
 # Network Quiz Battle Java LAN
 
-**Đợt B — thu mẫu khảo sát có tọa độ:** thêm **Tùy chọn → Khảo sát Wi-Fi**, tạo khu/điểm và tọa độ server, thu nhiều scan tại mỗi điểm, xác nhận hoặc loại lượt, lưu SQLite offline và nhập/xuất JSON. Giảng viên/Admin có thể đồng bộ dữ liệu lên Server qua TLS, thử lại sau mất mạng không tạo bản sao. Xem [hướng dẫn khảo sát](docs/Khao_sat_WiFi_fingerprinting.md). Chưa triển khai KNN/WKNN hoặc hiển thị khoảng cách client–server từ khảo sát; cần bộ dữ liệu thực địa tiếp theo.
+**Nguồn thuật toán và đánh giá offline:** lõi KNN/WKNN được chuyển có sửa đổi từ **DMSL/Anyplace (MIT)**, đối chiếu 12 kết quả chạy mã gốc. Có công cụ Java đánh giá các lượt khảo sát độc lập, báo lỗi vị trí/khoảng cách Server và tỷ lệ từ chối. Xem [nguồn mã, thay đổi và cách chạy](docs/Nguon_mo_va_danh_gia_fingerprinting.md) cùng [thông báo bản quyền](THIRD_PARTY_NOTICES.md). Chưa bật định vị trực tiếp trong phòng thi.
+
+**Đợt B — thu mẫu khảo sát có tọa độ:** thêm **Tùy chọn → Khảo sát Wi-Fi**, tạo khu/điểm và tọa độ server, thu nhiều scan tại mỗi điểm, xác nhận hoặc loại lượt, lưu SQLite offline và nhập/xuất JSON. Giảng viên/Admin có thể đồng bộ dữ liệu lên Server qua TLS, thử lại sau mất mạng không tạo bản sao. Xem [hướng dẫn khảo sát](docs/Khao_sat_WiFi_fingerprinting.md). Cần bộ dữ liệu thực địa để đánh giá baseline trước khi hiển thị khoảng cách client–server trực tiếp.
 
 **Đợt A — mạng riêng và chuẩn bị fingerprinting:** thêm chọn máy chủ bằng IP/hostname (dùng được với Tailscale), tự khôi phục phiên thí sinh khi mất mạng ngắn và **Tùy chọn → Chẩn đoán quét Wi-Fi** để đọc nhiều BSSID, phân biệt dữ liệu mới/cũ, tự lưu danh mục quan sát và xuất JSON. Xem [hướng dẫn đợt A và phần cần nghiệm thu tại trường](docs/Ket_noi_mang_rieng_va_chan_doan_WiFi.md). Chưa triển khai định vị theo tọa độ khảo sát.
 

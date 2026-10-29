@@ -1,6 +1,6 @@
 # Khảo sát Wi-Fi tại các điểm có tọa độ
 
-Đợt B thêm sổ khảo sát trên Client bằng Java 21/JavaFX và SQLite. Có thể thu mẫu khi chưa kết nối Server. Đây là dữ liệu đầu vào cho bước định vị tiếp theo; bản này **chưa tính tọa độ client hoặc khoảng cách client–server bằng fingerprinting**.
+Đợt B thêm sổ khảo sát trên Client bằng Java 21/JavaFX và SQLite. Có thể thu mẫu khi chưa kết nối Server. Dữ liệu này dùng cho [baseline KNN/WKNN và công cụ đánh giá offline](Nguon_mo_va_danh_gia_fingerprinting.md); ứng dụng **chưa hiển thị tọa độ client hoặc khoảng cách client–server trực tiếp trong phòng thi**.
 
 ## Cách dùng
 

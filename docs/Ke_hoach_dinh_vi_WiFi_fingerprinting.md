@@ -1,6 +1,6 @@
 # Kế hoạch định vị Wi-Fi và giữ phiên khi roaming
 
-Trạng thái: đã triển khai phần mềm đợt A và luồng thu/lưu/nhập/xuất/đồng bộ khảo sát đợt B. Xem [hướng dẫn đợt A](Ket_noi_mang_rieng_va_chan_doan_WiFi.md) và [hướng dẫn khảo sát đợt B](Khao_sat_WiFi_fingerprinting.md). Quét native trong đợt A trên HUTECH E1 đã đọc được nhiều BSSID; kết nối Tailscale giữa hai laptop, roaming và bộ khảo sát pilot thật còn cần nghiệm thu. Đợt C–D chưa triển khai; test giả lập không thay thế đánh giá sai số thực địa.
+Trạng thái: đã triển khai phần mềm đợt A, luồng khảo sát đợt B, và bước đầu đợt C: baseline KNN/WKNN chuyển từ Anyplace/MIT kèm đánh giá offline theo lượt giữ riêng. Xem [hướng dẫn đợt A](Ket_noi_mang_rieng_va_chan_doan_WiFi.md), [khảo sát đợt B](Khao_sat_WiFi_fingerprinting.md) và [nguồn mã/đánh giá offline](Nguon_mo_va_danh_gia_fingerprinting.md). Kết nối Tailscale giữa hai laptop, roaming và bộ pilot thật còn cần nghiệm thu. Chưa chọn mô hình theo sai số thực địa, chưa triển khai đợt D; test giả lập không thay thế đánh giá tại trường.
 
 ## Mục tiêu đã thống nhất
 
@@ -79,6 +79,8 @@ Giữ phong cách và luồng chính của UI theo `.cursor/rules/preserve-exist
 
 ## Giai đoạn 5 — Định vị bằng Java và đánh giá độc lập
 
+Đã có baseline offline chuyển từ Anyplace/MIT và báo cáo theo toàn bộ lượt giữ riêng. Nguồn mã, thay đổi, kết quả đối chiếu và cách chạy nằm ở [tài liệu đánh giá](Nguon_mo_va_danh_gia_fingerprinting.md). Phần chuyển động, chọn tham số bằng dữ liệu thật và tích hợp trực tiếp vẫn chưa hoàn tất.
+
 1. Thêm bộ định vị Java thuần trong `nqb-shared` hoặc module core phù hợp, không phụ thuộc JavaFX/JNA. KNN làm baseline, WKNN là phương án so sánh, không mặc định WKNN luôn tốt hơn.
 2. Chuẩn hóa vector theo BSSID/tần số trong đúng khu/model revision. Lọc nhiễu, dùng thống kê RSSI theo điểm; xử lý BSSID thiếu, mức độ trùng mẫu và tín hiệu mới. Không đổi vector RSSI thành mét tới AP trước khi so khớp.
 3. Tính tọa độ từ điểm gần trong không gian tín hiệu; thiết lập quy tắc từ chối khi mẫu cũ, thiếu trùng khớp hoặc không phân biệt được vị trí. Chỉ báo chất lượng/độ phù hợp; không gắn phần trăm tin cậy khi chưa được hiệu chuẩn.
@@ -119,5 +121,6 @@ Trong lúc chưa có mẫu thực địa, có thể hoàn thành luồng phần 
 - [Microsoft WlanScan](https://learn.microsoft.com/en-us/windows/win32/api/wlanapi/nf-wlanapi-wlanscan): yêu cầu scan và vòng đời bất đồng bộ.
 - [Microsoft WlanGetNetworkBssList](https://learn.microsoft.com/en-us/windows/win32/api/wlanapi/nf-wlanapi-wlangetnetworkbsslist): dữ liệu BSS trên card Wi-Fi.
 - [Tailscale connection types](https://tailscale.com/docs/reference/connection-types): kết nối trực tiếp/relay và giới hạn theo mạng.
-- [Talentica/WifiIndoorPositioning](https://github.com/Talentica/WifiIndoorPositioning): luồng fingerprinting; `Algorithms.java` để đối chiếu KNN/WKNN. Nếu tái sử dụng mã, kiểm tra và giữ thông báo giấy phép tương ứng từng tệp.
+- [DMSL/Anyplace](https://github.com/dmsl/anyplace/blob/7229551823757cc39174cc693947d9077e770bfb/clients/android/Anyplace/src/com/dmsl/airplace/algorithms/Algorithms.java): đã chuyển có sửa đổi lõi Euclidean/KNN/WKNN, giữ thông báo MIT; đối chiếu 12 kết quả chạy bản gốc.
+- [Talentica/WifiIndoorPositioning](https://github.com/Talentica/WifiIndoorPositioning): đã đọc luồng fingerprinting và `Algorithms.java`; file thuật toán có nguồn gốc Anyplace nên dùng trực tiếp upstream Anyplace cho bản chuyển.
 - [codedpro/DIY-IPS-Indoor-Positioning-System](https://github.com/codedpro/DIY-IPS-Indoor-Positioning-System): quy trình thu mẫu nhiều hướng và kiểm tra sai số độc lập; không nhập phần Android/PDR/Firebase/Python vào ứng dụng Windows.
