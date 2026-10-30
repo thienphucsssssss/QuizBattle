@@ -55,6 +55,27 @@ class ServerIntegrationTest {
         do {state=host.request("ROOM_STATE",obj());if(condition.test(state))return state;Thread.sleep(30);}while(System.nanoTime()<until);
         throw new AssertionError("Room condition not reached: "+state.path("phase"));
     }
+    @Test void floorTrackingUsesOwnedSurveyAndFreshScanAcrossExamAndReconnect()throws Exception {
+        var host=admin();String code=room(host,1);var original=new Client();var resume=resumableJoin(original,code,"Moving client");
+        var other=guest(code,"Second client");
+        var demo=vn.edu.hutech.nqb.shared.fingerprint.FingerprintDemo.create();
+        var bundle=Bundle.of(demo.bundle().areas(),demo.bundle().runs().stream().filter(r->!demo.heldOut().contains(r.id())).toList());var area=bundle.areas().getFirst();
+        SurveySync.upload(host.gateway,bundle,null).get(15,TimeUnit.SECONDS);
+        var configure=obj().put("area_id",area.id()).put("revision",1);
+        error(original,"FORBIDDEN","FLOOR_CONFIGURE",configure);
+        var floor=host.request("FLOOR_CONFIGURE",configure);assertTrue(floor.path("enabled").asBoolean());
+        var payload=obj().put("epoch",floor.path("epoch").asText()).put("sequence",1);payload.set("scan",JSON.valueToTree(demo.bundle().runs().get(5).scans().getFirst()));
+        var self=original.request("FLOOR_REPORT",payload);assertEquals(1,self.path("players").size());assertTrue(self.path("players").path(0).path("located").asBoolean());
+        assertEquals(2,host.request("FLOOR_GET",obj()).path("players").size());assertFalse(other.request("FLOOR_GET",obj()).path("players").path(0).has("distance_m"));
+        error(original,"FLOOR_OLD_SAMPLE","FLOOR_REPORT",payload);
+        original.request("READY_SET",obj().put("ready",true));other.request("READY_SET",obj().put("ready",true));host.request("START_GAME",obj());
+        original.close();waitRoom(host,s->s.path("players").path(0).path("reconnecting").asBoolean());
+        var again=new Client();again.request("RESUME",resumePayload(resume,vn.edu.hutech.nqb.shared.ResumeRules.token()));
+        payload.set("scan",JSON.valueToTree(demo.bundle().runs().get(5).scans().get(1)));
+        assertTrue(again.request("FLOOR_REPORT",payload).path("players").path(0).path("located").asBoolean());
+        assertNotEquals("WAITING",again.request("ROOM_STATE",obj()).path("phase").asText());
+        assertEquals(2,host.request("ROOM_STATE",obj()).path("players").size());
+    }
     @Test void surveyUploadUsesAuthenticatedOwnerAndCanRetryAfterReconnectWithoutDuplicateRows()throws Exception {
         var host=admin();String code=room(host,1);var student=guest(code,"Khảo sát không có quyền");
         long now=System.currentTimeMillis();var point=new Point(id(),"Cửa",Zone.CORRIDOR,0,0);

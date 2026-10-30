@@ -41,7 +41,7 @@ final class SurveyViews implements AutoCloseable {
     }
     void open(){
         if(closed)return;if(dialog!=null&&dialog.isShowing()){dialog.getDialogPane().getScene().getWindow().requestFocus();return;}
-        closing=false;actionButtons.clear();captureInputs.clear();dialog=new Dialog<>();dialog.initOwner(app.ownerStage());dialog.setTitle("Khảo sát Wi-Fi");dialog.setHeaderText("Bản đồ tín hiệu · tọa độ đo bằng mét");styleDialog(dialog);dialog.setResizable(true);
+        closing=false;actionButtons.clear();captureInputs.clear();dialog=new Dialog<>();dialog.initOwner(app.ownerStage());dialog.setTitle("Khảo sát Wi-Fi");dialog.setHeaderText("Bản đồ tín hiệu · tọa độ mét theo quy ước khu");styleDialog(dialog);dialog.setResizable(true);
         dialog.getDialogPane().setId("survey-dialog");dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
         areas=new ComboBox<>();areas.setId("survey-area");areas.setMaxWidth(Double.MAX_VALUE);
         points=new ComboBox<>();points.setId("survey-point");points.setMaxWidth(Double.MAX_VALUE);
@@ -102,6 +102,12 @@ final class SurveyViews implements AutoCloseable {
         areas.valueProperty().addListener((o,b,a)->{if(a==null)return;points.setItems(FXCollections.observableArrayList(a.points()));points.getSelectionModel().selectFirst();details.setText("SSID: "+a.ssid()+" · Server ("+a.serverX()+", "+a.serverY()+") m · "+a.collector()+"\n"+a.axisNote());refreshRuns(null);});
         repository.whenComplete((repo,error)->Platform.runLater(()->{if(!showing())return;if(error!=null){status.setText(ArcadeApplication.message(error));return;}refreshAreas(null);status.setText("Dữ liệu lưu trên máy, sử dụng được khi chưa kết nối Server.");setBusy(false);}));
         app.proximityClient().scanAdaptersAsync().whenComplete((values,error)->Platform.runLater(()->{if(!showing())return;if(error!=null){status.setText(ArcadeApplication.message(error));return;}adapters.setItems(FXCollections.observableArrayList(values));values.stream().filter(WifiScanProvider.Adapter::connected).findFirst().or(()->values.stream().findFirst()).ifPresent(adapters::setValue);}));
+    }
+    void openArea(Area area){
+        open();if(capture!=null&&capture.busy()){status.setText("Hoàn tất lượt khảo sát đang chạy trước khi tạo khu mới.");return;}
+        setBusy(true);repository.thenCompose(r->r.saveArea(LOCAL_OWNER,area)).whenComplete((saved,error)->Platform.runLater(()->{
+            if(!showing())return;setBusy(false);if(error!=null)status.setText(ArcadeApplication.message(error));else{refreshAreas(saved);status.setText("Đã tạo mốc từ sơ đồ quy ước. Đứng tại mốc tương ứng ngoài thực tế rồi thu mẫu; không cần đo chi tiết phòng.");}
+        }));
     }
     private boolean showing(){return !closed&&dialog!=null&&dialog.isShowing();}
     private Button action(String name,Runnable task){var b=new Button(name);b.getStyleClass().add("quiet");b.setOnAction(e->{if(!ioBusy||b==cancel)task.run();});actionButtons.add(b);return b;}

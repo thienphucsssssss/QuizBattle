@@ -13,6 +13,14 @@
 .fingerprint-estimate { -fx-stroke: #9e400d; -fx-stroke-width: 3; }
 .fingerprint-distance { -fx-stroke: #3049d5; -fx-stroke-width: 2; }
 .fingerprint-error { -fx-stroke: #9e400d; -fx-stroke-width: 2; }
+.corridor-map { -fx-background-color: -surface; -fx-background-radius: 10; }
+.corridor-room { -fx-fill: -cream; -fx-stroke: -line; -fx-stroke-width: 1.5; }
+.corridor-hall { -fx-fill: -surface; }
+.corridor-label { -fx-fill: -ink; -fx-font-size: 12px; }
+.corridor-client { -fx-fill: #3049d5; -fx-stroke: -surface; -fx-stroke-width: 2; -fx-cursor: hand; }
+.corridor-halo { -fx-fill: #3049d5; -fx-opacity: .15; -fx-mouse-transparent: true; }
+.corridor-server { -fx-fill: -ink; -fx-stroke: -surface; -fx-stroke-width: 2; }
+.corridor-link { -fx-stroke: #3049d5; -fx-stroke-width: 2; }
 .label { -fx-text-fill: -ink; }
 .muted { -fx-text-fill: -muted; -fx-font-size: 13px; }
 .caption { -fx-font-size: 12px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-text-fill: -muted; }

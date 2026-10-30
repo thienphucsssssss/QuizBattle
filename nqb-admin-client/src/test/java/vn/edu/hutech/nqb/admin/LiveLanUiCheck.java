@@ -42,6 +42,7 @@ public final class LiveLanUiCheck {
                 try { if(args.length>3&&args[3].equals("phase-a")){checkPhaseA(app);System.out.println("PHASE_A_UI_PASS");}
                     else if(args.length>3&&args[3].equals("phase-b")){checkPhaseB(app);System.out.println("PHASE_B_UI_PASS");}
                     else if(args.length>3&&args[3].equals("phase-c")){checkPhaseC(app);System.out.println("PHASE_C_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("floor-map")){checkFloorMap(app);System.out.println("FLOOR_MAP_UI_PASS");}
                     else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
                     else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, optional direct endpoint, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
@@ -50,6 +51,38 @@ public final class LiveLanUiCheck {
             });
             ArcadeApplication.launchFor("STUDENT", new String[]{"--width="+(args.length>1?args[1]:"1366"), "--height="+(args.length>2?args[2]:"768")});
         } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config");System.clearProperty("nqb.connection.settings");System.clearProperty("nqb.wifi.catalog");System.clearProperty("nqb.survey.database"); }
+    }
+    private static void checkFloorMap(ArcadeApplication app)throws Exception {
+        fx(()->{app.qaSettings();((javafx.scene.control.Button)auxiliary("#floor-open").lookup("#floor-open")).fire();});
+        fx(()->{
+            var scene=auxiliary("#floor-map");scene.getRoot().applyCss();scene.getRoot().layout();
+            if(scene.getRoot().lookupAll(".corridor-room").size()!=12||scene.getRoot().lookupAll(".corridor-client").size()!=2)throw new AssertionError("Missing corridor rooms/clients");
+            if(!((javafx.scene.control.Label)scene.lookup("#floor-origin")).getText().contains("MÔ PHỎNG"))throw new AssertionError("Unlabelled simulation");
+            ((javafx.scene.control.CheckBox)scene.lookup("#floor-smooth")).setSelected(false);
+            ((javafx.scene.control.Slider)scene.lookup("#floor-motion")).setValue(100);
+            if(!((javafx.scene.control.Label)scene.lookup("#floor-distance")).getText().contains("32.5"))throw new AssertionError("Distance did not follow movement");
+            scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"floor-01-corridor");
+            var map=scene.lookup("#floor-map");var bounds=map.localToScene(map.getBoundsInLocal());
+            if(bounds.getMaxX()>scene.getWidth()||bounds.getMinX()<0)throw new AssertionError("Map clipped horizontally");
+            ((javafx.scene.control.ComboBox<?>)scene.lookup("#floor-server-room")).getSelectionModel().select(7);
+            ((javafx.scene.control.Button)scene.lookup("#floor-play")).fire();
+        });
+        await(()->((javafx.scene.control.Slider)auxiliary("#floor-map").lookup("#floor-motion")).getValue()>0);
+        fx(()->{
+            var scene=auxiliary("#floor-map");((javafx.scene.control.Button)scene.lookup("#floor-play")).fire();
+            ((javafx.scene.control.ToggleButton)scene.lookup("#floor-live")).fire();
+            if(!scene.lookup("#floor-activate").isDisabled())throw new AssertionError("Unconnected activation enabled");
+            if(!scene.getRoot().lookupAll(".corridor-client").isEmpty())throw new AssertionError("Simulation leaked into live map");
+            var sample=vn.edu.hutech.nqb.shared.fingerprint.FingerprintDemo.create();var data=object().put("enabled",true).put("epoch","qa");
+            data.set("area",vn.edu.hutech.nqb.shared.WifiSurvey.JSON.valueToTree(sample.bundle().areas().getFirst()));data.set("plan",vn.edu.hutech.nqb.shared.WifiSurvey.JSON.valueToTree(vn.edu.hutech.nqb.shared.fingerprint.CorridorPlan.DEFAULT));
+            data.putArray("players").add(object().put("player_id","qa").put("nickname","Client QA").put("located",true).put("status","ESTIMATED").put("x",20).put("y",0).put("age_ms",1000));app.qaFloorMap().accept(data);
+            scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"floor-02-live-fixture");
+            if(scene.getRoot().lookupAll(".corridor-client").size()!=1)throw new AssertionError("Missing live point");
+            ((com.fasterxml.jackson.databind.node.ObjectNode)data.path("players").path(0)).put("located",false).put("status","STALE");app.qaFloorMap().accept(data);
+            if(!scene.getRoot().lookupAll(".corridor-client").isEmpty())throw new AssertionError("Stale position is still shown");
+            app.qaFloorMap().close();
+        });
+        if(Files.exists(Path.of(System.getProperty("nqb.survey.database"))))throw new AssertionError("Simulation wrote survey storage");
     }
     private static void checkPhaseC(ArcadeApplication app)throws Exception {
         fx(()->{app.qaSettings();((javafx.scene.control.Button)auxiliary("#fingerprint-open").lookup("#fingerprint-open")).fire();});

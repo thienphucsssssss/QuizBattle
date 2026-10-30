@@ -40,6 +40,8 @@ public final class QuizServer implements AutoCloseable {
     private String roomGeneration=UUID.randomUUID().toString();
     private long deadline,questionOpenedAt;
     private final RoomTelemetry telemetry=new RoomTelemetry();
+    private final FloorTracker floor=new FloorTracker();
+    private long floorVersion,lastFloorBroadcast;
     private List<ObjectNode> questions=List.of();
     private boolean resultSaved, aborted;
     private static ThreadPoolExecutor pool(String name,int count,int size) {return new ThreadPoolExecutor(count,count,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(size),Thread.ofPlatform().daemon().name(name+"-",0).factory(),new ThreadPoolExecutor.AbortPolicy());}
@@ -145,6 +147,26 @@ public final class QuizServer implements AutoCloseable {
                     });}catch(RejectedExecutionException ignored){}
                 });return;
             }
+            if(type.equals("FLOOR_CONFIGURE")){
+                host(p);waiting();if(p.surveyBusy)throw fail("SERVER_BUSY","Đang xử lý khảo sát.");
+                if(payload.has("room_code")&&!roomCode.equals(payload.path("room_code").asText()))throw fail("FLOOR_CONTEXT_CHANGED","Phòng thi đã đổi trong lúc đồng bộ.");
+                String areaId=text(payload,"area_id",80);int revision=integer(payload,"revision",1,1,1000000);
+                vn.edu.hutech.nqb.shared.fingerprint.CorridorPlan plan;
+                try{plan=payload.has("plan")?WifiSurvey.decode(payload.path("plan"),vn.edu.hutech.nqb.shared.fingerprint.CorridorPlan.class):vn.edu.hutech.nqb.shared.fingerprint.CorridorPlan.DEFAULT;}
+                catch(IllegalArgumentException invalid){throw fail("FLOOR_INVALID",invalid.getMessage());}
+                long version=++floorVersion;String roomToken=roomGeneration;int ownerToken=owner;p.surveyBusy=true;
+                surveyStore.bundle(String.valueOf(p.userId),areaId,revision).thenApply(bundle->FloorTracker.prepare(bundle,plan)).whenComplete((value,error)->{
+                    try{worker.execute(()->{
+                        p.surveyBusy=false;if(p.gone.get()||p.closeAfterWrite)return;
+                        if(version!=floorVersion||!roomToken.equals(roomGeneration)||ownerToken!=owner||phase!=GamePhase.WAITING){p.send(envelope("ERROR",id,fail("FLOOR_CONTEXT_CHANGED","Phòng đã đổi; chọn lại bản đồ.").payload()));return;}
+                        if(error!=null){Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();p.send(envelope("ERROR",id,fail("FLOOR_INVALID",cause instanceof IllegalArgumentException?cause.getMessage():"Không mở được khảo sát đã đồng bộ.").payload()));return;}
+                        floor.configure(value);p.send(envelope(type+"_OK",id,floorSnapshot(p)));broadcastState();emitFloorUpdate();
+                    });}catch(RejectedExecutionException ignored){}
+                });return;
+            }
+            if(type.equals("FLOOR_DISABLE")){host(p);waiting();floorVersion++;floor.clear();p.send(envelope(type+"_OK",id,floorSnapshot(p)));broadcastState();emitFloorUpdate();return;}
+            if(type.equals("FLOOR_GET")){if(p.playerId.isEmpty())host(p);else student(p);p.send(envelope(type+"_OK",id,floorSnapshot(p)));return;}
+            if(type.equals("FLOOR_REPORT")){var player=student(p);try{floor.report(player.id,payload,System.nanoTime());}catch(IllegalArgumentException invalid){throw fail("FLOOR_INVALID",invalid.getMessage());}p.send(envelope(type+"_OK",id,floorSnapshot(p)));emitFloorUpdate();return;}
             if(type.equals("ROOM_STATE")){p.send(envelope("ROOM_STATE_OK",id,state(p,true)));return;}
             if(type.equals("NETWORK_PROBE_REPLY")){var player=student(p);telemetry.reply(player.id,text(payload,"probe_id",80),System.nanoTime());p.send(envelope(type+"_OK",id,obj()));broadcastState();emitProximityUpdate();return;}
             if(type.startsWith("USER_")){admin(p);users(p,id,type,payload);return;}
@@ -428,6 +450,8 @@ public final class QuizServer implements AutoCloseable {
         state.put("question_set_id",questionSetId).put("question_set_name",questionSetName).put("question_source_name",historySessionId.isEmpty()?(questionSetId==0?"Toàn bộ ngân hàng":questionSetName):"Từ lịch sử: "+historyRoomName);
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
         state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY);
+        state.withArray("capabilities").add(FloorTracker.CAPABILITY);
+        state.set("floor",(viewer.userId==owner&&owner!=0)||players.containsKey(viewer.playerId)?floor.config():obj().put("enabled",false));
         state.put("scoring_version",AnswerScoring.VERSION);
         state.set("proximity",proximity.buildRoomStateSection(viewer.playerId,running(),System.nanoTime()));
         state.set("players",list);
@@ -456,6 +480,16 @@ public final class QuizServer implements AutoCloseable {
         for(var p:peers)if(!p.gone.get()&&!p.closeAfterWrite&&!p.mustChange&&(p.role.equals("ADMIN")||p.userId==owner))p.send(envelope("PROXIMITY_UPDATE",null,snap));
     }
     private void broadcastState(){for(var p:peers)if(!p.gone.get()&&!p.closeAfterWrite&&!p.mustChange&&(p.userId!=0||!p.playerId.isEmpty()))p.send(envelope("ROOM_STATE",null,state(p,false)));}
+    private ObjectNode floorSnapshot(Peer viewer){
+        var snapshot=floor.config();snapshot.put("room_code",roomCode);var entries=snapshot.putArray("players");long now=System.nanoTime();
+        for(var player:players.values())if(viewer.userId==owner||player.id.equals(viewer.playerId))
+            entries.add(floor.player(player.id,player.nickname,player.peer!=null&&!player.peer.gone.get(),now));
+        return snapshot;
+    }
+    private void emitFloorUpdate(){
+        if(owner==0)return;lastFloorBroadcast=System.nanoTime();
+        for(var p:peers)if(participant(p)&&!p.mustChange)p.send(envelope("FLOOR_UPDATE",null,floorSnapshot(p)));
+    }
     private ObjectNode monitoringSnapshot(){
         syncTelemetryContext();long now=System.nanoTime();
         var snapshot=proximity.buildMonitoringSnapshot(roomCode,roomName,phase.name(),session,running(),System.nanoTime());
@@ -467,21 +501,23 @@ public final class QuizServer implements AutoCloseable {
     private void detach(Peer p){
         var v=players.get(p.playerId);if(v==null||v.peer!=p)return;v.peer=null;v.ready=false;
         telemetry.disconnect(v.id);
+        floor.disconnect(v.id);
         long now=System.nanoTime();if(v.resumeHash!=null)v.resumeUntil=now+TimeUnit.SECONDS.toNanos(config.resumeGraceSeconds());
         proximity.onPlayerDisconnect(v.id,running(),session,now,v.resumeHash!=null);
-        if(!running()&&v.resumeHash==null){players.remove(v.id);avatars.leave(v.id);telemetry.remove(v.id);}p.playerId="";
+        if(!running()&&v.resumeHash==null){players.remove(v.id);avatars.leave(v.id);telemetry.remove(v.id);floor.remove(v.id);}p.playerId="";
         if(running()&&!hasLiveOrReserved(now))abort();else{broadcastState();emitProximityUpdate();}
     }
     private boolean hasLiveOrReserved(long now){return players.values().stream().anyMatch(v->(v.peer!=null&&!v.peer.gone.get())||(v.resumeHash!=null&&(v.peer!=null||v.resumeUntil>now)));}
     private void tick()throws SQLException{
         long now=System.nanoTime();boolean changed=false;
         syncTelemetryContext();boolean netChanged=telemetry.tick(now);
+        if(floor.enabled()&&now-lastFloorBroadcast>TimeUnit.SECONDS.toNanos(2))emitFloorUpdate();
         for(var v:players.values())if(v.peer!=null&&!v.peer.gone.get()){var probe=telemetry.probe(v.id,now);if(probe!=null)v.peer.send(envelope("NETWORK_PROBE",null,probe));}
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;
         for(var p:peers){if(now-p.lastSeen>TimeUnit.SECONDS.toNanos(20)||(p.userId==0&&p.playerId.isEmpty()&&now-p.connected>TimeUnit.SECONDS.toNanos(10)))p.close();if(p.gone.get()){detach(p);peers.remove(p);changed=true;}}
         for(var it=players.values().iterator();it.hasNext();){var v=it.next();if(v.peer==null&&v.resumeHash!=null&&now>=v.resumeUntil){
             v.resumeHash=null;v.resumeUntil=0;changed=true;
-            if(!running()){it.remove();avatars.leave(v.id);telemetry.remove(v.id);proximity.onPlayerDisconnect(v.id,false,session,now);}
+            if(!running()){it.remove();avatars.leave(v.id);telemetry.remove(v.id);floor.remove(v.id);proximity.onPlayerDisconnect(v.id,false,session,now);}
         }}
         if(running()&&!hasLiveOrReserved(now)){abort();return;}
         boolean proxChanged=proximity.tick(running(),session,owner,roomName,roomCode,started,proximityStore,now);
@@ -515,14 +551,14 @@ public final class QuizServer implements AutoCloseable {
     private void abort(){phase=GamePhase.FINISHED;aborted=true;resultSaved=false;proximity.onMatchEnd(session,owner,roomName,roomCode,started,true,proximityStore,System.nanoTime());emitAll("GAME_ABORTED",obj().put("session_id",session).put("message","Ván thi đã hủy."));broadcastState();emitProximityUpdate();}
     private void resetRoom(){
         players.values().removeIf(v->{if(v.peer!=null&&!v.peer.gone.get()&&!v.peer.closeAfterWrite)return false;
-            if(v.peer!=null){v.peer.playerId="";v.peer=null;}avatars.leave(v.id);telemetry.remove(v.id);proximity.onPlayerDisconnect(v.id,false,"",System.nanoTime());return true;});
+            if(v.peer!=null){v.peer.playerId="";v.peer=null;}avatars.leave(v.id);telemetry.remove(v.id);floor.remove(v.id);proximity.onPlayerDisconnect(v.id,false,"",System.nanoTime());return true;});
         phase=GamePhase.WAITING;roomCode=newCode();roomGeneration=UUID.randomUUID().toString();session="";questions=List.of();proximity.resetForNewMatchInSameRoom();
         players.values().forEach(v->{v.ready=false;v.resetGame();if(v.resumable)v.peer.send(envelope("SESSION_CREDENTIALS",null,issueCredential(v)));});
     }
     private void closeRoom(){
         roomGeneration=UUID.randomUUID().toString();
         for(var v:players.values())if(v.peer!=null){v.peer.send(envelope("ROOM_CLOSED",null,obj().put("message","Giảng viên đã đóng phòng.")));v.peer.closeAfterWrite=true;}
-        players.clear();avatars.clear();proximity.resetAll();telemetry.clear();owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";historySessionId="";historyRoomName="";
+        players.clear();avatars.clear();proximity.resetAll();telemetry.clear();floor.clear();floorVersion++;owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";historySessionId="";historyRoomName="";
     }
     @Override public void close(){
         if(!closed.compareAndSet(false,true))return;discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();

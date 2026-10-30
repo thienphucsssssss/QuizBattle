@@ -3,7 +3,7 @@ package vn.edu.hutech.nqb.shared.fingerprint;
 import java.util.*;
 import static vn.edu.hutech.nqb.shared.WifiSurvey.*;
 
-/** Offline baseline adapter over AnyplaceKnn. Not a calibrated model or a live telemetry API. */
+/** Baseline adapter over the licensed AnyplaceKnn core. Thresholds require field evaluation. */
 public final class FingerprintModel {
     public enum Method { KNN, WKNN }
     public enum Status { ESTIMATED, NO_FRESH_DATA, INSUFFICIENT_OVERLAP, OUTSIDE_SIGNAL_MAP, AMBIGUOUS_ZONE, AMBIGUOUS_EXACT_MATCH, NEIGHBORS_TOO_FAR_APART }
@@ -62,7 +62,16 @@ public final class FingerprintModel {
             if(trainingScans.contains(scan.scanId()))throw invalid("Scan kiểm tra trùng tập huấn luyện.");
             for(var o:scan.observations())if(o.fresh()&&trainingMeasurements.contains(measurement(query,o)))throw invalid("Timestamp/BSSID/adapter của mẫu kiểm tra trùng huấn luyện dù mã lượt khác.");
         }
-        var observed=signal(query);
+        return estimateSignal(signal(query),method);
+    }
+    /** Fresh single scan; transport is responsible for replay prevention and receipt-time expiry. */
+    public Estimate estimateLive(Scan scan,Method method){
+        var query=new Run(id(),area.id(),area.revision(),area.points().getFirst().id(),scan.adapterId(),scan.adapterName(),
+            "Live client","Live","Không xác định",scan.startedAtMillis(),scan.completedAtMillis(),State.REVIEW,"",List.of(scan));
+        validate(query,area);
+        return estimateSignal(signal(query),Objects.requireNonNull(method));
+    }
+    private Estimate estimateSignal(Map<String,Double> observed,Method method){
         if(observed.isEmpty())return reject(Status.NO_FRESH_DATA,List.of());
         var candidates=new ArrayList<Candidate>();boolean overlapFound=false;
         for(var reference:references){
