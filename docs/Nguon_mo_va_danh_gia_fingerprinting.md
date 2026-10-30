@@ -29,6 +29,8 @@ Chi tiết nguồn, SHA-256, giấy phép và thay đổi ở [THIRD_PARTY_NOTIC
 
 ## Dùng công cụ đánh giá offline
 
+Từ Client 0.6.4 có [giao diện đánh giá và mô phỏng tại nhà](Danh_gia_WiFi_tai_nha_0_6_4.md), dùng lại chính evaluator bên dưới. Không bắt buộc chạy lệnh.
+
 Đây là bước đầu đợt C, chưa tích hợp vị trí trực tiếp vào phòng thi. Cần xuất một phiên bản khu từ màn khảo sát, có ít nhất 2 điểm huấn luyện và lượt kiểm tra đã xác nhận. Thu các lượt kiểm tra vào thời điểm khác; nếu dùng laptop khác, đặt nhãn thiết bị riêng.
 
 Chọn trước các `id` trong mảng `runs` làm tập kiểm tra. Mỗi ID đại diện **toàn bộ lượt**, không chia những scan gần giống nhau của một lượt sang cả huấn luyện và kiểm tra. Các lượt ACCEPTED còn lại làm huấn luyện; lượt bị loại, gián đoạn hoặc chờ xác nhận không được dùng.
@@ -53,4 +55,4 @@ Các mức lỗi chỉ tính trên lượt được định vị; phải xem cù
 
 Test bổ sung kiểm tra khoảng cách đường thẳng, bỏ cache, radio khác tần số, mơ hồ khác vùng/cùng fingerprint, hàng xóm quá xa, không có radio chung, lỗi toàn bộ bị từ chối, mẫu kiểm tra trùng huấn luyện dù đổi ID, và bảo vệ file đầu vào/báo cáo đã tồn tại. Chạy `mvn -q -pl nqb-shared test`.
 
-Các fixture là dữ liệu tổng hợp để kiểm tra phép tính. Chưa có bộ pilot đo tại hành lang HUTECH, chưa có sai số thực địa được xác nhận, chưa phát hành EXE mới hoặc bật định vị trực tiếp.
+Các fixture là dữ liệu tổng hợp để kiểm tra phép tính. Client Portable 0.6.4 có EXE chạy giao diện đánh giá offline. Chưa có bộ pilot đo tại hành lang HUTECH, chưa có sai số thực địa được xác nhận và chưa bật định vị trực tiếp.

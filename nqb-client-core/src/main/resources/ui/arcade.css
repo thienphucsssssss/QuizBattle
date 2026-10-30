@@ -4,6 +4,15 @@
     -fx-font-family: "Be Vietnam Pro"; -fx-font-size: 15px;
     -fx-background-color: -cream; -fx-text-fill: -ink;
 }
+.fingerprint-map { -fx-background-color: -surface; -fx-border-color: -line; -fx-border-radius: 10; -fx-background-radius: 10; }
+.fingerprint-axis { -fx-stroke: -muted; -fx-stroke-width: 1; }
+.fingerprint-axis-text { -fx-fill: -muted; -fx-font-size: 12px; }
+.fingerprint-point { -fx-fill: -muted; }
+.fingerprint-truth { -fx-fill: transparent; -fx-stroke: -ink; -fx-stroke-width: 2; }
+.fingerprint-server { -fx-fill: #3049d5; -fx-stroke: -surface; -fx-stroke-width: 1; }
+.fingerprint-estimate { -fx-stroke: #9e400d; -fx-stroke-width: 3; }
+.fingerprint-distance { -fx-stroke: #3049d5; -fx-stroke-width: 2; }
+.fingerprint-error { -fx-stroke: #9e400d; -fx-stroke-width: 2; }
 .label { -fx-text-fill: -ink; }
 .muted { -fx-text-fill: -muted; -fx-font-size: 13px; }
 .caption { -fx-font-size: 12px; -fx-font-family: "Be Vietnam Pro SemiBold"; -fx-text-fill: -muted; }

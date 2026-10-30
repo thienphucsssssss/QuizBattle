@@ -37,6 +37,7 @@ public final class ArcadeApplication extends Application {
     private final Preferences prefs = Preferences.userNodeForPackage(ArcadeApplication.class);
     private QuizGateway gateway;
     private SurveyViews surveyViews;
+    private FingerprintViews fingerprintViews;
     private LanEntryPane lanEntry;
     private record OpenedConnection(LanEntryPane.Target target,QuizGateway gateway) { }
     private JsonNode user = object(), room = object(), question = object(), result = object();
@@ -129,7 +130,7 @@ public final class ArcadeApplication extends Application {
             if(owner==stage){modal.setIconified(false);modal.toFront();modal.requestFocus();}
         }
     }
-    @Override public void stop() { if(surveyViews!=null)surveyViews.close(); if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); proximityClient.close(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); if (monitorWindow != null) monitorWindow.close(); }
+    @Override public void stop() { if(fingerprintViews!=null)fingerprintViews.close(); if(surveyViews!=null)surveyViews.close(); if(lanEntry!=null)lanEntry.close(); LanEntryPane.shutdownSearches(); closeGateway(); proximityClient.close(); sfx.close(); music.close(); if (pulse != null) pulse.stop(); if (projection != null) projection.close(); if (monitorWindow != null) monitorWindow.close(); }
     private void closeGateway() { music.stop(); if(monitorWindow!=null){monitorWindow.close();monitorWindow=null;}lobbyTopology=null;projectionTopology=null;proximitySnapshot=object();measurementSnapshotAt=0; answerElapsedMs=-1;answerStreak=0;updateAnswerMeta();connectionGeneration++; wifiReadPending=false; closeProximityDialogs(); proximityContext=new ProximityContext(1,""); proximityReportingActive = false; proximityClient.stopSession(); if (avatarDialog != null) avatarDialog.close(); avatarPending = false; if (gateway != null) { gateway.close(); gateway = null; } }
 
     void trackProximityDialog(Dialog<?> dialog) {
@@ -1027,7 +1028,8 @@ public final class ArcadeApplication extends Application {
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));
         var scanWifi=button("Chẩn đoán quét Wi-Fi", "quiet",()->WifiScanViews.open(this,proximityClient));scanWifi.setId("wifi-scan-open");
         var surveyWifi=button("Khảo sát Wi-Fi", "quiet",this::openSurvey);surveyWifi.setId("survey-open");surveyWifi.setDisable(isRunning());
-        var content = column(16, surveyWifi, scanWifi, new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
+        var evaluateWifi=button("Đánh giá định vị Wi-Fi", "quiet",()->openFingerprint(null,stage));evaluateWifi.setId("fingerprint-open");evaluateWifi.setDisable(isRunning());
+        var content = column(16, surveyWifi, evaluateWifi, scanWifi, new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
         var scroller = scroll(content); scroller.setPrefViewportWidth(460); scroller.setPrefViewportHeight(Math.min(410, Math.max(240, stage.getHeight() - 240)));
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); styleDialog(dialog); dialog.setHeaderText("Tùy chọn"); dialog.setResizable(true);
         dialog.getDialogPane().setContent(scroller);
@@ -1067,6 +1069,12 @@ public final class ArcadeApplication extends Application {
     }
     ProximityClientService proximityClient() { return proximityClient; }
     void openSurvey(){if(isRunning()){feedback.setText("Khảo sát trước hoặc sau ván thi.");return;}if(surveyViews==null)surveyViews=new SurveyViews(this);surveyViews.open();}
+    void openFingerprint(vn.edu.hutech.nqb.shared.WifiSurvey.Bundle initial,Window owner){
+        if(isRunning()){feedback.setText("Đánh giá trước hoặc sau ván thi.");return;}
+        if(fingerprintViews!=null&&fingerprintViews.showing())fingerprintViews.close();
+        fingerprintViews=new FingerprintViews(this,owner);fingerprintViews.open(initial);
+    }
     QuizGateway surveyGateway(){return gateway!=null&&!disconnected&&!passwordRequired&&Set.of("ADMIN","TEACHER").contains(role)?gateway:null;}
     Stage qaMonitorStage() { return monitorWindow != null && monitorWindow.isShowing() ? monitorWindow.stage() : null; }
+    FingerprintViews qaFingerprintView() { return fingerprintViews; }
 }

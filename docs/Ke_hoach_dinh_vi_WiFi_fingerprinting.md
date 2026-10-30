@@ -28,6 +28,7 @@ BSSID thay đổi chỉ xác nhận đổi kết nối, không chứng minh đã
 | `ResumingQuizGateway`, `QuizServer` | Khôi phục phiên bằng token, giữ chỗ có giới hạn, phục hồi đáp án Server đã nhận | Nghiệm thu roaming/mất mạng thật |
 | `AccessPointTracker`, `AccessPointViews` | Danh mục AP vật lý xác nhận thủ công, lịch sử association; BSSID quan sát tự lưu riêng | Kết hợp với kết quả vị trí nhưng giữ hai ý nghĩa độc lập |
 | `SurveyRepository`, `SurveyViews` | Khu/điểm/tọa độ có phiên bản, mẫu raw, SQLite, import/export và upload TLS | Thu bộ pilot thật cho mô hình KNN/WKNN |
+| `FingerprintViews`, `FingerprintEvaluation` | Chọn lượt/K, so sánh KNN/WKNN, sơ đồ cùng tỷ lệ mét, xuất báo cáo; có mô phỏng độc lập để thử ở nhà | Hiệu chỉnh và nghiệm thu bằng dữ liệu thực địa |
 | `DatabaseSchema` | SQLite schema phiên bản 5, dữ liệu khảo sát và phiên bản tọa độ | Bổ sung model đã đánh giá và kết quả định vị ở đợt C–D |
 | `ProximityViews`, màn hình phòng | Giám sát khoảng cách tới AP và lịch sử AP, UI JavaFX hiện tại | Màn xem vị trí theo khảo sát, khoảng cách Client–Server và chất lượng dữ liệu |
 

@@ -2,6 +2,8 @@
 
 Đợt B thêm sổ khảo sát trên Client bằng Java 21/JavaFX và SQLite. Có thể thu mẫu khi chưa kết nối Server. Dữ liệu này dùng cho [baseline KNN/WKNN và công cụ đánh giá offline](Nguon_mo_va_danh_gia_fingerprinting.md); ứng dụng **chưa hiển thị tọa độ client hoặc khoảng cách client–server trực tiếp trong phòng thi**.
 
+Client 0.6.4 thêm nút **Đánh giá định vị** trong **Lượt đã lưu**. Khi chưa có dữ liệu thực địa, có thể vào **Tùy chọn → Đánh giá định vị Wi-Fi → Thử mô phỏng tại nhà**; xem [hướng dẫn thử offline](Danh_gia_WiFi_tai_nha_0_6_4.md).
+
 ## Cách dùng
 
 1. Trước hoặc sau ván thi, mở **Tùy chọn → Khảo sát Wi-Fi → Tạo khu**. Không khảo sát trong lúc đang thi.

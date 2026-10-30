@@ -41,6 +41,7 @@ public final class LiveLanUiCheck {
             ArcadeApplication.qaDriver = app -> Thread.ofPlatform().daemon().name("live-ui-check").start(() -> {
                 try { if(args.length>3&&args[3].equals("phase-a")){checkPhaseA(app);System.out.println("PHASE_A_UI_PASS");}
                     else if(args.length>3&&args[3].equals("phase-b")){checkPhaseB(app);System.out.println("PHASE_B_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("phase-c")){checkPhaseC(app);System.out.println("PHASE_C_UI_PASS");}
                     else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
                     else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, optional direct endpoint, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
@@ -49,6 +50,53 @@ public final class LiveLanUiCheck {
             });
             ArcadeApplication.launchFor("STUDENT", new String[]{"--width="+(args.length>1?args[1]:"1366"), "--height="+(args.length>2?args[2]:"768")});
         } finally { ArcadeApplication.qaDriver = null; liveServer=null; System.clearProperty("nqb.client.config");System.clearProperty("nqb.connection.settings");System.clearProperty("nqb.wifi.catalog");System.clearProperty("nqb.survey.database"); }
+    }
+    private static void checkPhaseC(ArcadeApplication app)throws Exception {
+        fx(()->{app.qaSettings();((javafx.scene.control.Button)auxiliary("#fingerprint-open").lookup("#fingerprint-open")).fire();});
+        fx(()->{
+            var scene=auxiliary("#fingerprint-dialog");if(!scene.lookup("#fingerprint-evaluate").isDisabled())throw new AssertionError("Empty evaluator enabled");
+            ((javafx.scene.control.Button)scene.lookup("#fingerprint-demo")).fire();
+        });
+        await(()->!auxiliary("#fingerprint-dialog").lookup("#fingerprint-evaluate").isDisabled());
+        fx(()->{
+            var scene=auxiliary("#fingerprint-dialog");scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-c-01-select-runs");
+            var evaluateButton=scene.lookup("#fingerprint-evaluate");var bounds=evaluateButton.localToScene(evaluateButton.getBoundsInLocal());
+            if(bounds.getMaxY()>scene.getHeight()||bounds.getMinY()<0)throw new AssertionError("Evaluate button outside window");
+            var origin=(javafx.scene.control.Label)scene.lookup("#fingerprint-origin");if(origin.getHeight()+1<origin.prefHeight(origin.getWidth()))throw new AssertionError("Dataset provenance clipped");
+            if(!((javafx.scene.control.Label)scene.lookup("#fingerprint-origin")).getText().contains("MÔ PHỎNG"))throw new AssertionError("Demo is not labelled");
+            ((javafx.scene.control.Button)scene.lookup("#fingerprint-evaluate")).fire();
+        });
+        await(()->!auxiliary("#fingerprint-dialog").lookup("#fingerprint-export").isDisabled());
+        fx(()->{
+            var scene=auxiliary("#fingerprint-dialog");var table=(javafx.scene.control.TableView<vn.edu.hutech.nqb.shared.fingerprint.FingerprintEvaluation.Row>)scene.lookup("#fingerprint-results");
+            if(table.getItems().size()!=3)throw new AssertionError("Missing holdout rows");
+            if(!((javafx.scene.control.Label)scene.lookup("#fingerprint-metrics")).getText().contains("2/3"))throw new AssertionError("Missing rejected rate");
+            scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"phase-c-02-results");
+            table.getSelectionModel().select(table.getItems().stream().filter(r->r.estimate().estimated()).findFirst().orElseThrow());
+            ((javafx.scene.control.ToggleButton)scene.lookup("#fingerprint-map-tab")).fire();((javafx.scene.control.ScrollPane)scene.lookup("#fingerprint-scroll")).setVvalue(1);
+        });
+        fx(()->{var scene=auxiliary("#fingerprint-dialog");scene.getRoot().applyCss();scene.getRoot().layout();if(scene.getRoot().lookupAll(".fingerprint-estimate").size()!=2)throw new AssertionError("Estimated position not drawn");saveImage(scene.snapshot(null),"phase-c-03-map");});
+        fx(()->{
+            var scene=auxiliary("#fingerprint-dialog");var table=(javafx.scene.control.TableView<vn.edu.hutech.nqb.shared.fingerprint.FingerprintEvaluation.Row>)scene.lookup("#fingerprint-results");
+            table.getSelectionModel().select(table.getItems().stream().filter(r->!r.estimate().estimated()).findFirst().orElseThrow());
+            scene.getRoot().applyCss();scene.getRoot().layout();if(!scene.getRoot().lookupAll(".fingerprint-estimate").isEmpty())throw new AssertionError("Rejected row retained stale estimate");saveImage(scene.snapshot(null),"phase-c-04-rejected");
+        });
+        Path report=Files.createTempDirectory("nqb-eval-report-").resolve("report.json");fx(()->app.qaFingerprintView().exportTo(report));
+        await(()->((javafx.scene.control.Label)auxiliary("#fingerprint-dialog").lookup("#fingerprint-status")).getText().startsWith("Đã xuất"));
+        if(!vn.edu.hutech.nqb.shared.WifiSurvey.JSON.readTree(Files.readAllBytes(report)).path("datasetKind").asText().equals("SYNTHETIC_DEMO"))throw new AssertionError("Lost synthetic provenance");
+        fx(()->{
+            var scene=auxiliary("#fingerprint-dialog");((javafx.scene.control.ToggleButton)scene.lookup("#fingerprint-setup-tab")).fire();
+            ((javafx.scene.control.Spinner<Integer>)scene.lookup("#fingerprint-k")).getValueFactory().setValue(3);
+            if(!scene.lookup("#fingerprint-export").isDisabled()||!scene.lookup("#fingerprint-map-tab").isDisabled())throw new AssertionError("Changed K retained stale report");
+        });
+        Path input=report.resolveSibling("survey.json");Files.writeString(input,vn.edu.hutech.nqb.shared.WifiSurvey.encode(vn.edu.hutech.nqb.shared.fingerprint.FingerprintDemo.create().bundle()));
+        fx(()->app.qaFingerprintView().loadFile(input));await(()->((javafx.scene.control.Label)auxiliary("#fingerprint-dialog").lookup("#fingerprint-origin")).getText().startsWith("KHẢO SÁT"));
+        fx(()->{var scene=auxiliary("#fingerprint-dialog");if(!scene.lookup("#fingerprint-evaluate").isDisabled())throw new AssertionError("User holdouts preselected");
+            ((javafx.scene.control.Button)scene.lookup("#fingerprint-toggle-run")).fire();if(scene.lookup("#fingerprint-evaluate").isDisabled())throw new AssertionError("Selecting a held-out run did not enable evaluation");
+            ((javafx.scene.control.Button)scene.lookup("#fingerprint-toggle-run")).fire();if(!scene.lookup("#fingerprint-evaluate").isDisabled())throw new AssertionError("Removing last holdout did not disable evaluation");
+            ((javafx.scene.control.Button)scene.lookup("#fingerprint-demo")).fire();app.qaCloseAuxiliary();});
+        fx(()->{app.openFingerprint(null,app.ownerStage());var scene=auxiliary("#fingerprint-dialog");if(!((javafx.scene.control.Label)scene.lookup("#fingerprint-origin")).getText().equals("Chưa chọn dữ liệu."))throw new AssertionError("Closed view callback polluted reopened view");app.qaCloseAuxiliary();});
+        if(Files.exists(Path.of(System.getProperty("nqb.survey.database"))))throw new AssertionError("Offline demo created survey database");
     }
     private static void checkPhaseB(ArcadeApplication app)throws Exception {
         class Fixture implements WifiSignalProvider,WifiScanProvider {

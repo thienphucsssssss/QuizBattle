@@ -80,7 +80,13 @@ final class SurveyViews implements AutoCloseable {
         runs.getSelectionModel().selectedItemProperty().addListener((o,b,r)->{reviewButtons();if(r!=null)runDetail.setText(r.deviceLabel()+" · "+r.adapterName()+" · "+r.orientation()+"\n"+quality(r).summary()+"\n"+r.note());});
         var export=action("Xuất JSON",this::exportFile);export.setId("survey-export");var importFile=action("Nhập JSON",this::importFile);importFile.setId("survey-import");
         sync=action("Đồng bộ lên Server",this::sync);sync.setId("survey-sync");
-        var actions=new FlowPane(10,10,accept,reject,export,importFile,sync);
+        var evaluation=action("Đánh giá định vị",()->{
+            var area=areas.getValue();if(area==null){status.setText("Chọn một phiên bản khu trước khi đánh giá.");return;}
+            setBusy(true);repository.thenCompose(r->r.bundle(LOCAL_OWNER,area.id(),area.revision())).whenComplete((bundle,error)->Platform.runLater(()->{
+                if(!showing())return;setBusy(false);if(error!=null)status.setText(ArcadeApplication.message(error));else app.openFingerprint(bundle,dialog.getDialogPane().getScene().getWindow());
+            }));
+        });evaluation.setId("survey-evaluate");
+        var actions=new FlowPane(10,10,accept,reject,export,importFile,sync,evaluation);
         var saved=column(10,runs,runDetail,actions,text("Chỉ xác nhận khi đã đứng yên đúng điểm. Tối thiểu 3 scan mới và 2 BSSID/tần số là điều kiện thu mẫu ban đầu, chưa bảo đảm độ chính xác định vị.","caption"));
         var captureTab=new ToggleButton("Thu mẫu");captureTab.setId("survey-capture-tab");var savedTab=new ToggleButton("Lượt đã lưu");savedTab.setId("survey-saved-tab");var modes=new ToggleGroup();captureTab.setToggleGroup(modes);savedTab.setToggleGroup(modes);captureTab.setSelected(true);
         var views=new StackPane(captureFields,saved);saved.setVisible(false);saved.setManaged(false);
