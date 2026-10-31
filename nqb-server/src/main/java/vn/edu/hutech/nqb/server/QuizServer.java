@@ -20,6 +20,8 @@ public final class QuizServer implements AutoCloseable {
     private final ProximityStore proximityStore;
     private final SurveyRepository surveyStore;
     private final ProximityRoomTracker proximity = new ProximityRoomTracker();
+    private final ServerWifiMonitor serverWifi;
+    private long lastWifiBroadcast;
     private final SSLServerSocket listener;
     private final LanDiscoveryServer discovery;
     private final String serverId=UUID.randomUUID().toString();
@@ -56,6 +58,10 @@ public final class QuizServer implements AutoCloseable {
     }
     private record Cached(String signature,ObjectNode response) { }
     public QuizServer(ServerConfig config,SSLContext tls,QuizStore store) throws Exception {
+        this(config,tls,store,new ServerWifiMonitor());
+    }
+    QuizServer(ServerConfig config,SSLContext tls,QuizStore store,ServerWifiMonitor serverWifi) throws Exception {
+        this.serverWifi=serverWifi;
         this.config=config;this.store=store;connectionSlots=new Semaphore(config.maxConnections());
         proximity.accessPoints.load(config.database());
         this.surveyStore=new SurveyRepository(config.database(),false);
@@ -66,13 +72,14 @@ public final class QuizServer implements AutoCloseable {
         try {
             listener.setEnabledProtocols(new String[]{"TLSv1.3","TLSv1.2"});listener.bind(new InetSocketAddress(config.bind(),config.port()));
             discovery=new LanDiscoveryServer(config.bind(),config.discoveryPort(),port());
-        } catch(Exception error){listener.close();proximityStore.close();surveyStore.close();throw error;}
+        } catch(Exception error){listener.close();proximityStore.close();surveyStore.close();serverWifi.close();throw error;}
     }
     ProximityRoomTracker proximityTracker(){return proximity;}
     ProximityStore proximityStore(){return proximityStore;}
     public int port(){return listener.getLocalPort();}
     public int discoveryPort(){return discovery.port();}
     public void start(){
+        serverWifi.start();
         discovery.start();
         Thread.ofPlatform().daemon().name("tls-accept").start(this::accept);
         clock.scheduleAtFixedRate(()-> {if(!closed.get()&&tickPending.compareAndSet(false,true)){try{worker.execute(()->{try{tick();}catch(Exception e){System.err.println("Game tick failed; aborting current match.");if(running())abort();}finally{tickPending.set(false);}});}catch(RejectedExecutionException busy){tickPending.set(false);}}},0,50,TimeUnit.MILLISECONDS);
@@ -253,7 +260,7 @@ public final class QuizServer implements AutoCloseable {
                     String refreshId=payload.path("refresh_id").asText();
                     if(telemetry.accepts(player.id,refreshId)){
                         boolean fresh=payload.path("samples").size()==LanTelemetryRules.REFRESH_SAMPLES;
-                        boolean measured=fresh&&selfView.has("estimated_meters");
+                        boolean measured=fresh&&(selfView.has("estimated_meters")||selfView.path("ap_distance").path("fresh").asBoolean());
                         telemetry.complete(player.id,refreshId,measured?"UPDATED":"FAILED",measured?"":selfView.path("status_label").asText("Chưa có đủ mẫu mới"));
                     }
                     if(phase==GamePhase.WAITING&&player.ready&&!proximity.isReadyEligible(player.id,nowNano)){player.ready=false;broadcastState();}
@@ -265,7 +272,7 @@ public final class QuizServer implements AutoCloseable {
                     p.send(envelope(type+"_OK",id,obj()));emitProximityUpdate();}
                 case "PROXIMITY_REFRESH"->{manager(p);
                     if(!p.role.equals("ADMIN")&&(owner==0||owner!=p.userId))throw fail("FORBIDDEN","Chỉ chủ phòng hoặc Admin được làm mới số đo.");
-                    if(owner==0||!proximity.isEnabled()||proximity.anchorBssid().isBlank())throw fail("PROXIMITY_DISABLED","Hãy bật giám sát và chọn điểm phát trong Cấu hình phòng.");
+                    if(owner==0)throw fail("PROXIMITY_DISABLED","Hãy tạo phòng thi trước khi lấy số đo.");
                     syncTelemetryContext();long refreshNow=System.nanoTime();boolean active=telemetry.refresh(refreshNow).path("state").asText().equals("RUNNING");
                     String refresh=telemetry.begin(players.values().stream().filter(v->v.peer!=null&&!v.peer.gone.get()).map(v->v.id).toList(),refreshNow);
                     if(!active)for(String target:telemetry.pending()){var v=players.get(target);if(v!=null&&v.peer!=null)v.peer.send(envelope("PROXIMITY_REFRESH_REQUEST",null,obj().put("refresh_id",refresh).put("room_code",roomCode).put("config_epoch",proximity.configEpoch()).put("session_id",running()?session:"")));}
@@ -303,7 +310,7 @@ public final class QuizServer implements AutoCloseable {
     }
     private ObjectNode publicDirectory()throws SQLException{
         var data=obj().put("server_id",serverId).put("server_name","Quiz Battle · "+serverId.substring(0,4).toUpperCase(Locale.ROOT));
-        data.putArray("capabilities").add(ProximityRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY);
+        data.putArray("capabilities").add(ProximityRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY).add(AutomaticApDistance.CAPABILITY);
         var rooms=array();
         if(owner!=0){
             int count=players.size(); // Includes temporarily reserved seats.
@@ -451,9 +458,11 @@ public final class QuizServer implements AutoCloseable {
         if(viewer.userId==owner&&owner!=0)state.put("history_session_id",historySessionId).put("history_room_name",historyRoomName);
         state.putArray("capabilities").add(ProximityRules.CAPABILITY).add("QUESTION_SETS_V1").add("HISTORY_QUESTIONS_V1").add(LanTelemetryRules.CAPABILITY).add(ResumeRules.CAPABILITY).add(WifiSurvey.CAPABILITY);
         state.withArray("capabilities").add(FloorTracker.CAPABILITY);
+        state.withArray("capabilities").add(AutomaticApDistance.CAPABILITY);
         state.set("floor",(viewer.userId==owner&&owner!=0)||players.containsKey(viewer.playerId)?floor.config():obj().put("enabled",false));
         state.put("scoring_version",AnswerScoring.VERSION);
         state.set("proximity",proximity.buildRoomStateSection(viewer.playerId,running(),System.nanoTime()));
+        if(participant(viewer))((ObjectNode)state.path("proximity")).set("server_ap_distance",serverWifi.snapshot(System.nanoTime()));
         state.set("players",list);
         var self=players.get(viewer.playerId);
         if(self!=null)state.set("self_answer",obj().put("answer",self.answer).put("recorded",!self.answer.isEmpty()).put("answer_elapsed_ms",self.answerElapsedMs));
@@ -482,8 +491,9 @@ public final class QuizServer implements AutoCloseable {
     private void broadcastState(){for(var p:peers)if(!p.gone.get()&&!p.closeAfterWrite&&!p.mustChange&&(p.userId!=0||!p.playerId.isEmpty()))p.send(envelope("ROOM_STATE",null,state(p,false)));}
     private ObjectNode floorSnapshot(Peer viewer){
         var snapshot=floor.config();snapshot.put("room_code",roomCode);var entries=snapshot.putArray("players");long now=System.nanoTime();
+        snapshot.set("server_ap_distance",serverWifi.snapshot(now));
         for(var player:players.values())if(viewer.userId==owner||player.id.equals(viewer.playerId))
-            entries.add(floor.player(player.id,player.nickname,player.peer!=null&&!player.peer.gone.get(),now));
+            entries.add(floor.player(player.id,player.nickname,player.peer!=null&&!player.peer.gone.get(),now).set("ap_distance",proximity.apDistance(player.id,now)));
         return snapshot;
     }
     private void emitFloorUpdate(){
@@ -494,6 +504,7 @@ public final class QuizServer implements AutoCloseable {
         syncTelemetryContext();long now=System.nanoTime();
         var snapshot=proximity.buildMonitoringSnapshot(roomCode,roomName,phase.name(),session,running(),System.nanoTime());
         snapshot.put("topology_supported",true);snapshot.set("refresh",telemetry.refresh(now));
+        snapshot.set("server_ap_distance",serverWifi.snapshot(now));
         for(var value:snapshot.path("players")){var player=players.get(value.path("player_id").asText());if(player!=null&&value instanceof ObjectNode node){node.put("ip_address",player.ipAddress).put("ready",player.ready).put("reconnecting",player.peer==null&&player.resumeHash!=null&&player.resumeUntil>now);telemetry.decorate(player.id,node,player.peer!=null&&!player.peer.gone.get(),now);}}
         return snapshot;
     }
@@ -511,6 +522,7 @@ public final class QuizServer implements AutoCloseable {
     private void tick()throws SQLException{
         long now=System.nanoTime();boolean changed=false;
         syncTelemetryContext();boolean netChanged=telemetry.tick(now);
+        if(owner!=0&&now-lastWifiBroadcast>TimeUnit.SECONDS.toNanos(5)){lastWifiBroadcast=now;emitProximityUpdate();if(!floor.enabled())emitFloorUpdate();}
         if(floor.enabled()&&now-lastFloorBroadcast>TimeUnit.SECONDS.toNanos(2))emitFloorUpdate();
         for(var v:players.values())if(v.peer!=null&&!v.peer.gone.get()){var probe=telemetry.probe(v.id,now);if(probe!=null)v.peer.send(envelope("NETWORK_PROBE",null,probe));}
         for(var peer:peers)if(peer.questionImport!=null&&peer.questionImport.expired())peer.questionImport=null;
@@ -561,7 +573,7 @@ public final class QuizServer implements AutoCloseable {
         players.clear();avatars.clear();proximity.resetAll();telemetry.clear();floor.clear();floorVersion++;owner=0;phase=GamePhase.WAITING;roomCode="";roomName="";session="";questions=List.of();questionSetId=0;questionSetName="";historySessionId="";historyRoomName="";
     }
     @Override public void close(){
-        if(!closed.compareAndSet(false,true))return;discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();
+        if(!closed.compareAndSet(false,true))return;serverWifi.close();discovery.close();try{listener.close();}catch(Exception ignored){}clock.shutdownNow();peers.forEach(Peer::close);handshakes.shutdownNow();auth.shutdownNow();
         worker.shutdown();try{if(!worker.awaitTermination(5,TimeUnit.SECONDS))worker.shutdownNow();proximityStore.close();surveyStore.close();store.close();}catch(Exception ignored){}
     }
 }

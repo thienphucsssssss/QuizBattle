@@ -15,8 +15,11 @@ import static vn.edu.hutech.nqb.admin.FxKit.*;
 final class LanTopologyView extends VBox {
     private final Map<String,PlayerNode> nodes=new LinkedHashMap<>();
     private final Label summary=text("","muted"),ssid=text("Chưa chọn điểm phát","topology-ssid"),refreshSummary=text("","topology-legend");
+    private final Label serverDistance=text("","topology-legend");
+    private JsonNode serverReading=vn.edu.hutech.nqb.client.QuizGateway.object();
     private final Graph graph=new Graph();
     private final Consumer<String> select;
+    private final boolean publicView;
     private long receivedAt;
     private final Timeline ageTimer=new Timeline(new KeyFrame(Duration.seconds(1),e->updateAges()));
     private static final class PlayerNode {
@@ -24,13 +27,16 @@ final class LanTopologyView extends VBox {
         JsonNode data;String avatar="",name="";
     }
     LanTopologyView(boolean publicView,Consumer<String> select){
-        super(12);this.select=publicView?null:select;setId(publicView?"projected-topology":"lan-topology");getStyleClass().add("topology-panel");
-        getChildren().addAll(row(12,text("Kết nối lớp học","subtitle"),space(),summary),graph,text("Ping: với máy chủ · Khoảng cách: đến điểm phát","topology-legend"),refreshSummary);
+        super(12);this.publicView=publicView;this.select=publicView?null:select;setId(publicView?"projected-topology":"lan-topology");getStyleClass().add("topology-panel");
+        serverDistance.setId("server-ap-distance");
+        getChildren().addAll(row(12,text("Kết nối lớp học","subtitle"),space(),summary),graph,text("Ping: với Server · Mét: đến AP đang kết nối của từng máy · Ước lượng RSSI","topology-legend"),serverDistance,refreshSummary);
         ageTimer.setCycleCount(Timeline.INDEFINITE);runWhenShowing(this,ageTimer);
     }
     void update(JsonNode room,JsonNode snapshot){
         receivedAt=System.nanoTime();
+        serverReading=snapshot.path("server_ap_distance");
         String network=snapshot.path("anchor_ssid").asText(room.path("proximity").path("anchor_ssid").asText());ssid.setText(network.isBlank()?"Chưa chọn điểm phát":network);
+        if(snapshot.path("automatic_distance_supported").asBoolean())ssid.setText("Các AP đang kết nối");
         var data=new LinkedHashMap<String,JsonNode>();for(var p:snapshot.path("players"))data.put(p.path("player_id").asText(),p);
         var roster=room.path("players").isArray()?room.path("players"):snapshot.path("players");
         Set<String> keep=new LinkedHashSet<>();int ready=0;
@@ -51,16 +57,19 @@ final class LanTopologyView extends VBox {
         refreshSummary.setManaged(!refreshSummary.getText().isEmpty());refreshSummary.setVisible(refreshSummary.isManaged());
     }
     private void updateAges(){long extra=receivedAt==0?0:(System.nanoTime()-receivedAt)/1_000_000;
+        serverDistance.setText(publicView?"Server → AP: "+ApDistanceViews.distance(serverReading,extra)+" · "+ApDistanceViews.status(serverReading,extra):ApDistanceViews.summary("Server",serverReading,extra));
         for(var node:nodes.values()){
             var p=node.data;boolean live=p.path("connected").asBoolean();long age=p.path("measurement_age_ms").asLong(-1);boolean fresh=age>=0&&age+extra<15000;
+            var apDistance=ApDistanceViews.value(p);if(p.has("ap_distance"))fresh=ApDistanceViews.fresh(apDistance,extra);
             long pingAge=p.path("ping_age_ms").asLong(-1);String ping=live&&p.has("ping_ms")&&pingAge>=0&&pingAge+extra<15000?(p.path("ping_ms").asLong()==0?"<1":p.path("ping_ms").asText())+" ms":"— ms";
-            String distance=live&&fresh&&p.has("estimated_meters")?"≈ "+String.format(Locale.forLanguageTag("vi-VN"),"%.1f",p.path("estimated_meters").asDouble())+" m":"— m";
+            String distance=live&&fresh?ApDistanceViews.distance(apDistance,extra):"— m";
+            node.button.setTooltip(new Tooltip(publicView?node.name+" → AP: "+distance+" · "+ApDistanceViews.status(apDistance,extra):ApDistanceViews.summary(node.name,apDistance,extra)));
             boolean pending=p.path("refresh_status").asText().equals("PENDING");boolean failed=Set.of("FAILED","TIMEOUT").contains(p.path("refresh_status").asText());
             try{if(java.time.Instant.parse(p.path("updated_at_utc").asText()).isAfter(java.time.Instant.parse(p.path("refreshed_at_utc").asText())))failed=false;}catch(java.time.format.DateTimeParseException ignored){}
             node.metrics.setText(ping+" · "+distance);node.metrics.setOpacity(pending||failed?.55:1);
-            String state=!live?(p.path("reconnecting").asBoolean()?"Đang giữ chỗ…":"Ngắt kết nối"):pending?"Đang đo…":p.path("refresh_status").asText().equals("UNSUPPORTED")?"Cần cập nhật Client":failed?reason(p.path("refresh_reason").asText()):!fresh&&p.has("estimated_meters")?"Số đo đã cũ":p.path("ready").asBoolean()?"Sẵn sàng":p.path("status_label").asText("Đang chuẩn bị");
+            String state=!live?(p.path("reconnecting").asBoolean()?"Đang giữ chỗ…":"Ngắt kết nối"):pending?"Đang đo…":p.path("refresh_status").asText().equals("UNSUPPORTED")?"Cần cập nhật Client":failed?reason(p.path("refresh_reason").asText()):p.has("ap_distance")?(fresh?apDistance.path("calibrated").asBoolean()?"Đã hiệu chuẩn":"Chưa hiệu chuẩn":ApDistanceViews.status(apDistance,extra)):!fresh&&p.has("estimated_meters")?"Số đo đã cũ":p.path("ready").asBoolean()?"Sẵn sàng":p.path("status_label").asText("Đang chuẩn bị");
             node.status.setText(state);node.button.setAccessibleText(node.name+", "+node.metrics.getText()+", "+state);
-            node.line.getStyleClass().removeAll("lost","warning","missing");if(!live)node.line.getStyleClass().add("lost");else if(p.path("over_threshold").asBoolean()||p.path("status").asText().equals("FLUCTUATING"))node.line.getStyleClass().add("warning");else if(!fresh||!p.has("estimated_meters"))node.line.getStyleClass().add("missing");
+            node.line.getStyleClass().removeAll("lost","warning","missing");if(!live)node.line.getStyleClass().add("lost");else if(p.path("over_threshold").asBoolean()||p.path("status").asText().equals("FLUCTUATING"))node.line.getStyleClass().add("warning");else if(!fresh)node.line.getStyleClass().add("missing");
         }
     }
     static String reason(String value){return switch(value){case "CALIBRATING"->"Đang hiệu chuẩn";case "PERMISSION_DENIED"->"Chưa cấp quyền";case "WIFI_DISABLED"->"Wi-Fi đang tắt";case "NO_ADAPTER"->"Không có Wi-Fi";case "DISCONNECTED"->"Mất Wi-Fi";case "API_ERROR"->"Chưa đọc được RSSI";case "CANCELLED"->"Đã hủy lượt đo";default->value.isBlank()?"Chưa có số đo":value;};}

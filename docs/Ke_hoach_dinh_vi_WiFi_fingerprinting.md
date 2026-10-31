@@ -14,7 +14,7 @@ Trạng thái: đã triển khai phần mềm đợt A, luồng khảo sát đ�
 
 ### Điều chỉnh so với ý tưởng đo từng khoảng cách tới AP
 
-Khi chưa biết vị trí AP và không tiếp cận được AP để hiệu chuẩn theo khoảng cách thật, các số đo RSSI → mét của Server–AP/Client–AP không đủ cơ sở để cộng trừ thành khoảng cách Client–Server. Bản đầu dùng vị trí đã khảo sát làm mốc. Tính năng đo khoảng cách AP hiện có vẫn là chế độ riêng, chỉ sử dụng khi có hồ sơ hiệu chuẩn hợp lệ.
+Khi chưa biết vị trí AP và không tiếp cận được AP để hiệu chuẩn theo khoảng cách thật, các số đo RSSI → mét của Server–AP/Client–AP không đủ cơ sở để cộng trừ thành khoảng cách Client–Server. Bản đầu dùng vị trí đã khảo sát làm mốc. Tính năng khoảng cách AP là chế độ riêng: mã nguồn mới có [ước lượng thô bằng tham số giả định](Uoc_luong_AP_tu_dong.md), còn hồ sơ hiệu chuẩn hợp lệ được ưu tiên khi có.
 
 BSSID thay đổi chỉ xác nhận đổi kết nối, không chứng minh đã ra khỏi vùng phủ sóng AP trước. Hệ thống phân biệt AP đang kết nối, AP quan sát được và vị trí ước lượng. Số BSSID cũng không được trình bày thành số AP vật lý.
 

@@ -64,7 +64,7 @@ class ProximityServerIntegrationTest {
         int owner = store.bootstrap("admin", "Quản trị", "Admin-test-only-1".toCharArray());
         ServerTestData.seedQuestions(store, owner);
         var config = new ServerConfig("127.0.0.1", 0, data.resolve("quiz.db"), key, 10, 32, 80, 80, 120);
-        server = new QuizServer(config, config.tls(KEY_PASSWORD), store);
+        server = new QuizServer(config, config.tls(KEY_PASSWORD), store,new ServerWifiMonitor(ServerWifiMonitorTest.Fixture::new));
         server.proximityTracker().setTimingsForTest(15_000L, 10L, 100L);
         server.start();
         port = server.port();
@@ -165,6 +165,40 @@ class ProximityServerIntegrationTest {
         return p;
     }
 
+    @Test void automaticDistanceSurvivesRoamingAndDoesNotGateTheExam()throws Exception{
+        var host=admin();var room=host.request("ROOM_CONFIGURE",obj().put("room_name","Automatic AP distance").put("question_count",1).put("duration_seconds",5)
+            .put("proximity_enabled",true).put("anchor_bssid","aa:bb:cc:dd:ee:01").put("anchor_band","5 GHz"));
+        assertFalse(room.path("proximity").path("calibration_required").asBoolean());
+        var a=guest(room.path("room_code").asText(),"Moving");var b=guest(room.path("room_code").asText(),"No Wi-Fi");
+        int epoch=room.path("proximity").path("config_epoch").asInt();
+        var near=a.request("PROXIMITY_REPORT",reportPayload(epoch,1,"aa:bb:cc:dd:ee:01","5 GHz",-46,""));
+        assertEquals(1,near.path("ap_distance").path("estimated_meters").asDouble());assertFalse(near.has("estimated_meters"));
+        assertEquals("MODEL_DEFAULT",near.path("ap_distance").path("mode").asText());
+        a.request("READY_SET",obj().put("ready",true));b.request("READY_SET",obj().put("ready",true));
+        host.request("START_GAME",obj());String session=host.request("ROOM_STATE",obj()).path("session_id").asText();
+        Thread.sleep(20);
+        var far=a.request("PROXIMITY_REPORT",reportPayload(epoch,2,"aa:bb:cc:dd:ee:02","5 GHz",-76,session));
+        assertEquals(10,far.path("ap_distance").path("estimated_meters").asDouble());assertTrue(far.path("ready_eligible").asBoolean());
+        var monitor=host.request("PROXIMITY_GET",obj());assertEquals("aa:bb:cc:dd:ee:fe",monitor.path("server_ap_distance").path("bssid").asText());
+        assertEquals(1,monitor.path("server_ap_distance").path("estimated_meters").asDouble());
+        for(var player:b.request("ROOM_STATE",obj()).path("players"))assertFalse(player.has("ap_distance"));
+        assertEquals(2,host.request("ROOM_STATE",obj()).path("connected_player_count").asInt());
+        Thread.sleep(20);var denied=a.request("PROXIMITY_REPORT",obj().put("config_epoch",epoch).put("seq",3).put("session_id",session).put("device_status","PERMISSION_DENIED"));
+        assertFalse(denied.path("ap_distance").has("estimated_meters"));assertTrue(denied.path("ready_eligible").asBoolean());
+    }
+
+    @Test void refreshWorksWithoutAnchorOrCalibrationAndCannotOverwriteTheServerReading()throws Exception{
+        var host=admin();var room=host.request("ROOM_CONFIGURE",obj().put("room_name","Auto refresh").put("question_count",1).put("duration_seconds",5));
+        var a=guest(room.path("room_code").asText(),"No calibration");int epoch=room.path("proximity").path("config_epoch").asInt();
+        a.request("PROXIMITY_REPORT",reportPayload(epoch,1,"aa:bb:cc:dd:ee:01","5 GHz",-46,""));
+        String refresh=host.request("PROXIMITY_REFRESH",obj()).path("refresh").path("refresh_id").asText();assertFalse(refresh.isBlank());
+        Thread.sleep(20);var payload=reportPayload(epoch,2,"aa:bb:cc:dd:ee:02","5 GHz",-76,"").put("refresh_id",refresh);
+        payload.set("server_ap_distance",obj().put("estimated_meters",12345));a.request("PROXIMITY_REPORT",payload);
+        var result=host.request("PROXIMITY_GET",obj());assertEquals(1,result.path("refresh").path("updated").asInt());
+        assertEquals(1,result.path("server_ap_distance").path("estimated_meters").asDouble());
+        error(a,"FORBIDDEN","PROXIMITY_GET",obj());
+    }
+
     @Test void apCatalogIsHostOnlyPersistentAndTrackingWorksWithoutDistanceCalibration() throws Exception {
         var host = admin();
         var room = host.request("ROOM_CONFIGURE", obj().put("room_name", "Hành lang E1").put("question_count", 1)
@@ -248,7 +282,7 @@ class ProximityServerIntegrationTest {
             .put("room_name", "Phòng Thi LAN")
             .put("question_count", 1)
             .put("duration_seconds", 5)
-            .put("proximity_enabled", true)
+            .put("proximity_enabled", true).put("calibration_required",true)
             .put("anchor_ssid", "Lab-AP")
             .put("anchor_bssid", "AA:BB:CC:DD:EE:01")
             .put("anchor_band", "5 GHz")
@@ -371,7 +405,7 @@ class ProximityServerIntegrationTest {
             .put("room_name", "Phòng Hủy Giữa Chừng")
             .put("question_count", 2)
             .put("duration_seconds", 10)
-            .put("proximity_enabled", true)
+            .put("proximity_enabled", true).put("calibration_required",true)
             .put("anchor_ssid", "Lab-AP")
             .put("anchor_bssid", "AA:BB:CC:DD:EE:01")
             .put("anchor_band", "5 GHz")
@@ -431,7 +465,7 @@ class ProximityServerIntegrationTest {
             .put("room_name", "Phòng GV A")
             .put("question_count", 1)
             .put("duration_seconds", 5)
-            .put("proximity_enabled", true)
+            .put("proximity_enabled", true).put("calibration_required",true)
             .put("anchor_ssid", "AP-A")
             .put("anchor_bssid", "11:22:33:44:55:66")
             .put("anchor_band", "5 GHz")
@@ -478,7 +512,7 @@ class ProximityServerIntegrationTest {
         Thread.sleep(15L);
         student2.request("PROXIMITY_REPORT", reportPayload(epoch, 1, "66:55:44:33:22:11", "2.4 GHz", -48, ""));
         var updatedFromCandidate = teacherA.request("PROXIMITY_CONFIGURE", obj()
-            .put("proximity_enabled", true)
+            .put("proximity_enabled", true).put("calibration_required",true)
             .put("from_player_id", s2Id)
             .put("threshold_meters", 12));
         assertEquals("66:55:44:33:22:11", updatedFromCandidate.path("proximity").path("anchor_bssid").asText());
@@ -570,9 +604,9 @@ class ProximityServerIntegrationTest {
         l2.close();
 
         // 2. Enable proximity with fast stale timeout (250ms) and test 10 concurrent students
-        server.proximityTracker().setTimingsForTest(250L, 5L, 80L);
+        server.proximityTracker().setTimingsForTest(15_000L, 5L, 80L);
         var configured = host.request("PROXIMITY_CONFIGURE", obj()
-            .put("proximity_enabled", true)
+            .put("proximity_enabled", true).put("calibration_required",true)
             .put("anchor_ssid", "Hall-AP")
             .put("anchor_bssid", "AA:BB:CC:11:22:33")
             .put("anchor_band", "5 GHz")
@@ -590,6 +624,8 @@ class ProximityServerIntegrationTest {
         }
         assertEquals(10, host.request("ROOM_STATE", obj()).path("ready_count").asInt());
 
+        // Shorten freshness only after TLS setup; connection speed must not determine the initial count.
+        server.proximityTracker().setTimingsForTest(250L,5L,80L);
         // Wait for data to expire (> 250ms): tick() automatically clears Ready in waiting room and marks NO_DATA
         Thread.sleep(360L);
         assertEquals(0, host.request("ROOM_STATE", obj()).path("ready_count").asInt(), "Stale proximity data must clear Ready in waiting room");

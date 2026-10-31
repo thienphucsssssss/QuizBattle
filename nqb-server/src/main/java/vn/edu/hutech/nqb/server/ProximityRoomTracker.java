@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import vn.edu.hutech.nqb.shared.ProximityRules;
+import vn.edu.hutech.nqb.shared.AutomaticApDistance;
 
 import java.time.Instant;
 import java.util.*;
@@ -27,6 +28,7 @@ final class ProximityRoomTracker {
     record CandidateAnchor(String ssid, String bssid, String band, String reportedByNickname, String updatedAtUtc) { }
 
     static final class PlayerProximity {
+        final AutomaticApDistance automaticDistance=new AutomaticApDistance();
         final AccessPointTracker.Track apTrack = new AccessPointTracker.Track();
         final String playerId;
         String nickname;
@@ -126,6 +128,7 @@ final class ProximityRoomTracker {
     private final List<ProximityStore.AlertEventRow> pendingAlerts = new ArrayList<>();
 
     private boolean enabled;
+    private boolean calibrationRequired;
     private int configEpoch = 1;
     private String anchorSsid = "";
     private String anchorBssid = "";
@@ -179,6 +182,7 @@ final class ProximityRoomTracker {
         candidateAnchors.clear();
         pendingAlerts.clear();
         enabled = false;
+        calibrationRequired = false;
         configEpoch = 1;
         anchorSsid = "";
         anchorBssid = "";
@@ -234,6 +238,7 @@ final class ProximityRoomTracker {
         PlayerProximity p = players.get(playerId);
         if (p == null) return;
         p.connected = false;
+        p.automaticDistance.unavailable("DISCONNECTED",nowNano);
         p.apTrack.breakContinuity();
         p.apTrack.deviceStatus="DISCONNECTED";
         p.lastValidReportNano=0;p.lastDeviceStatus="NONE";
@@ -250,7 +255,7 @@ final class ProximityRoomTracker {
      * Returns true if ready states in the waiting room must be cleared.
      */
     boolean configure(JsonNode payload, boolean isExplicitProximityConfigure) {
-        if (!isExplicitProximityConfigure && !payload.has("proximity_enabled") && !payload.has("anchor_bssid") && !payload.has("threshold_meters")) {
+        if (!isExplicitProximityConfigure && !payload.has("proximity_enabled") && !payload.has("anchor_bssid") && !payload.has("threshold_meters") && !payload.has("calibration_required")) {
             return false;
         }
         boolean nextEnabled = payload.has("enabled")
@@ -276,6 +281,8 @@ final class ProximityRoomTracker {
             rawBand = source.currentBand;
         }
         boolean recalibrateAll = bool(payload, "recalibrate_all", false);
+        boolean nextRequired=bool(payload,"calibration_required",calibrationRequired);
+        boolean requirementChanged=nextRequired!=calibrationRequired;
 
         String normalizedBssid = rawBssid.isBlank() ? "" : ProximityRules.normalizeBssid(rawBssid);
         if (!rawBssid.isBlank() && normalizedBssid.isEmpty()) {
@@ -294,12 +301,13 @@ final class ProximityRoomTracker {
         boolean enabledTurnedOn = !this.enabled && nextEnabled;
 
         this.enabled = nextEnabled;
+        this.calibrationRequired=nextRequired;
         this.thresholdMeters = nextThreshold;
         this.anchorSsid = rawSsid;
         this.anchorBssid = normalizedBssid;
         this.anchorBand = normalizedBand;
 
-        if (anchorChanged || enabledTurnedOn || recalibrateAll) {
+        if (anchorChanged || enabledTurnedOn || recalibrateAll || requirementChanged) {
             this.configEpoch++;
             if (recalibrateAll) {
                 this.recalibratedAtUtc = Instant.now().toString();
@@ -492,6 +500,7 @@ final class ProximityRoomTracker {
         p.currentSignalQuality = quality;
 
         if (!deviceStatus.equals("CONNECTED")) {
+            p.automaticDistance.unavailable(deviceStatus,nowNano);
             p.currentBssid = "";
             p.currentBand = "";
             p.rssiWindow.clear();
@@ -546,6 +555,8 @@ final class ProximityRoomTracker {
         } else {
             throw fail("INVALID_INPUT", "Báo cáo kết nối cần có ít nhất một mẫu RSSI hợp lệ.");
         }
+
+        p.automaticDistance.accept(adapterId,ssid,bssid,band,incomingSamples,nowNano);
 
         // Check if adapter changed since calibration
         if (p.calibrated && !adapterId.isEmpty() && !p.calibratedAdapterId.equalsIgnoreCase(adapterId)) {
@@ -743,7 +754,7 @@ final class ProximityRoomTracker {
      * Returns null if eligible, or a Failure with exact code and Vietnamese message if not.
      */
     Failure checkReadyEligibility(String playerId, long nowNano) {
-        if (!enabled) {
+        if (!enabled || !calibrationRequired) {
             return null;
         }
         if (anchorBssid.isEmpty() || anchorBand.isEmpty()) {
@@ -1031,6 +1042,7 @@ final class ProximityRoomTracker {
 
     ObjectNode buildRoomStateSection(String viewerPlayerId, boolean locked, long nowNano) {
         ObjectNode node = obj()
+            .put("automatic_distance_supported",true).put("calibration_required",calibrationRequired)
             .put("ap_tracking_supported", true)
             .put("supported", true)
             .put("capability", ProximityRules.CAPABILITY)
@@ -1074,11 +1086,25 @@ final class ProximityRoomTracker {
             self.put("estimated_meters", Math.round(p.currentDistanceMeters * 10.0) / 10.0);
         }
         self.set("access_point", accessPoints.view(p.apTrack, p.connected, nowNano));
+        self.set("ap_distance",apDistance(p,nowNano));
         return self;
     }
 
+    private ObjectNode apDistance(PlayerProximity p,long now){
+        var result=p.automaticDistance.snapshot(p.connected,now);
+        if(result.path("fresh").asBoolean()&&p.calibrated&&p.calibratedEpoch==configEpoch&&p.calibratedAdapterId.equalsIgnoreCase(p.currentAdapterId)
+            &&p.calibratedBssid.equals(p.currentBssid)&&p.calibratedBand.equals(p.currentBand)&&isFresh(p,now)&&p.currentDistanceMeters!=null){
+            result.put("mode","CALIBRATED").put("calibrated",true).put("estimated_meters",Math.round(p.currentDistanceMeters*10)/10.0)
+                .put("distance_label",ProximityRules.formatEstimatedDistance(p.currentDistanceMeters)).put("method_label","Theo hồ sơ hiệu chuẩn")
+                .put("reference_rssi_1m",p.rssi1m).put("path_loss_n",p.pathLossN).put("clamped",p.currentDistanceMeters<=.2||p.currentDistanceMeters>=200);
+        }
+        return result;
+    }
+    ObjectNode apDistance(String playerId,long now){var p=players.get(playerId);return p==null?obj():apDistance(p,now);}
+
     ObjectNode buildMonitoringSnapshot(String roomCode, String roomName, String phase, String sessionId, boolean locked, long nowNano) {
         ObjectNode root = obj()
+            .put("automatic_distance_supported",true).put("calibration_required",calibrationRequired)
             .put("room_code", roomCode)
             .put("room_name", roomName)
             .put("phase", phase)
@@ -1144,6 +1170,7 @@ final class ProximityRoomTracker {
             }
             list.add(item);
             item.set("access_point", accessPoints.view(p.apTrack, p.connected, nowNano));
+            item.set("ap_distance",apDistance(p,nowNano));
         }
         return root;
     }

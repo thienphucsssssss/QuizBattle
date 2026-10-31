@@ -1,5 +1,7 @@
 # Giám sát khoảng cách Wi-Fi (ước lượng) — Bản 0.3.8
 
+**Cập nhật mã nguồn:** mặc định hiện có [ước lượng AP tự động không bắt buộc hiệu chuẩn](Uoc_luong_AP_tu_dong.md). Quy trình 1 m / 5 m bên dưới vẫn dùng cho chế độ nâng cao; chỉ chặn Sẵn sàng khi chủ phòng bật tùy chọn bắt buộc hiệu chuẩn. Client bắt đầu đọc RSSI khi vào phòng và có thể mở chẩn đoán quyền qua nút Đang đo Wi-Fi / Bật đo Wi-Fi.
+
 Tài liệu hướng dẫn cấp quyền đọc Wi-Fi trên Windows, hiệu chuẩn hai bước (1 m và 5 m), quy trình tổ chức thi có giám sát khoảng cách trong LAN và cách ghi nhận sai số thực nghiệm. Đã cập nhật sau đợt review ngày 26/10/2026.
 
 ---

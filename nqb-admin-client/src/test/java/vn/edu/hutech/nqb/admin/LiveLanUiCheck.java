@@ -43,6 +43,7 @@ public final class LiveLanUiCheck {
                     else if(args.length>3&&args[3].equals("phase-b")){checkPhaseB(app);System.out.println("PHASE_B_UI_PASS");}
                     else if(args.length>3&&args[3].equals("phase-c")){checkPhaseC(app);System.out.println("PHASE_C_UI_PASS");}
                     else if(args.length>3&&args[3].equals("floor-map")){checkFloorMap(app);System.out.println("FLOOR_MAP_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("auto-ap")){checkAutomaticAp(app);System.out.println("AUTOMATIC_AP_UI_PASS");}
                     else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
                     else {run(app);System.out.println("LIVE_LAN_UI_PASS: UDP discovery with wrong configured TCP port, list JOIN, code JOIN, invalid code, optional direct endpoint, avatar, game, ranking, LOGIN, REGISTER, bank, history, verified TLS");} }
@@ -83,6 +84,49 @@ public final class LiveLanUiCheck {
             app.qaFloorMap().close();
         });
         if(Files.exists(Path.of(System.getProperty("nqb.survey.database"))))throw new AssertionError("Simulation wrote survey storage");
+    }
+    private static void checkAutomaticAp(ArcadeApplication app)throws Exception {
+        var radio=new java.util.concurrent.atomic.AtomicReference<>(WifiSignalProvider.Reading.connected("qa-client","QA fixture","HUTECH E1","aa:bb:cc:dd:ee:01","5 GHz",36,5180000,-46,85,System.currentTimeMillis()));
+        WifiSignalProvider provider=new WifiSignalProvider(){public Reading readSignal(){return radio.get();}public void close(){}};
+        fx(()->app.setProximityClientForTest(new ProximityClientService(provider,new ProximityCalibrationStore(output.resolve("auto-calibration.json")),1000,5000,30)));
+        try(var host=connect()){
+            request(host,"LOGIN",object().put("username","admin").put("password",SECRET));
+            request(host,"QUESTION_CREATE",object().put("content","QA RSSI tự động").put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA"));
+            var room=request(host,"ROOM_CONFIGURE",object().put("room_name","QA · RSSI Client giả lập").put("question_count",1).put("duration_seconds",5));
+            String code=room.path("room_code").asText();int epoch=room.path("proximity").path("config_epoch").asInt();
+            host.close(); // Release the admin account before the GUI signs in later.
+            fx(()->{app.qaStudentAuth();fillForm(app,"Client tự động",code);app.qaClick("Tham gia phòng   →");});
+            await(()->app.managedRoomSnapshot().path("proximity").path("self").path("ap_distance").has("estimated_meters"));
+            fx(()->{app.qaCloseAuxiliary();if(!hasLabel(app,"chưa hiệu chuẩn"))throw new AssertionError("Missing estimate provenance");app.qaClick("Sẵn sàng   →");});
+            await(()->app.managedRoomSnapshot().path("ready_count").asInt()==1);
+            radio.set(WifiSignalProvider.Reading.connected("qa-client","QA fixture","HUTECH E1","aa:bb:cc:dd:ee:02","5 GHz",36,5180000,-76,40,System.currentTimeMillis()));
+            await(()->app.managedRoomSnapshot().path("proximity").path("self").path("ap_distance").path("estimated_meters").asDouble()==10);
+            fx(()->{if(app.managedRoomSnapshot().path("ready_count").asInt()!=1)throw new AssertionError("Roaming cleared ready");snapshot(app,"auto-01-client-roamed");
+                var codeLabel=(javafx.scene.control.Label)app.qaScene().lookup(".room-code");if(codeLabel.getWidth()+1<codeLabel.prefWidth(-1))throw new AssertionError("Room code clipped");});
+            radio.set(WifiSignalProvider.Reading.failure(WifiSignalProvider.Status.PERMISSION_DENIED,"QA denied",System.currentTimeMillis()));
+            await(()->hasLabel(app,"Cần cấp quyền"));fx(()->{snapshot(app,"auto-02-no-permission");app.qaLogout();});
+            try(var other=connect()){
+            request(other,"JOIN",object().put("room_code",code).put("nickname","Client RSSI QA"));
+            request(other,"PROXIMITY_REPORT",object().put("config_epoch",epoch).put("seq",1).put("device_status","CONNECTED").put("adapter_id","qa-radio").put("ssid","HUTECH E1").put("bssid","aa:bb:cc:dd:ee:02").put("band","5 GHz").put("rssi_dbm",-76));
+            fx(()->{app.qaAuth();fillForm(app,"admin","");app.qaClick("Đăng nhập   →");});await(app::qaConnected);
+            fx(app::openProximityMonitor);await(()->app.qaMonitorStage()!=null);
+            await(()->app.latestProximitySnapshot().path("players").size()==1);
+            fx(()->{app.qaMonitorStage().setWidth(app.ownerStage().getWidth());app.qaMonitorStage().setHeight(app.ownerStage().getHeight());});
+            await(()->app.qaMonitorStage().getScene().getHeight()<=app.ownerStage().getHeight()&&app.qaMonitorStage().getScene().getWidth()>=app.ownerStage().getWidth()-25);
+            await(()->!app.qaMonitorStage().getScene().lookup("#proximity-monitor-refresh").isDisabled());
+            fx(()->{
+                var stage=app.qaMonitorStage();
+                var scene=stage.getScene();scene.getRoot().applyCss();scene.getRoot().layout();
+                if(!app.canRefreshMeasurements())throw new AssertionError("Auto refresh disabled without anchor");
+                if(scene.lookup("#server-ap-distance")==null)throw new AssertionError("Server distance missing");
+                saveImage(scene.snapshot(null),"auto-03-monitor");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-list-mode")).fire();scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"auto-04-table");
+                var table=(javafx.scene.control.TableView<JsonNode>)scene.lookup("#proximity-monitor-table");
+                if(!table.getColumns().get(3).getCellData(0).toString().contains("10.0"))throw new AssertionError("Automatic distance missing from table");
+                stage.close();
+            });
+            }
+        }
     }
     private static void checkPhaseC(ArcadeApplication app)throws Exception {
         fx(()->{app.qaSettings();((javafx.scene.control.Button)auxiliary("#fingerprint-open").lookup("#fingerprint-open")).fire();});

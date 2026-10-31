@@ -684,6 +684,7 @@ final class ProximityViews {
         private final Stage stage;
         private final Label anchorSummary = text("", "subtitle");
         private final Label thresholdSummary = text("", "muted");
+        private final Label serverSummary=text("","muted");
         private final Label warningBanner = text("", "feedback", "error");
         private final TableView<JsonNode> table = new TableView<>();
         private final TableView<JsonNode> apTable = new TableView<>();
@@ -722,18 +723,20 @@ final class ProximityViews {
             playerCol.setPrefWidth(210);
             playerCol.setSortable(false);
 
-            TableColumn<JsonNode, String> distCol = new TableColumn<>("Khoảng cách");
-            var distanceInfo=text("ⓘ","caption");distanceInfo.setTooltip(new Tooltip("Khoảng cách được tính từ tín hiệu Wi-Fi thực và hồ sơ hiệu chuẩn; không phải phép đo mét trực tiếp."));distCol.setGraphic(distanceInfo);
+            TableColumn<JsonNode, String> distCol = new TableColumn<>("Client → AP");
+            var distanceInfo=text("ⓘ","caption");distanceInfo.setTooltip(new Tooltip("Ước lượng từ RSSI của AP Client đang kết nối. Dùng tham số giả định khi chưa hiệu chuẩn; có thể sai lệch lớn do tường và thiết bị."));distCol.setGraphic(distanceInfo);
             distCol.setCellValueFactory(c -> {
                 JsonNode p = c.getValue();
-                String label = p.path("distance_label").asText("Không có dữ liệu");
+                String label = ApDistanceViews.distance(ApDistanceViews.value(p),app.measurementSnapshotAgeMs());
                 return new ReadOnlyStringWrapper(label);
             });
             distCol.setPrefWidth(190);
             distCol.setSortable(false);
 
             TableColumn<JsonNode, String> statusCol = new TableColumn<>("Trạng thái");
-            statusCol.setCellValueFactory(c -> new ReadOnlyStringWrapper(c.getValue().path("status_label").asText("Không có dữ liệu")));
+            statusCol.setCellValueFactory(c -> {var value=c.getValue().path("ap_distance");return new ReadOnlyStringWrapper(c.getValue().has("ap_distance")?
+                ApDistanceViews.fresh(value,app.measurementSnapshotAgeMs())?(value.path("calibrated").asBoolean()?"Đã hiệu chuẩn":"Chưa hiệu chuẩn"):ApDistanceViews.status(value,app.measurementSnapshotAgeMs())
+                :c.getValue().path("status_label").asText("Không có dữ liệu"));});
             statusCol.setPrefWidth(160);
             statusCol.setSortable(false);
 
@@ -759,7 +762,8 @@ final class ProximityViews {
                 if (selected != null) { selectedPlayerId = selected.path("player_id").asText(); renderPlayerDetail(selected); }
             });
             var ageTimer = new javafx.animation.Timeline(new javafx.animation.KeyFrame(javafx.util.Duration.seconds(1), e -> {
-                apTable.refresh();
+                apTable.refresh();table.refresh();
+                serverSummary.setText(ApDistanceViews.summary("Server",app.latestProximitySnapshot().path("server_ap_distance"),app.measurementSnapshotAgeMs()));
                 if (!selectedPlayerId.isBlank()) for (var p : apTable.getItems())
                     if (p.path("player_id").asText().equals(selectedPlayerId)) { renderPlayerDetail(p); break; }
             }));
@@ -798,7 +802,7 @@ final class ProximityViews {
             refreshBtn.setId("proximity-monitor-refresh");
             refreshBtn.setMinWidth(Region.USE_PREF_SIZE);
 
-            var titleBox = column(4, text("Giám sát khoảng cách Wi-Fi", "title"), anchorSummary, thresholdSummary);
+            var titleBox = column(4, text("Giám sát khoảng cách Wi-Fi", "title"), anchorSummary, thresholdSummary,serverSummary);
             HBox.setHgrow(titleBox, Priority.ALWAYS);
             var header = row(12, titleBox, recalibrateAllBtn, refreshBtn);
             apConfigBtn = button("Cấu hình AP", "quiet", () -> AccessPointViews.openConfiguration(app));
@@ -855,7 +859,11 @@ final class ProximityViews {
             String band = snap.path("anchor_band").asText("");
             int threshold = snap.path("threshold_meters").asInt(10);
 
-            if (!enabled) {
+            serverSummary.setText(ApDistanceViews.summary("Server",snap.path("server_ap_distance"),app.measurementSnapshotAgeMs()));
+            if(snap.path("automatic_distance_supported").asBoolean()){
+                anchorSummary.setText("Tự động ước lượng tới AP đang kết nối · Không cần hiệu chuẩn");
+                thresholdSummary.setText(enabled?"Cảnh báo theo mốc đã hiệu chuẩn: "+threshold+" m"+(snap.path("calibration_required").asBoolean()?" · Bắt buộc hiệu chuẩn để sẵn sàng":" · Hiệu chuẩn tùy chọn") : "Tham số mặc định chỉ dùng để demo; số mét có thể dao động khi đứng yên.");
+            } else if (!enabled) {
                 anchorSummary.setText("Giám sát khoảng cách đang tắt cho phòng này.");
                 thresholdSummary.setText("Chủ phòng có thể bật trong Cấu hình phòng trước khi bắt đầu.");
             } else if (bssid.isBlank()) {
@@ -901,6 +909,14 @@ final class ProximityViews {
             String detail = p.path("detail").asText("");
             String err = p.path("error_reason").asText("");
             boolean extrapolated = p.path("extrapolated").asBoolean(false);
+            if(p.has("ap_distance")){
+                var value=p.path("ap_distance");statusLabel=ApDistanceViews.status(value,app.measurementSnapshotAgeMs());distLabel=ApDistanceViews.distance(value,app.measurementSnapshotAgeMs());
+                detail=ApDistanceViews.summary("Client",value,app.measurementSnapshotAgeMs());err="";
+                if(!value.path("calibrated").asBoolean()){
+                    extrapolated=false;
+                    if(value.has("median_rssi_dbm"))detail+=" · RSSI trung vị: "+value.path("median_rssi_dbm").asText()+" dBm · RSSI 1 m giả định: "+value.path("reference_rssi_1m").asText()+" dBm · n = "+value.path("path_loss_n").asText();
+                }
+            }
 
             List<Node> lines = new ArrayList<>();
             lines.add(row(10,text("CHI TIẾT TÍN HIỆU · " + nick.toUpperCase(Locale.ROOT), "caption"),space(),button("Thu gọn","link-button",()->{selectedPlayerId="";table.getSelectionModel().clearSelection();detailBox.setVisible(false);detailBox.setManaged(false);})));

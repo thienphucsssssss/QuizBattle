@@ -15,7 +15,7 @@ class ProximityRoomTrackerTest {
     private long time=TimeUnit.SECONDS.toNanos(1);
 
     @BeforeEach void setup() {
-        tracker.configure(obj().put("enabled",true).put("anchor_bssid",AP).put("anchor_band","5 GHz"),true);
+        tracker.configure(obj().put("enabled",true).put("calibration_required",true).put("anchor_bssid",AP).put("anchor_band","5 GHz"),true);
         tracker.onPlayerJoin("p","Student","avatar");
         epoch=tracker.configEpoch();
         calibrate();
@@ -95,5 +95,13 @@ class ProximityRoomTrackerTest {
         assertNull(tracker.checkReadyEligibility("p",time));
         calibrate();
         assertEquals("PROXIMITY_DATA_STALE",tracker.checkReadyEligibility("p",time).code);
+    }
+    @Test void automaticFallbackDoesNotApplyThePreviousApCalibration(){
+        assertEquals("CALIBRATED",report(-50,false).path("ap_distance").path("mode").asText());
+        time+=TimeUnit.SECONDS.toNanos(5);var payload=ProximityServerIntegrationTest.reportPayload(epoch,++sequence,"aa:bb:cc:dd:ee:02","5 GHz",-76,"");
+        var result=tracker.handleReport("p",obj().set("payload",payload),false,"",time);
+        assertEquals("MODEL_DEFAULT",result.path("ap_distance").path("mode").asText());assertEquals(10,result.path("ap_distance").path("estimated_meters").asDouble());
+        tracker.onPlayerDisconnect("p",false,"",time,true);tracker.onPlayerResume("p","Student","avatar");
+        assertFalse(self().path("ap_distance").has("estimated_meters"));
     }
 }

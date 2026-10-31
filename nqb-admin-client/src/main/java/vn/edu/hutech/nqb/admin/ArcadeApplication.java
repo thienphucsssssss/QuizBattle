@@ -409,7 +409,7 @@ public final class ArcadeApplication extends Application {
         if (student && apTracking && !proximityReportingActive) startStudentProximityReporting(null);
         String proxSummaryText;
         if (!proxEnabled) {
-            proxSummaryText = "Giám sát khoảng cách: Đang tắt";
+            proxSummaryText = prox.path("automatic_distance_supported").asBoolean()?"Khoảng cách tới AP: Tự động · Hiệu chuẩn tùy chọn":"Giám sát khoảng cách: Đang tắt";
         } else {
             String bssid = prox.path("anchor_bssid").asText("");
             String ssid = prox.path("anchor_ssid").asText("");
@@ -423,9 +423,7 @@ public final class ArcadeApplication extends Application {
         var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"),text(room.path("question_source_name").asText("Toàn bộ ngân hàng"),"caption"),proxSummaryLabel);
         if (student) {
             JsonNode selfProx = prox.path("self");
-            String selfStatus = selfProx.path("status_label").asText("Chưa hiệu chuẩn");
-            String selfDist = selfProx.has("estimated_meters") ? " · " + selfProx.path("distance_label").asText("") + " (ước lượng)" : "";
-            var selfLabel = text("Trạng thái máy bạn: " + selfStatus + selfDist, "muted");
+            var selfLabel = text(studentMeasurementText(selfProx), "muted");
             selfLabel.setId("student-proximity-status");
             configSummary.getChildren().add(selfLabel);
             if (apTracking) {
@@ -442,6 +440,7 @@ public final class ArcadeApplication extends Application {
             configure.setMinWidth(Region.USE_PREF_SIZE);copy.setMinWidth(Region.USE_PREF_SIZE);configSummary.getChildren().add(new FlowPane(10,10,configure,copy));
         }
         var board = new GridPane(); board.setHgap(40); board.add(codeArea, 0, 0); board.add(configSummary, 1, 0); GridPane.setHgrow(configSummary, Priority.ALWAYS); board.getStyleClass().add("room-banner");
+        if(student){var codeColumn=new ColumnConstraints();codeColumn.setPercentWidth(40);var statusColumn=new ColumnConstraints();statusColumn.setPercentWidth(60);board.getColumnConstraints().setAll(codeColumn,statusColumn);}
         var people = column(10, text("NGƯỜI CHƠI  ·  " + room.path("ready_count").asInt() + "/" + room.path("connected_player_count").asInt() + " sẵn sàng", "caption"));
         var tiles = new FlowPane(12, 12);
         for (JsonNode player : room.path("players")) {
@@ -544,7 +543,8 @@ public final class ArcadeApplication extends Application {
             return;
         }
         JsonNode prox = room.path("proximity");
-        if (!prox.path("enabled").asBoolean(false)) {
+        if (!prox.path("enabled").asBoolean(false)||(prox.path("automatic_distance_supported").asBoolean()&&!prox.path("calibration_required").asBoolean())) {
+            if(!proximityReportingActive)startStudentProximityReporting(null);
             sendReadySet(true);
             return;
         }
@@ -630,7 +630,7 @@ public final class ArcadeApplication extends Application {
     }
     void refreshProximitySamples(){if(!canRefreshMeasurements())return;call("PROXIMITY_REFRESH",object(),this::acceptProximitySnapshot);}
     long measurementSnapshotAgeMs(){return measurementSnapshotAt==0?0:(System.nanoTime()-measurementSnapshotAt)/1_000_000;}
-    boolean canRefreshMeasurements(){return gateway!=null&&!disconnected&&(role.equals("ADMIN")||room.path("is_owner").asBoolean())&&!room.path("room_code").asText().isBlank()&&room.path("room_code").asText().equals(proximitySnapshot.path("room_code").asText())&&proximitySnapshot.path("topology_supported").asBoolean()&&proximitySnapshot.path("enabled").asBoolean()&&!proximitySnapshot.path("anchor_bssid").asText().isBlank();}
+    boolean canRefreshMeasurements(){return gateway!=null&&!disconnected&&(role.equals("ADMIN")||room.path("is_owner").asBoolean())&&!room.path("room_code").asText().isBlank()&&room.path("room_code").asText().equals(proximitySnapshot.path("room_code").asText())&&proximitySnapshot.path("topology_supported").asBoolean()&&(proximitySnapshot.path("automatic_distance_supported").asBoolean()||(proximitySnapshot.path("enabled").asBoolean()&&!proximitySnapshot.path("anchor_bssid").asText().isBlank()));}
     JsonNode managedRoomSnapshot(){return room;}
     private void acceptProximitySnapshot(JsonNode snap){
         proximitySnapshot=snap;measurementSnapshotAt=System.nanoTime();
@@ -642,13 +642,17 @@ public final class ArcadeApplication extends Application {
     private String lobbySignature(JsonNode value){var signature=new StringBuilder();for(String key:List.of("room_code","room_name","question_count","duration_seconds","question_source_name"))signature.append(value.path(key));signature.append(value.path("proximity").path("config_epoch")).append(value.path("proximity").path("enabled"));for(var p:value.path("players"))for(String key:List.of("player_id","nickname","avatar_id","ready","connected"))signature.append(p.path(key));return signature.toString();}
     private void updateStudentMeasurementText(){
         if(!role.equals("STUDENT")||!(scene.lookup("#student-proximity-status") instanceof Label label))return;
-        String ping="— ms";for(var player:room.path("players"))if(player.path("player_id").asText().equals(user.path("player_id").asText())&&player.has("ping_ms"))ping=(player.path("ping_ms").asLong()==0?"<1":player.path("ping_ms").asText())+" ms";
-        var self=room.path("proximity").path("self");label.setText("Máy bạn: "+ping+(self.has("estimated_meters")?" · "+self.path("distance_label").asText():"")+" · "+self.path("status_label").asText("Đang chuẩn bị"));
+        var self=room.path("proximity").path("self");label.setText(studentMeasurementText(self));
         if (scene.lookup("#student-access-point") instanceof Label apLabel) {
             var ap = self.path("access_point");
             apLabel.setText("AP đang kết nối: " + ap.path("ap_label").asText("Đang đọc Wi-Fi…")
                 + " · " + ap.path("direction_label").asText("Chưa xác định hướng di chuyển"));
         }
+    }
+    private String studentMeasurementText(JsonNode self){
+        String ping="— ms";for(var player:room.path("players"))if(player.path("player_id").asText().equals(user.path("player_id").asText())&&player.has("ping_ms"))ping=(player.path("ping_ms").asLong()==0?"<1":player.path("ping_ms").asText())+" ms";
+        return self.has("ap_distance")?"Ping Server: "+ping+" · "+ApDistanceViews.summary("Client",self.path("ap_distance"),0)
+            :"Máy bạn: "+ping+(self.has("estimated_meters")?" · "+self.path("distance_label").asText():"")+" · "+self.path("status_label").asText("Đang chuẩn bị");
     }
 
     JsonNode latestProximitySnapshot() {
@@ -680,10 +684,10 @@ public final class ArcadeApplication extends Application {
         Spinner<Integer> seconds = new Spinner<>(5, 120, defaults.path("duration_seconds").asInt(15));seconds.setId("room-question-seconds");
         var questionSource=new RoomQuestionSource(this,room,historical,count);
 
-        CheckBox proxEnabled = new CheckBox("Giám sát khoảng cách Wi-Fi (ước lượng)");
+        CheckBox proxEnabled = new CheckBox("Giám sát theo mốc đã hiệu chuẩn (nâng cao)");
         proxEnabled.setId("room-proximity-enabled");
         boolean supported=prox.path("supported").asBoolean(false);
-        proxEnabled.setSelected(supported && (creatingNew || prox.path("enabled").asBoolean(false)));
+        proxEnabled.setSelected(supported && !creatingNew && prox.path("enabled").asBoolean(false));
         proxEnabled.setDisable(!supported);
 
         Spinner<Integer> threshold = new Spinner<>(
@@ -734,11 +738,13 @@ public final class ArcadeApplication extends Application {
         rescanBtn.setId("room-anchor-rescan");
 
         CheckBox recalibrateAll = new CheckBox("Hiệu chuẩn lại cả phòng (chọn khi di chuyển điểm phát)");
+        var calibrationRequired=new CheckBox("Bắt buộc hiệu chuẩn trước khi sẵn sàng (nâng cao)");
+        calibrationRequired.setId("room-calibration-required");calibrationRequired.setSelected(prox.path("calibration_required").asBoolean(false));
         recalibrateAll.setId("room-recalibrate-all");
         recalibrateAll.setVisible(!creatingNew);
         recalibrateAll.setManaged(!creatingNew);
 
-        VBox proxSection = column(12, field("Điểm phát làm mốc (BSSID · Băng tần)", anchorCombo), rescanBtn, field("Ngưỡng cảnh báo (mét ước lượng)", threshold), recalibrateAll);
+        VBox proxSection = column(12, text("Khoảng cách tới AP hiện tại được ước lượng tự động. Hiệu chuẩn dưới đây là tùy chọn để đo theo mốc và cảnh báo.","caption"),field("Điểm phát làm mốc (BSSID · Băng tần)", anchorCombo), rescanBtn, field("Ngưỡng cảnh báo (mét ước lượng)", threshold), calibrationRequired,recalibrateAll);
         proxSection.disableProperty().bind(proxEnabled.selectedProperty().not());
 
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); dialog.setHeaderText("Cấu hình phòng thi"); styleDialog(dialog);
@@ -755,6 +761,7 @@ public final class ArcadeApplication extends Application {
                 .put("question_count", count.getValue())
                 .put("duration_seconds", seconds.getValue())
                 .put("proximity_enabled", proxEnabled.isSelected())
+                .put("calibration_required",calibrationRequired.isSelected())
                 .put("threshold_meters", threshold.getValue())
                 .put("recalibrate_all", recalibrateAll.isSelected());
             ProximityViews.AnchorOption chosen = anchorCombo.getValue();

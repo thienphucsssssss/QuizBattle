@@ -6,6 +6,7 @@
     <dependencies>
         <dependency><groupId>vn.edu.hutech.nqb</groupId><artifactId>nqb-shared</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId></dependency>
-        <dependency><groupId>vn.edu.hutech.nqb</groupId><artifactId>nqb-client-core</artifactId><version>${project.version}</version><scope>test</scope></dependency>
+        <!-- Reuse the existing headless Native Wi-Fi provider; no JavaFX dependency. -->
+        <dependency><groupId>vn.edu.hutech.nqb</groupId><artifactId>nqb-client-core</artifactId><version>${project.version}</version></dependency>
     </dependencies>
 </project>

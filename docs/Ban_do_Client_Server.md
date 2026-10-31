@@ -2,6 +2,8 @@
 
 Mở **Tùy chọn → Bản đồ Client — Server**. Cửa sổ bản đồ hoạt động bên cạnh giao diện phòng thi hiện tại.
 
+Ước lượng khoảng cách tới AP hiện tại không còn bắt buộc hiệu chuẩn trên từng Client; xem [hướng dẫn ước lượng AP tự động](Uoc_luong_AP_tu_dong.md). Phần định vị Client trên bản đồ vẫn cần khảo sát chung như bên dưới.
+
 Chạy mã nguồn đã build bằng `powershell -ExecutionPolicy Bypass -File .\scripts\Run-Quiz.ps1 -Role Admin` tại thư mục dự án. Bộ `.exe`/ZIP 0.6.4 đã phát hành trước đó chưa chứa phần này; cần đóng gói lại khi phát bản mới cho nhóm.
 
 ## Mô phỏng tại nhà

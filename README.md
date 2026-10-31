@@ -1,5 +1,7 @@
 # Network Quiz Battle Java LAN
 
+**Mã nguồn mới — ước lượng AP tự động:** Client đọc RSSI của AP đang kết nối, Server đọc Wi-Fi trên chính máy Server; hiển thị riêng Client → AP và Server → AP. Mặc định không bắt buộc hiệu chuẩn 1 m / 5 m; số dùng tham số giả định được ghi rõ “chưa hiệu chuẩn”. Xem [hướng dẫn](docs/Uoc_luong_AP_tu_dong.md). [Bản đồ Client — Server](docs/Ban_do_Client_Server.md) có chế độ mô phỏng và định vị theo khảo sát chung. Cần build/đóng gói lại cả Server và Client; ZIP 0.6.4 bên dưới chưa có hai phần mới này.
+
 **Thử ở nhà — Client Portable 0.6.4:** thêm **Tùy chọn → Đánh giá định vị Wi-Fi**, chọn lượt kiểm tra/K, xem KNN/WKNN trên bảng và sơ đồ, xuất báo cáo. Có mô phỏng độc lập, không cần Server hoặc Wi-Fi trường, không ghi vào kho khảo sát. Giải nén [Client 0.6.4](dist/QuizBattle/Client/QuizBattle-Portable-0.6.4.zip) rồi chạy `QuizBattle.exe`; không cần setup. Xem [hướng dẫn](docs/Danh_gia_WiFi_tai_nha_0_6_4.md). Đây là Client mới để thử offline; bộ Setup/Server cũ bên dưới chưa được thay trong đợt này.
 
 **Nguồn thuật toán và đánh giá offline:** lõi KNN/WKNN được chuyển có sửa đổi từ **DMSL/Anyplace (MIT)**, đối chiếu 12 kết quả chạy mã gốc. Có công cụ Java đánh giá các lượt khảo sát độc lập, báo lỗi vị trí/khoảng cách Server và tỷ lệ từ chối. Xem [nguồn mã, thay đổi và cách chạy](docs/Nguon_mo_va_danh_gia_fingerprinting.md) cùng [thông báo bản quyền](THIRD_PARTY_NOTICES.md). Chưa bật định vị trực tiếp trong phòng thi.
