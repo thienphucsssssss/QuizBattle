@@ -617,7 +617,7 @@ public final class ArcadeApplication extends Application {
     void openProximityMonitor() {
         if (role.equals("STUDENT") || gateway == null || disconnected) return;
         if(!room.path("proximity").path("supported").asBoolean()) { notice("Máy chủ chưa hỗ trợ giám sát Wi-Fi. Hãy cập nhật Server.",true); return; }
-        if (monitorWindow == null) {
+        if (monitorWindow == null || monitorWindow.isClosed()) {
             monitorWindow = new ProximityViews.LiveMonitorWindow(this);
         }
         monitorWindow.showAndRefresh();
@@ -1054,7 +1054,7 @@ public final class ArcadeApplication extends Application {
         var scanWifi=button("Quét Wi-Fi", "quiet",()->WifiScanViews.open(this,proximityClient));scanWifi.setId("wifi-scan-open");
         var surveyWifi=button("Khảo sát Wi-Fi", "quiet",this::openSurvey);surveyWifi.setId("survey-open");surveyWifi.setDisable(isRunning());
         var evaluateWifi=button("Đánh giá định vị", "quiet",()->openFingerprint(null,stage));evaluateWifi.setId("fingerprint-open");evaluateWifi.setDisable(isRunning());
-        var floorButton=button("Bản đồ Client — Server","quiet",this::openFloorMap);floorButton.setId("floor-open");
+        var floorButton=button(canOpenRoomMonitor()?"Giám sát phòng thi":"Bản đồ Client — Server","quiet",this::openFloorMap);floorButton.setId("floor-open");
         var wifiTools=new FlowPane(10,10,floorButton,surveyWifi,evaluateWifi,scanWifi);
         for(var control:List.of(floorButton,surveyWifi,evaluateWifi,scanWifi))control.setMinWidth(Region.USE_PREF_SIZE);
         var content = column(16,wifiTools,new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
@@ -1099,7 +1099,12 @@ public final class ArcadeApplication extends Application {
     }
     ProximityClientService proximityClient() { return proximityClient; }
     boolean reducedMotion(){return reducedMotion;}
-    void openFloorMap(){if(floorMapViews!=null&&floorMapViews.showing()){floorMapViews.focus();return;}floorMapViews=new FloorMapViews(this);}
+    private boolean canOpenRoomMonitor(){return !role.equals("STUDENT")&&floorGateway()!=null&&!floorRoomCode().isBlank()&&(room.path("is_owner").asBoolean()||role.equals("ADMIN"));}
+    void openFloorMap(){
+        if(canOpenRoomMonitor()){openProximityMonitor();if(monitorWindow!=null)monitorWindow.showMap();return;}
+        if(floorMapViews!=null&&floorMapViews.showing()){floorMapViews.focus();return;}floorMapViews=new FloorMapViews(this);
+    }
+    FloorMapViews createEmbeddedFloor(Stage owner){if(floorMapViews!=null)floorMapViews.close();floorMapViews=new FloorMapViews(this,owner);return floorMapViews;}
     FloorMapViews qaFloorMap(){return floorMapViews;}
     QuizGateway floorGateway(){return gateway!=null&&!disconnected&&!passwordRequired?gateway:null;}
     boolean canConfigureFloor(){return floorGateway()!=null&&room.path("is_owner").asBoolean()&&room.path("phase").asText().equals("WAITING");}

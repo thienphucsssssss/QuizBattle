@@ -8,7 +8,7 @@ Server đọc card Wi-Fi **trên máy chạy tiến trình Server**, khoảng 1 
 
 1. Chạy bản Server và Client mới, cho từng máy kết nối Wi-Fi và tham gia phòng.
 2. Client tự gửi mẫu ngay khi vào phòng; chờ tối đa một chu kỳ báo cáo để thấy số. Nếu Windows chặn đọc Wi-Fi, mở **Đang đo Wi-Fi / Bật đo Wi-Fi** để xem chẩn đoán và cấp quyền vị trí trên chính máy đó.
-3. Xem **Client → AP** và **Server → AP** trong cửa sổ giám sát; bảng danh sách và chi tiết cho biết phương pháp. Trong bản đồ, chế độ **Theo dõi Wi-Fi** cũng hiển thị hai số AP riêng biệt.
+3. Mở **Giám sát** để xem chung **Bản đồ · Danh sách · AP & hướng**. **Server → AP** nằm ở đầu cửa sổ; chọn Client để xem **Client → AP**, ping và khoảng cách **Client → Server** nếu đã định vị được. Số mét tới AP không được dùng thay cho khoảng cách tới Server.
 4. Di chuyển Client hoặc chuyển AP: ứng dụng dùng RSSI mới và bỏ mẫu của AP/card/băng tần cũ. Mặc định, việc này không hủy trạng thái sẵn sàng hay tự đẩy Client khỏi phòng. Khả năng nối lại khi roaming mất mạng vẫn dùng cơ chế giữ phiên hiện có.
 
 Hiệu chuẩn hai mốc vẫn nằm trong **Cấu hình phòng → Giám sát theo mốc đã hiệu chuẩn (nâng cao)**. Chỉ khi chủ phòng chủ động chọn **Bắt buộc hiệu chuẩn trước khi sẵn sàng** thì điều kiện AP/hiệu chuẩn/mẫu mới mới chặn nút sẵn sàng. Hồ sơ hợp lệ được ưu tiên cho đúng card, BSSID và băng tần; chuyển AP sẽ quay về mô hình mặc định. Cảnh báo và lịch sử khoảng cách cũ chỉ ghi số đã hiệu chuẩn, không tự trộn số mặc định vào đó.

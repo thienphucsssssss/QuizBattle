@@ -35,7 +35,6 @@ final class LanTopologyView extends VBox {
         getChildren().addAll(row(12,text("Kết nối lớp học","subtitle"),space(),summary),graph,legend,serverDistance,refreshSummary);
         ageTimer.setCycleCount(Timeline.INDEFINITE);runWhenShowing(this,ageTimer);
     }
-    void showServerDistance(boolean show){serverDistance.setVisible(show);serverDistance.setManaged(show);}
     void update(JsonNode room,JsonNode snapshot){
         receivedAt=System.nanoTime();
         serverReading=snapshot.path("server_ap_distance");

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import javafx.animation.*;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
@@ -19,11 +20,17 @@ import static vn.edu.hutech.nqb.admin.FxKit.*;
 import static vn.edu.hutech.nqb.client.QuizGateway.object;
 import static vn.edu.hutech.nqb.shared.WifiSurvey.*;
 
-/** A schematic view alongside the existing exam workspace. Demo never transmits samples. */
+/** Shared map panel, embedded in room monitoring or opened alone for offline/student use. */
 final class FloorMapViews implements AutoCloseable {
     private record Choice(String id,String name){@Override public String toString(){return name;}}
     private final ArcadeApplication app;
-    private final Stage stage=new Stage();
+    private final Stage stage;
+    private final boolean embedded;
+    private final ScrollPane view;
+    private final TitledPane settingsPane;
+    private Consumer<String> selectionChanged=id->{};
+    private Runnable modeChanged=()->{};
+    private String selectedLiveClient="";
     private final CorridorMapView map=new CorridorMapView();
     private final ComboBox<Choice> clients=new ComboBox<>();
     private final ComboBox<String> serverRoom=new ComboBox<>();
@@ -47,11 +54,16 @@ final class FloorMapViews implements AutoCloseable {
     private volatile boolean closed;
     private boolean busy,selecting;
     private long snapshotAt;
-    private final Timeline ageTimer=new Timeline(new KeyFrame(Duration.seconds(1),e->updateApReadings()));
+    private final Timeline ageTimer=new Timeline(new KeyFrame(Duration.seconds(1),e->{if(!demo.isSelected())render();}));
 
     FloorMapViews(ArcadeApplication app){
-        this.app=app;stage.initOwner(app.ownerStage());stage.setTitle("Bản đồ Client — Server");stage.setMinWidth(760);stage.setMinHeight(540);
-        stage.setWidth(Math.min(1100,app.ownerStage().getWidth()));stage.setHeight(Math.min(760,app.ownerStage().getHeight()));
+        this(app,new Stage(),false);
+    }
+    FloorMapViews(ArcadeApplication app,Stage owner){this(app,owner,true);}
+    private FloorMapViews(ArcadeApplication app,Stage owner,boolean embedded){
+        this.app=app;this.stage=owner;this.embedded=embedded;
+        if(!embedded){stage.initOwner(app.ownerStage());stage.setTitle("Bản đồ Client — Server");stage.setMinWidth(760);stage.setMinHeight(540);
+            stage.setWidth(Math.min(1100,app.ownerStage().getWidth()));stage.setHeight(Math.min(760,app.ownerStage().getHeight()));}
         ageTimer.setCycleCount(Animation.INDEFINITE);runWhenShowing(apDistances,ageTimer);
         map.setId("floor-map");origin.setId("floor-origin");distance.setId("floor-distance");status.setId("floor-status");detail.setId("floor-detail");
         distance.setStyle("-fx-font-size: 24px;");
@@ -59,7 +71,9 @@ final class FloorMapViews implements AutoCloseable {
         status.managedProperty().bind(status.textProperty().isNotEmpty());status.visibleProperty().bind(status.managedProperty());
         positionStatus.managedProperty().bind(positionStatus.textProperty().isNotEmpty());positionStatus.visibleProperty().bind(positionStatus.managedProperty());
         clients.setId("floor-client");clients.setPrefWidth(210);clients.setAccessibleText("Client đang xem");
-        var group=new ToggleGroup();demo.setToggleGroup(group);live.setToggleGroup(group);demo.setSelected(true);demo.setId("floor-demo");live.setId("floor-live");
+        var group=new ToggleGroup();demo.setToggleGroup(group);live.setToggleGroup(group);demo.setId("floor-demo");live.setId("floor-live");
+        if(embedded||!app.floorRoomCode().isBlank())live.setSelected(true);else demo.setSelected(true);
+        clients.setPromptText("Chọn Client");
         smooth.setSelected(!app.reducedMotion());smooth.setId("floor-smooth");smooth.setOnAction(e->render());
         for(int i=0;i<12;i++)serverRoom.getItems().add(plan.roomName(i));serverRoom.getSelectionModel().select(1);serverRoom.setId("floor-server-room");
         serverRoom.valueProperty().addListener((o,b,a)->{if(a!=null&&!selecting){progress[0]=0;progress[1]=55;render();}});
@@ -80,29 +94,35 @@ final class FloorMapViews implements AutoCloseable {
         var apply=button("Áp dụng kích thước","quiet",()->{installPlan(new CorridorPlan(plan.roomsPerSide(),roomWidth.getValue(),roomDepth.getValue(),hallWidth.getValue()));render();});apply.setId("floor-apply-size");
         var dimensions=new FlowPane(12,8,field("Ngang phòng (m)",roomWidth),field("Sâu phòng (m)",roomDepth),field("Rộng hành lang (m)",hallWidth),apply);
         var setup=new TitledPane("Sơ đồ & mốc khảo sát",column(10,text("6 phòng mỗi bên, kích thước giả định. Dùng cùng tỷ lệ cho sơ đồ và mốc khảo sát.","caption"),dimensions,new FlowPane(12,8,field("Tên khu",areaName),field("Tên Wi-Fi",ssid)),template));setup.setExpanded(false);setup.setId("floor-setup");
-        var body=column(12,origin,new FlowPane(12,8,demo,live,field("Client",clients),smooth),distance,positionStatus,map,
-            text("Client: chấm xanh   ·   Server: ô vuông   ·   Đường nối: khoảng cách thẳng","caption"),apDistances,demoControls,liveControls,status,signalPane,setup);
-        body.setPadding(new Insets(20));var scroller=scroll(body);scroller.setId("floor-scroll");var scene=new Scene(scroller);scene.getStylesheets().add(CSS);stage.setScene(scene);stage.setOnHidden(e->close());
-        map.prefHeightProperty().bind(stage.heightProperty().multiply(.42));
+        settingsPane=new TitledPane("Thiết lập bản đồ",column(12,liveControls,setup));settingsPane.setExpanded(false);settingsPane.setId("floor-settings");
+        var body=column(12,origin,new FlowPane(12,8,demo,live,field("Client",clients),smooth),distance,positionStatus,apDistances,map,
+            text("Client: chấm xanh   ·   Server: ô vuông   ·   Đường nối: khoảng cách thẳng","caption"),demoControls,status,signalPane,settingsPane);
+        body.setPadding(new Insets(embedded?12:20));view=scroll(body);view.setId("floor-scroll");
+        if(!embedded){var scene=new Scene(view);scene.getStylesheets().add(CSS);stage.setScene(scene);stage.setOnHidden(e->close());}
+        map.prefHeightProperty().bind(stage.heightProperty().multiply(embedded?.36:.42));
         map.onSelect(id->{clients.getItems().stream().filter(c->c.id().equals(id)).findFirst().ifPresent(clients::setValue);});
-        map.onDistance(value->distance.setText((clients.getValue()==null?"Client":clients.getValue().name())+" → Server: "+(value==null?"chưa định vị được":String.format(Locale.ROOT,"≈ %.1f m",value))));
-        clients.valueProperty().addListener((o,b,a)->{if(!selecting)render();});
-        group.selectedToggleProperty().addListener((o,b,a)->{if(a==null){demo.setSelected(true);return;}stopPlayback();refreshClients();render();if(a==live)refresh();});
-        refreshClients();render();stage.show();
+        map.onDistance(value->distance.setText(clients.getValue()==null?"Chọn Client để xem khoảng cách":clients.getValue().name()+" → Server: "+(value==null?"chưa xác định vị trí":String.format(Locale.ROOT,"≈ %.1f m",value))));
+        clients.valueProperty().addListener((o,b,a)->{if(selecting)return;if(live.isSelected()){selectedLiveClient=a==null?"":a.id();selectionChanged.accept(selectedLiveClient);}render();});
+        group.selectedToggleProperty().addListener((o,b,a)->{if(a==null){live.setSelected(true);return;}stopPlayback();refreshClients();render();modeChanged.run();if(a==live)refresh();});
+        refreshClients();render();if(!embedded){stage.show();if(live.isSelected())refresh();}
     }
     private int demoIndex(){return clients.getValue()!=null&&clients.getValue().id().equals("demo-2")?1:0;}
     private void togglePlayback(){if(playback.getStatus()==Animation.Status.RUNNING)stopPlayback();else{if(motion.getValue()>=100)motion.setValue(0);playback.play();play.setText("Tạm dừng");}}
     private void stopPlayback(){playback.stop();play.setText("Chạy mô phỏng");}
     private void refreshClients(){
-        selecting=true;String before=clients.getValue()==null?"":clients.getValue().id();clients.getItems().clear();
-        if(demo.isSelected())clients.getItems().addAll(new Choice("demo-1","Client 01"),new Choice("demo-2","Client 02"));
-        else for(var p:snapshot.path("players"))clients.getItems().add(new Choice(p.path("player_id").asText(),p.path("nickname").asText("Client")));
-        clients.getItems().stream().filter(c->c.id().equals(before)).findFirst().ifPresentOrElse(clients::setValue,()->clients.getSelectionModel().selectFirst());selecting=false;
+        selecting=true;String before=demo.isSelected()?(clients.getValue()==null?"":clients.getValue().id()):selectedLiveClient;var choices=new ArrayList<Choice>();
+        if(demo.isSelected())choices.addAll(List.of(new Choice("demo-1","Client 01"),new Choice("demo-2","Client 02")));
+        else {var roster=new LinkedHashMap<String,Choice>();for(var p:snapshot.path("players"))roster.put(p.path("player_id").asText(),new Choice(p.path("player_id").asText(),p.path("nickname").asText("Client")));
+            if(embedded)for(var p:app.latestProximitySnapshot().path("players"))roster.put(p.path("player_id").asText(),new Choice(p.path("player_id").asText(),p.path("nickname").asText("Client")));
+            choices.addAll(roster.values());}
+        if(!clients.getItems().equals(choices))clients.getItems().setAll(choices);
+        clients.getItems().stream().filter(c->c.id().equals(before)).findFirst().ifPresentOrElse(clients::setValue,()->{if(demo.isSelected())clients.getSelectionModel().selectFirst();else clients.getSelectionModel().clearSelection();});selecting=false;
     }
     private void render(){
         if(closed)return;boolean simulated=demo.isSelected();demoControls.setVisible(simulated);demoControls.setManaged(simulated);liveControls.setVisible(!simulated);liveControls.setManaged(!simulated);
-        apDistances.setManaged(!simulated);apDistances.setVisible(!simulated);
-        signalPane.setManaged(!simulated);signalPane.setVisible(!simulated);
+        boolean selected=clients.getValue()!=null;
+        apDistances.setManaged(!simulated&&(!embedded||selected));apDistances.setVisible(apDistances.isManaged());
+        signalPane.setManaged(!simulated&&(!embedded||selected));signalPane.setVisible(signalPane.isManaged());
         updateApReadings();
         var values=new ArrayList<CorridorMapView.Client>();CorridorPlan visiblePlan=plan;var server=plan.roomCenter(Math.max(0,serverRoom.getSelectionModel().getSelectedIndex()));
         if(simulated){
@@ -114,24 +134,33 @@ final class FloorMapViews implements AutoCloseable {
             origin.setText("THEO DÕI WI-FI · "+(snapshot.path("enabled").asBoolean()?snapshot.path("area").path("name").asText():"Chưa bật bản đồ cho phòng thi"));
             if(snapshot.path("enabled").asBoolean()){
                 visiblePlan=decode(snapshot.path("plan"),CorridorPlan.class);var area=snapshot.path("area");server=new CorridorPlan.Position(area.path("serverX").asDouble(),area.path("serverY").asDouble());
-                for(var p:snapshot.path("players"))values.add(new CorridorMapView.Client(p.path("player_id").asText(),p.path("nickname").asText(),p.path("located").asBoolean()?new CorridorPlan.Position(p.path("x").asDouble(),p.path("y").asDouble()):null,p.path("status").asText()));
+                for(var p:snapshot.path("players"))values.add(new CorridorMapView.Client(p.path("player_id").asText(),p.path("nickname").asText(),located(p)?new CorridorPlan.Position(p.path("x").asDouble(),p.path("y").asDouble()):null,p.path("status").asText()));
                 var chosen=clients.getValue();var node=chosen==null?null:findPlayer(chosen.id());
-                positionStatus.setText(node==null?"Chưa có Client trong phòng.":node.path("located").asBoolean()?"":statusName(node.path("status").asText()));
-                detail.setText(node==null?"":statusName(node.path("status").asText())+" · BSSID: "+node.path("bssid").asText("—")+" · tuổi mẫu: "+node.path("age_ms").asLong()/1000+" giây");
+                String locationStatus=node==null?"":node.path("located").asBoolean()&&!located(node)?"STALE":node.path("status").asText();
+                positionStatus.setText(node==null?(clients.getItems().isEmpty()?"Chưa có Client trong phòng.":""):located(node)?"":statusName(locationStatus));
+                detail.setText(node==null?"":statusName(locationStatus)+" · BSSID: "+node.path("bssid").asText("—")+" · tuổi mẫu: "+(node.path("age_ms").asLong()+snapshotAge())/1000+" giây");
             }else {positionStatus.setText("Chủ phòng mở khảo sát và bật theo dõi.");detail.setText("");}
         }
         map.update(visiblePlan,server,values,clients.getValue()==null?"":clients.getValue().id(),smooth.isSelected());
         activate.setDisable(busy||survey==null||!app.canConfigureFloor());disable.setDisable(busy||!app.canConfigureFloor()||!snapshot.path("enabled").asBoolean());load.setDisable(busy);
     }
     private JsonNode findPlayer(String id){for(var p:snapshot.path("players"))if(p.path("player_id").asText().equals(id))return p;return null;}
-    private void updateApReadings(){if(closed||demo.isSelected())return;var chosen=clients.getValue();var player=chosen==null?null:findPlayer(chosen.id());long age=snapshotAt==0?0:(System.nanoTime()-snapshotAt)/1_000_000;
-        apDistances.setText((player==null?"":ApDistanceViews.compact(chosen.name(),player.path("ap_distance"),age)+"\n")+ApDistanceViews.compact("Server",snapshot.path("server_ap_distance"),age));
-        signalDetails.setText((player==null?"":ApDistanceViews.summary(chosen.name(),player.path("ap_distance"),age)+"\n")+ApDistanceViews.summary("Server",snapshot.path("server_ap_distance"),age)+"\nKhoảng cách tới AP được ước lượng từ RSSI, có thể sai lệch do tường và thiết bị.");}
+    private long snapshotAge(){return snapshotAt==0?0:(System.nanoTime()-snapshotAt)/1_000_000;}
+    private boolean located(JsonNode p){return p.path("located").asBoolean()&&p.path("age_ms").asLong(-1)>=0&&p.path("age_ms").asLong()+snapshotAge()<=20000;}
+    private void updateApReadings(){if(closed||demo.isSelected())return;var chosen=clients.getValue();var player=chosen==null?null:findPlayer(chosen.id());long age=snapshotAge();
+        if(embedded&&chosen!=null)for(var p:app.latestProximitySnapshot().path("players"))if(p.path("player_id").asText().equals(chosen.id())){player=p;age=app.measurementSnapshotAgeMs();break;}
+        String client=player==null?"":ApDistanceViews.compact(chosen.name(),player.path("ap_distance"),age);
+        if(embedded&&player!=null){long pingAge=player.path("ping_age_ms").asLong(-1);String ping=player.path("connected").asBoolean()&&player.has("ping_ms")&&pingAge>=0&&pingAge+age<=15000?player.path("ping_ms").asText()+" ms":"— ms";
+            String apName=player.path("access_point").path("ap_name").asText();
+            client+="\nAP: "+(!AccessPointViews.fresh(player,age)?"Đang chờ dữ liệu":apName.isBlank()?"Chưa đặt tên":apName)+" · Ping: "+ping;
+            if(player.has("connected")&&!player.path("connected").asBoolean())client+=player.path("reconnecting").asBoolean()?" · Đang giữ chỗ":" · Mất kết nối";}
+        apDistances.setText(client+(embedded?"":(client.isEmpty()?"":"\n")+ApDistanceViews.compact("Server",snapshot.path("server_ap_distance"),snapshotAge())));
+        signalDetails.setText((player==null?"":ApDistanceViews.summary(chosen.name(),player.path("ap_distance"),age)+"\n")+(embedded?"":ApDistanceViews.summary("Server",snapshot.path("server_ap_distance"),snapshotAge())+"\n")+"Khoảng cách tới AP được ước lượng từ RSSI, có thể sai lệch do tường và thiết bị.");}
     static String statusName(String value){return switch(value){case "ESTIMATED"->"Vị trí ước lượng theo khảo sát";case "WAITING"->"Đang chờ scan từ Client";case "STALE"->"Mẫu đã cũ";case "DISCONNECTED"->"Client mất kết nối";default->{try{yield FingerprintViews.statusName(FingerprintModel.Status.valueOf(value));}catch(Exception e){yield "Chưa có vị trí";}}};}
     void accept(JsonNode value){if(closed)return;snapshot=value.deepCopy();snapshotAt=System.nanoTime();if(live.isSelected()){refreshClients();render();}}
     void roomChanged(JsonNode config){
         if(closed)return;
-        if(!config.path("enabled").asBoolean()||!snapshot.path("epoch").asText().equals(config.path("epoch").asText())){snapshot=config.deepCopy();if(live.isSelected())refreshClients();}
+        if(config.path("enabled").asBoolean()!=snapshot.path("enabled").asBoolean()||!snapshot.path("epoch").asText().equals(config.path("epoch").asText())){snapshot=config.deepCopy();if(live.isSelected())refreshClients();}
         render();
     }
     private void installPlan(CorridorPlan value){
@@ -154,8 +183,17 @@ final class FloorMapViews implements AutoCloseable {
         var gateway=app.floorGateway();if(gateway==null){status.setText("Kết nối và tham gia phòng thi để xem dữ liệu thật.");return;}
         gateway.request(type,payload).whenComplete((value,error)->Platform.runLater(()->{if(closed)return;if(error==null)success.accept(value);else status.setText(ArcadeApplication.message(error));}));
     }
-    private void refresh(){request("FLOOR_GET",object(),this::accept);}
+    void refresh(){if(embedded&&!app.managedRoomSnapshot().path("is_owner").asBoolean())return;request("FLOOR_GET",object(),this::accept);}
+    Node content(){return view;}
+    boolean simulated(){return demo.isSelected();}
+    void onSelect(Consumer<String> action){selectionChanged=action;}
+    void onModeChanged(Runnable action){modeChanged=action;}
+    void showLive(){live.setSelected(true);}
+    void selectPlayer(String id){boolean changed=!selectedLiveClient.equals(id);selectedLiveClient=id;if(!demo.isSelected()){refreshClients();if(changed)render();else updateApReadings();}}
+    void measurementsChanged(){if(!demo.isSelected()){var before=clients.getValue();refreshClients();if(!Objects.equals(before,clients.getValue()))render();else updateApReadings();}}
+    void openSettings(){settingsPane.setExpanded(true);view.setVvalue(1);}
+    void suspend(){stopPlayback();}
     boolean showing(){return !closed&&stage.isShowing();}
     void focus(){stage.toFront();}
-    @Override public void close(){if(closed)return;closed=true;playback.stop();ageTimer.stop();map.close();stage.close();}
+    @Override public void close(){if(closed)return;closed=true;playback.stop();ageTimer.stop();map.close();if(!embedded)stage.close();}
 }

@@ -693,18 +693,23 @@ final class ProximityViews {
         private final Button recalibrateAllBtn;
         private final Button refreshBtn;
         private String selectedPlayerId = "";
-        private final LanTopologyView topology;
+        private final FloorMapViews floor;
+        private final ToggleButton mapMode=new ToggleButton("Bản đồ");
+        private boolean syncingSelection,closed;
         private final StackPane views=new StackPane();
 
         LiveMonitorWindow(ArcadeApplication app) {
             this.app = app;
             serverSummary.setTooltip(new Tooltip());
-            topology=new LanTopologyView(false,this::selectPlayer);
-            topology.showServerDistance(false);
             this.stage = new Stage();
-            stage.setTitle("Quiz Battle · Giám sát Wi-Fi");
+            stage.initOwner(app.ownerStage());
+            stage.setTitle("Quiz Battle · Giám sát phòng thi");
             stage.setMinWidth(820);
             stage.setMinHeight(520);
+            floor=app.createEmbeddedFloor(stage);
+            floor.onSelect(this::selectPlayer);
+            floor.onModeChanged(()->updateServerSummary(app.latestProximitySnapshot()));
+            serverSummary.setId("server-ap-distance");
 
             warningBanner.setVisible(false);
             warningBanner.setManaged(false);
@@ -762,7 +767,7 @@ final class ProximityViews {
                     .replace("Hướng suy đoán: ","").replace(" (tăng thứ tự)","").replace(" (giảm thứ tự)",""), 280),
                 col("BSSID", p -> p.path("access_point").path("bssid").asText("—"), 155));
             apTable.getSelectionModel().selectedItemProperty().addListener((o, before, selected) -> {
-                if (selected != null) { selectedPlayerId = selected.path("player_id").asText(); renderPlayerDetail(selected); }
+                if (selected != null&&!syncingSelection) selectPlayer(selected.path("player_id").asText());
             });
             var ageTimer = new javafx.animation.Timeline(new javafx.animation.KeyFrame(javafx.util.Duration.seconds(1), e -> {
                 apTable.refresh();table.refresh();
@@ -773,10 +778,7 @@ final class ProximityViews {
             ageTimer.setCycleCount(javafx.animation.Timeline.INDEFINITE); runWhenShowing(apTable, ageTimer);
 
             table.getSelectionModel().selectedItemProperty().addListener((o, old, selected) -> {
-                if (selected != null) {
-                    selectedPlayerId = selected.path("player_id").asText("");
-                    renderPlayerDetail(selected);
-                }
+                if (selected != null&&!syncingSelection) selectPlayer(selected.path("player_id").asText());
             });
 
             detailBox.getStyleClass().add("panel");
@@ -804,19 +806,25 @@ final class ProximityViews {
             refreshBtn = new FreshMeasurementButton(app);
             refreshBtn.setId("proximity-monitor-refresh");
             refreshBtn.setMinWidth(Region.USE_PREF_SIZE);
+            refreshBtn.addEventHandler(javafx.event.ActionEvent.ACTION,e->floor.refresh());
 
-            var titleBox = column(4, text("Giám sát Wi-Fi", "title"),serverSummary,anchorSummary,thresholdSummary);
+            var titleBox = column(4, text("Giám sát phòng thi", "title"),serverSummary,anchorSummary,thresholdSummary);
             HBox.setHgrow(titleBox, Priority.ALWAYS);
             var header = row(12, titleBox, recalibrateAllBtn, refreshBtn);
             apConfigBtn = button("Cấu hình AP", "quiet", () -> AccessPointViews.openConfiguration(app));
             apConfigBtn.setId("ap-open-config");
             var rootBox = new BorderPane();
             rootBox.setPadding(new Insets(20, 24, 20, 24));
-            var diagram=new ToggleButton("Sơ đồ");diagram.setId("monitor-topology-mode");var list=new ToggleButton("Danh sách");list.setId("monitor-list-mode");var modes=new ToggleGroup();diagram.setToggleGroup(modes);list.setToggleGroup(modes);diagram.setSelected(true);
+            mapMode.setId("monitor-map-mode");var list=new ToggleButton("Danh sách");list.setId("monitor-list-mode");var modes=new ToggleGroup();mapMode.setToggleGroup(modes);list.setToggleGroup(modes);mapMode.setSelected(true);
             var apMode = new ToggleButton("AP & hướng"); apMode.setId("monitor-ap-mode"); apMode.setToggleGroup(modes);
-            var graphScroll=scroll(topology);views.getChildren().addAll(graphScroll,table,apTable);table.setVisible(false);table.setManaged(false);apTable.setVisible(false);apTable.setManaged(false);
-            modes.selectedToggleProperty().addListener((o,b,a)->{if(a==null){diagram.setSelected(true);return;}boolean graph=a==diagram;graphScroll.setVisible(graph);graphScroll.setManaged(graph);table.setVisible(a==list);table.setManaged(a==list);apTable.setVisible(a==apMode);apTable.setManaged(a==apMode);});
-            rootBox.setTop(column(12, header,row(8,diagram,list,apMode,space(),apConfigBtn), warningBanner));
+            var mapContent=floor.content();views.getChildren().addAll(mapContent,table,apTable);table.setVisible(false);table.setManaged(false);apTable.setVisible(false);apTable.setManaged(false);
+            modes.selectedToggleProperty().addListener((o,b,a)->{
+                if(a==null){mapMode.setSelected(true);return;}boolean map=a==mapMode;
+                mapContent.setVisible(map);mapContent.setManaged(map);table.setVisible(a==list);table.setManaged(a==list);apTable.setVisible(a==apMode);apTable.setManaged(a==apMode);
+                if(!map){floor.suspend();floor.showLive();}selectPlayer(selectedPlayerId);
+            });
+            var mapSettings=button("Thiết lập bản đồ","quiet",()->{mapMode.setSelected(true);floor.openSettings();});mapSettings.setId("monitor-floor-settings");
+            rootBox.setTop(column(12, header,row(8,mapMode,list,apMode,space(),mapSettings,apConfigBtn), warningBanner));
             BorderPane.setMargin(table, new Insets(14, 0, 14, 0));
             rootBox.setCenter(views);
             var detailScroll = scroll(detailBox);
@@ -825,24 +833,38 @@ final class ProximityViews {
             detailScroll.managedProperty().bind(detailBox.managedProperty());
             rootBox.setBottom(detailScroll);
 
-            Scene scene = new Scene(rootBox,980,Math.min(720,javafx.stage.Screen.getPrimary().getVisualBounds().getHeight()-80));
+            Scene scene = new Scene(rootBox,Math.min(1200,app.ownerStage().getWidth()),Math.min(720,app.ownerStage().getHeight()-40));
             scene.getStylesheets().add(CSS);
             stage.setScene(scene);
+            stage.setOnHidden(e->{closed=true;floor.close();});
         }
 
         void showAndRefresh() {
+            floor.showLive();
             if (!stage.isShowing()) {
                 stage.show();
             } else {
                 stage.toFront();
             }
+            update(app.latestProximitySnapshot());
             app.refreshProximityMonitor();
+            floor.refresh();
         }
 
         boolean isShowing() {
             return stage.isShowing();
         }
-        void selectPlayer(String id){selectedPlayerId=id;for(var row:table.getItems())if(row.path("player_id").asText().equals(id)){table.getSelectionModel().select(row);renderPlayerDetail(row);return;}}
+        boolean isClosed(){return closed;}
+        void showMap(){mapMode.setSelected(true);floor.showLive();}
+        void selectPlayer(String id){
+            if(syncingSelection)return;syncingSelection=true;
+            try{selectedPlayerId=id;floor.selectPlayer(id);
+                for(var row:table.getItems())if(row.path("player_id").asText().equals(id)){
+                    table.getSelectionModel().select(row);apTable.getSelectionModel().select(row);renderPlayerDetail(row);return;}
+                table.getSelectionModel().clearSelection();apTable.getSelectionModel().clearSelection();showDetail(false);
+            }finally{syncingSelection=false;}
+        }
+        private void showDetail(boolean show){detailBox.setVisible(show&&!mapMode.isSelected());detailBox.setManaged(detailBox.isVisible());}
 
         Stage stage() {
             return stage;
@@ -855,11 +877,14 @@ final class ProximityViews {
             var data=snap.path("server_ap_distance");long age=app.measurementSnapshotAgeMs();
             serverSummary.setText(ApDistanceViews.compact("Server",data,age));
             serverSummary.getTooltip().setText(ApDistanceViews.summary("Server",data,age)+"\nSố mét được ước lượng từ RSSI; tường và thiết bị có thể làm kết quả sai lệch.");
+            boolean live=!floor.simulated();serverSummary.setVisible(live);serverSummary.setManaged(live);
+            anchorSummary.setVisible(live&&!anchorSummary.getText().isBlank());anchorSummary.setManaged(anchorSummary.isVisible());
+            thresholdSummary.setVisible(live&&!thresholdSummary.getText().isBlank());thresholdSummary.setManaged(thresholdSummary.isVisible());
         }
 
         void update(JsonNode snap) {
             if (snap == null || snap.isEmpty()) return;
-            topology.update(app.managedRoomSnapshot(),snap);
+            floor.measurementsChanged();
             boolean enabled = snap.path("enabled").asBoolean(false);
             boolean locked = snap.path("locked").asBoolean(false);
             String ssid = snap.path("anchor_ssid").asText("");
@@ -897,23 +922,15 @@ final class ProximityViews {
 
             List<JsonNode> rows = new ArrayList<>();
             snap.path("players").forEach(rows::add);
-            table.setItems(FXCollections.observableArrayList(rows));
-            apTable.setItems(FXCollections.observableArrayList(rows));
-
-            if (!selectedPlayerId.isBlank()) {
-                for (JsonNode p : rows) {
-                    if (selectedPlayerId.equals(p.path("player_id").asText())) {
-                        table.getSelectionModel().select(p);
-                        renderPlayerDetail(p);
-                        return;
-                    }
-                }
-            }
-            selectedPlayerId="";detailBox.setVisible(false);detailBox.setManaged(false);
+            syncingSelection=true;
+            try{table.setItems(FXCollections.observableArrayList(rows));apTable.setItems(FXCollections.observableArrayList(rows));}
+            finally{syncingSelection=false;}
+            if(rows.stream().noneMatch(p->selectedPlayerId.equals(p.path("player_id").asText())))selectedPlayerId="";
+            selectPlayer(selectedPlayerId);updateServerSummary(snap);
         }
 
         private void renderPlayerDetail(JsonNode p) {
-            detailBox.setVisible(true);detailBox.setManaged(true);
+            showDetail(true);
             String nick = p.path("nickname").asText("");
             String statusLabel = p.path("status_label").asText("Không có dữ liệu");
             String distLabel = p.path("distance_label").asText("Không có dữ liệu");
@@ -930,7 +947,7 @@ final class ProximityViews {
             }
 
             List<Node> lines = new ArrayList<>();
-            lines.add(row(10,text(nick, "subtitle"),space(),button("Thu gọn","link-button",()->{selectedPlayerId="";table.getSelectionModel().clearSelection();detailBox.setVisible(false);detailBox.setManaged(false);})));
+            lines.add(row(10,text(nick, "subtitle"),space(),button("Thu gọn","link-button",()->selectPlayer(""))));
             lines.add(text("Đến AP: " + distLabel + " · " + (p.has("ap_distance")?ApDistanceViews.shortStatus(p.path("ap_distance"),app.measurementSnapshotAgeMs()):statusLabel), "subtitle"));
             var ap = p.path("access_point");
             String apName=ap.path("ap_name").asText();

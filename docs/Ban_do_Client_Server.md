@@ -1,6 +1,10 @@
 # Bản đồ Client — Server
 
-Mở **Tùy chọn → Bản đồ Client — Server**. Cửa sổ bản đồ hoạt động bên cạnh giao diện phòng thi hiện tại.
+Trong phòng thi, giảng viên/Admin mở **Giám sát** để dùng cửa sổ **Giám sát phòng thi** với ba tab **Bản đồ · Danh sách · AP & hướng**. **Tùy chọn → Giám sát phòng thi** mở lại đúng cửa sổ này. Client đang chọn được giữ khi đổi tab; cửa sổ tiếp tục cập nhật khi chuyển câu hỏi.
+
+Mở từ phòng thi mặc định dùng **Theo dõi Wi-Fi**. Chọn Client trên sơ đồ hoặc trong danh sách để xem khoảng cách đến Server, khoảng cách tới AP và ping riêng biệt. Khi chưa có tọa độ khảo sát, vẫn xem được số đo AP; không vẽ vị trí giả từ RSSI. **Thiết lập bản đồ** chứa các thao tác mở khảo sát và bật/dừng theo dõi.
+
+Ngoài phòng thi, mở **Tùy chọn → Bản đồ Client — Server** để mô phỏng tại nhà. Học sinh trong phòng dùng lối mở này để xem vị trí của chính mình; không được cấu hình bản đồ hoặc mở bảng giám sát cả lớp.
 
 Ước lượng khoảng cách tới AP hiện tại không còn bắt buộc hiệu chuẩn trên từng Client; xem [hướng dẫn ước lượng AP tự động](Uoc_luong_AP_tu_dong.md). Phần định vị Client trên bản đồ vẫn cần khảo sát chung như bên dưới.
 
@@ -11,7 +15,7 @@ Chạy mã nguồn đã build bằng `powershell -ExecutionPolicy Bypass -File .
 - Không cần Server, kết nối mạng hoặc dữ liệu khảo sát.
 - Sơ đồ mặc định: một hành lang, 6 phòng mỗi bên. Phòng quy ước 8 × 8 m, hành lang rộng 3 m. Đây là giả định cho demo, **không phải số đo hoặc kích thước trung bình đã xác minh của HUTECH**.
 - Chọn phòng đặt Server, chọn Client 01/02, kéo thanh lộ trình hoặc nhấn **Chạy mô phỏng**. Client đi từ phòng ra cửa rồi dọc hành lang. Đường nối và số mét biểu diễn khoảng cách thẳng, kể cả xuyên tường.
-- Trong **Sơ đồ & mốc khảo sát**, có thể chỉnh kích thước. Sơ đồ chưa sao chép đầy đủ tên phòng, thang máy, cầu thang trong ảnh; A1…A6/B1…B6 là nhãn quy ước.
+- Trong **Thiết lập bản đồ → Sơ đồ & mốc khảo sát**, có thể chỉnh kích thước. Sơ đồ chưa sao chép đầy đủ tên phòng, thang máy, cầu thang trong ảnh; A1…A6/B1…B6 là nhãn quy ước.
 - Dữ liệu chuyển động ở chế độ này không gửi lên Server và không ghi thành mẫu Wi-Fi.
 
 ## Chuẩn bị theo dõi thực tế
@@ -19,7 +23,7 @@ Chạy mã nguồn đã build bằng `powershell -ExecutionPolicy Bypass -File .
 1. Chọn phòng đặt Server, tên khu, SSID và kích thước quy ước. Nhấn **Tạo mốc khảo sát**.
 2. Ứng dụng tạo khu khảo sát gồm 18 mốc: 6 mốc giữa hành lang và 12 mốc trong phòng. Không bắt buộc thu đủ tất cả mốc; chỉ các lượt đã xác nhận được dùng. Mốc trên sơ đồ phải được gắn nhất quán với vị trí thực tế như trước cửa phòng. Có thể sửa tên/tọa độ bằng phiên bản khu mới trong công cụ khảo sát.
 3. Đến trường, đứng tại từng mốc cần dùng, thu mẫu rồi xác nhận đúng điểm. Cần ít nhất hai điểm có lượt được xác nhận để nạp mô hình; điều này chỉ là điều kiện chạy, chưa bảo đảm phân biệt vị trí. Nên thu nhiều mốc dọc tuyến demo và một số mốc trong phòng Server.
-4. Xuất JSON khảo sát. Chủ phòng tạo phòng thi, mở bản đồ → **Theo dõi Wi-Fi → Mở khảo sát → Bật theo dõi**. Dữ liệu được đồng bộ vào kho khảo sát của tài khoản và dùng cho phòng hiện tại. Chỉ chủ phòng được bật/tắt khi phòng đang chờ.
+4. Xuất JSON khảo sát. Chủ phòng tạo phòng thi, mở **Giám sát → Bản đồ → Thiết lập bản đồ → Mở khảo sát → Bật theo dõi**. Dữ liệu được đồng bộ vào kho khảo sát của tài khoản và dùng cho phòng hiện tại. Chỉ chủ phòng được bật/tắt khi phòng đang chờ.
 5. Client phiên bản mới tham gia phòng sẽ tự quét nhiều BSSID theo SSID khảo sát. Client không cần giữ bản khảo sát riêng. Chọn **Theo dõi Wi-Fi** để xem vị trí; chủ phòng xem tất cả Client, học sinh chỉ xem chính mình. Mở **Chi tiết tín hiệu** khi cần xem BSSID, tuổi mẫu và phương pháp ước lượng.
 
 Server vật lý vẫn phải đặt tại vị trí đã khai báo trong khu khảo sát. Di chuyển Server hoặc đổi quy ước tọa độ cần tạo phiên bản khu mới. Kích thước sơ đồ tạo bằng công cụ này được giữ trong metadata `corridor-v1` của `axisNote`, cùng phiên bản tọa độ, nên mở lại JSON vẫn giữ tỷ lệ. Khảo sát cũ không có metadata dùng sơ đồ mặc định hoặc cấu hình người vận hành chọn; phải kiểm tra các tọa độ có cùng quy ước trục.
@@ -44,6 +48,7 @@ Cấu hình đang theo dõi thuộc phiên phòng hiện tại; sau khi đóng p
 
 - `mvn test`: tọa độ/lộ trình, cùng lõi WKNN cho scan trực tiếp, tuổi mẫu, chống lặp, đóng/dừng worker, TLS với phân quyền và Client nối lại giữa ván thi.
 - `LiveLanUiCheck ... floor-map`: mở từ Tùy chọn, hai dãy phòng, Client/số mét thay đổi, phát/tạm dừng, tách mô phỏng/dữ liệu theo dõi, ẩn mẫu cũ, đóng cửa sổ và không ghi dữ liệu khảo sát giả lập.
+- `LiveLanUiCheck ... unified-monitor`: hai lối mở dùng chung một cửa sổ, đồng bộ Client giữa ba tab, không suy ra vị trí từ khoảng cách AP, nạp khảo sát và nhận vị trí qua TLS, tách mô phỏng, ẩn tọa độ hết hạn, giữ cửa sổ khi thi và đóng/mở lại.
 
 Không cần cài đặt thêm thư viện bản đồ hoặc dịch vụ Google Maps.
 

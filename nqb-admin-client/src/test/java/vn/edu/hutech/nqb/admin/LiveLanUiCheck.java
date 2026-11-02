@@ -43,6 +43,7 @@ public final class LiveLanUiCheck {
                     else if(args.length>3&&args[3].equals("phase-b")){checkPhaseB(app);System.out.println("PHASE_B_UI_PASS");}
                     else if(args.length>3&&args[3].equals("phase-c")){checkPhaseC(app);System.out.println("PHASE_C_UI_PASS");}
                     else if(args.length>3&&args[3].equals("floor-map")){checkFloorMap(app);System.out.println("FLOOR_MAP_UI_PASS");}
+                    else if(args.length>3&&args[3].equals("unified-monitor")){checkUnifiedMonitor(app);System.out.println("UNIFIED_MONITOR_UI_PASS");}
                     else if(args.length>3&&args[3].equals("auto-ap")){checkAutomaticAp(app);System.out.println("AUTOMATIC_AP_UI_PASS");}
                     else if(args.length>3&&args[3].equals("ap-only")){checkAccessPoints(app);System.out.println("ACCESS_POINT_UI_PASS");}
                     else if(args.length>3&&args[3].equals("permission-only")){checkPermissionRecovery(app);System.out.println("PERMISSION_ONLY_UI_PASS");}
@@ -85,6 +86,83 @@ public final class LiveLanUiCheck {
         });
         if(Files.exists(Path.of(System.getProperty("nqb.survey.database"))))throw new AssertionError("Simulation wrote survey storage");
     }
+    private static void checkUnifiedMonitor(ArcadeApplication app)throws Exception {
+        fx(()->{app.qaAuth();fillForm(app,"admin","");app.qaClick("Đăng nhập   →");});await(app::qaConnected);
+        uiRequest(app,"QUESTION_CREATE",object().put("content","Giám sát chung · dữ liệu QA").put("option_a","A").put("option_b","B").put("option_c","C").put("option_d","D").put("correct_answer","A").put("category","QA"));
+        var room=uiRequest(app,"ROOM_CONFIGURE",object().put("room_name","Giám sát chung · dữ liệu giả lập").put("question_count",1).put("duration_seconds",5));
+        String code=room.path("room_code").asText();int epoch=room.path("proximity").path("config_epoch").asInt();
+        try(var first=connect();var second=connect()){
+            request(first,"JOIN",object().put("room_code",code).put("nickname","Client A"));
+            request(second,"JOIN",object().put("room_code",code).put("nickname","Client B"));
+            for(var client:List.of(first,second))request(client,"PROXIMITY_REPORT",object().put("config_epoch",epoch).put("seq",1).put("device_status","CONNECTED").put("adapter_id","qa-radio").put("ssid","HUTECH E1").put("bssid","aa:bb:cc:dd:ee:01").put("band","5 GHz").put("rssi_dbm",-76));
+            fx(app::openProximityMonitor);
+            await(()->app.qaMonitorStage()!=null&&app.latestProximitySnapshot().path("players").size()==2);
+            final javafx.stage.Stage[] opened={null};final FloorMapViews[] original={null};
+            fx(()->{opened[0]=app.qaMonitorStage();original[0]=app.qaFloorMap();opened[0].setWidth(app.ownerStage().getWidth());opened[0].setHeight(app.ownerStage().getHeight());
+                var scene=opened[0].getScene();scene.getRoot().applyCss();scene.getRoot().layout();
+                if(!((javafx.scene.control.ToggleButton)scene.lookup("#floor-live")).isSelected())throw new AssertionError("Room opened a simulated map");
+                var choices=(javafx.scene.control.ComboBox<?>)scene.lookup("#floor-client");
+                if(choices.getItems().size()!=2)throw new AssertionError("Wi-Fi-only clients missing from map selection");
+                choices.getSelectionModel().select(1);
+                if(!scene.getRoot().lookupAll(".corridor-client").isEmpty())throw new AssertionError("AP range fabricated a position");
+                if(!((javafx.scene.control.Label)scene.lookup("#floor-distance")).getText().contains("chưa xác định"))throw new AssertionError("Missing unlocated state");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-list-mode")).fire();
+                var table=(javafx.scene.control.TableView<JsonNode>)scene.lookup("#proximity-monitor-table");
+                if(!table.getSelectionModel().getSelectedItem().path("nickname").asText().equals("Client B"))throw new AssertionError("Map selection lost in list");
+                table.getSelectionModel().selectFirst();
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-ap-mode")).fire();
+                var aps=(javafx.scene.control.TableView<JsonNode>)scene.lookup("#ap-monitor-table");
+                if(!aps.getSelectionModel().getSelectedItem().path("nickname").asText().equals("Client A"))throw new AssertionError("List selection lost in AP tab");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-map-mode")).fire();
+                if(choices.getSelectionModel().getSelectedIndex()!=0)throw new AssertionError("AP selection lost in map");
+                scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"unified-01-wifi-without-position");
+                app.qaSettings();((javafx.scene.control.Button)auxiliary("#floor-open").lookup("#floor-open")).fire();
+                if(app.qaMonitorStage()!=opened[0]||app.qaFloorMap()!=original[0])throw new AssertionError("Settings opened a second monitoring window");
+                if(javafx.stage.Window.getWindows().stream().filter(w->w.isShowing()&&w.getScene().lookup("#floor-map")!=null).count()!=1)throw new AssertionError("Duplicate map windows");
+            });
+            var demo=vn.edu.hutech.nqb.shared.fingerprint.FingerprintDemo.create();
+            var bundle=vn.edu.hutech.nqb.shared.WifiSurvey.Bundle.of(demo.bundle().areas(),demo.bundle().runs().stream().filter(r->!demo.heldOut().contains(r.id())).toList());
+            Path file=Files.createTempDirectory("nqb-unified-map-").resolve("survey.json");Files.writeString(file,vn.edu.hutech.nqb.shared.WifiSurvey.encode(bundle));
+            fx(()->{((javafx.scene.control.Button)opened[0].getScene().lookup("#monitor-floor-settings")).fire();app.qaFloorMap().loadSurvey(file);});
+            await(()->!opened[0].getScene().lookup("#floor-activate").isDisabled());
+            fx(()->((javafx.scene.control.Button)opened[0].getScene().lookup("#floor-activate")).fire());
+            await(()->app.managedRoomSnapshot().path("floor").path("enabled").asBoolean());
+            var config=uiRequest(app,"FLOOR_GET");String floorEpoch=config.path("epoch").asText();
+            var report=object().put("epoch",floorEpoch).put("sequence",1);
+            report.set("scan",vn.edu.hutech.nqb.shared.WifiSurvey.JSON.valueToTree(demo.bundle().runs().get(5).scans().getFirst()));request(first,"FLOOR_REPORT",report);
+            report.set("scan",vn.edu.hutech.nqb.shared.WifiSurvey.JSON.valueToTree(demo.bundle().runs().get(6).scans().getFirst()));request(second,"FLOOR_REPORT",report);
+            await(()->opened[0].getScene().getRoot().lookupAll(".corridor-client").size()==2);
+            fx(()->{var scene=opened[0].getScene();((javafx.scene.control.TitledPane)scene.lookup("#floor-settings")).setExpanded(false);
+                ((javafx.scene.control.ScrollPane)scene.lookup("#floor-scroll")).setVvalue(0);((javafx.scene.control.CheckBox)scene.lookup("#floor-smooth")).setSelected(false);
+                ((javafx.scene.control.ComboBox<?>)scene.lookup("#floor-client")).getSelectionModel().select(1);
+                if(((javafx.scene.control.Label)scene.lookup("#floor-distance")).getText().contains("chưa xác định"))throw new AssertionError("No live distance after positioning");
+                scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"unified-02-live-map");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#floor-demo")).fire();((javafx.scene.control.Button)scene.lookup("#floor-play")).fire();
+            });
+            await(()->((javafx.scene.control.Slider)opened[0].getScene().lookup("#floor-motion")).getValue()>0);
+            fx(()->{var scene=opened[0].getScene();if(!((javafx.scene.control.Label)scene.lookup("#floor-origin")).getText().contains("MÔ PHỎNG"))throw new AssertionError("Unlabelled demo");
+                if(scene.lookup("#server-ap-distance").isVisible())throw new AssertionError("Real server metric shown as demo data");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-list-mode")).fire();
+                if(!((javafx.scene.control.Button)scene.lookup("#floor-play")).getText().equals("Chạy mô phỏng"))throw new AssertionError("Hidden simulation still running");
+                ((javafx.scene.control.ToggleButton)scene.lookup("#monitor-map-mode")).fire();
+                if(!((javafx.scene.control.ToggleButton)scene.lookup("#floor-live")).isSelected())throw new AssertionError("Demo leaked into live monitoring");
+            });
+            var afterDemo=uiRequest(app,"FLOOR_GET");
+            if(!afterDemo.path("epoch").asText().equals(floorEpoch)||afterDemo.path("players").size()!=2)throw new AssertionError("Simulation changed live room data");
+            var aged=afterDemo.deepCopy();for(var p:aged.path("players"))((com.fasterxml.jackson.databind.node.ObjectNode)p).put("age_ms",21000);
+            fx(()->{app.qaFloorMap().accept(aged);if(!opened[0].getScene().getRoot().lookupAll(".corridor-client").isEmpty())throw new AssertionError("Expired coordinates remain on map");app.qaFloorMap().accept(afterDemo);});
+            request(first,"READY_SET",object().put("ready",true));request(second,"READY_SET",object().put("ready",true));uiRequest(app,"START_GAME");
+            await(()->!app.managedRoomSnapshot().path("phase").asText().equals("WAITING"));
+            fx(()->{if(app.qaMonitorStage()!=opened[0])throw new AssertionError("Exam transition replaced monitoring window");
+                if(!opened[0].getScene().lookup("#floor-activate").isDisabled())throw new AssertionError("Floor setup enabled during exam");
+                opened[0].close();if(original[0].showing())throw new AssertionError("Closed map still active");app.openFloorMap();
+                if(app.qaMonitorStage()==opened[0]||app.qaFloorMap()==original[0])throw new AssertionError("Reopened a disposed map");
+            });
+            await(()->app.qaMonitorStage().getScene().getRoot().lookupAll(".corridor-client").size()==2);
+            await(()->app.managedRoomSnapshot().path("phase").asText().equals("FINISHED"));
+            fx(()->{if(!((javafx.scene.control.ToggleButton)app.qaMonitorStage().getScene().lookup("#floor-live")).isSelected())throw new AssertionError("Reopen defaulted to simulation");app.qaLogout();});
+        }
+    }
     private static void checkAutomaticAp(ArcadeApplication app)throws Exception {
         var radio=new java.util.concurrent.atomic.AtomicReference<>(WifiSignalProvider.Reading.connected("qa-client","QA fixture","HUTECH E1","aa:bb:cc:dd:ee:01","5 GHz",36,5180000,-46,85,System.currentTimeMillis()));
         WifiSignalProvider provider=new WifiSignalProvider(){public Reading readSignal(){return radio.get();}public void close(){}};
@@ -103,6 +181,18 @@ public final class LiveLanUiCheck {
             await(()->app.managedRoomSnapshot().path("proximity").path("self").path("ap_distance").path("estimated_meters").asDouble()==10);
             fx(()->{if(app.managedRoomSnapshot().path("ready_count").asInt()!=1)throw new AssertionError("Roaming cleared ready");snapshot(app,"auto-01-client-roamed");
                 var codeLabel=(javafx.scene.control.Label)app.qaScene().lookup(".room-code");if(codeLabel.getWidth()+1<codeLabel.prefWidth(-1))throw new AssertionError("Room code clipped");});
+            try(var peer=connect()){
+                request(peer,"JOIN",object().put("room_code",code).put("nickname","Client khác"));
+                fx(app::openFloorMap);
+                await(()->((javafx.scene.control.ComboBox<?>)auxiliary("#floor-map").lookup("#floor-client")).getItems().size()==1);
+                fx(()->{var map=auxiliary("#floor-map");
+                    if(!((javafx.scene.control.ToggleButton)map.lookup("#floor-live")).isSelected())throw new AssertionError("Student map opened in demo mode");
+                    if(app.canConfigureFloor()||!map.lookup("#floor-activate").isDisabled())throw new AssertionError("Student can configure room map");
+                    app.openProximityMonitor();if(app.qaMonitorStage()!=null)throw new AssertionError("Student opened host monitoring");
+                });
+                var own=uiRequest(app,"FLOOR_GET");if(own.path("players").size()!=1||!own.path("players").path(0).path("nickname").asText().equals("Client tự động"))throw new AssertionError("Student map exposed another client");
+                fx(()->app.qaFloorMap().close());
+            }
             radio.set(WifiSignalProvider.Reading.failure(WifiSignalProvider.Status.PERMISSION_DENIED,"QA denied",System.currentTimeMillis()));
             await(()->hasLabel(app,"Cần cấp quyền"));fx(()->{snapshot(app,"auto-02-no-permission");app.qaLogout();});
             try(var other=connect()){
