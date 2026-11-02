@@ -54,7 +54,8 @@ final class CorridorMapView extends Pane implements AutoCloseable {
             rectangle(x.applyAsDouble(wx),y.applyAsDouble(wy),plan.roomWidth()*scale,plan.roomDepth()*scale,"corridor-room");
             double doorY=y.applyAsDouble(side==0?plan.corridorWidth()/2:-plan.corridorWidth()/2);
             rectangle(x.applyAsDouble(wx+plan.roomWidth()/2-0.65),doorY-2,1.3*scale,4,"corridor-hall");
-            label(plan.roomName(i+side*plan.roomsPerSide()),x.applyAsDouble(wx+plan.roomWidth()/2)-10,side==0?y.applyAsDouble(wy)-8:y.applyAsDouble(-plan.halfHeight())+20);
+            var roomLabel=label(plan.roomName(i+side*plan.roomsPerSide()),0,side==0?y.applyAsDouble(wy)-8:y.applyAsDouble(-plan.halfHeight())+20);
+            roomLabel.setX(x.applyAsDouble(wx+plan.roomWidth()/2)-roomLabel.getLayoutBounds().getWidth()/2);
         }
         var chosen=clients.stream().filter(c->c.id().equals(selected)).findFirst().orElse(null);
         var active=chosen==null?null:displayed.get(chosen.id());

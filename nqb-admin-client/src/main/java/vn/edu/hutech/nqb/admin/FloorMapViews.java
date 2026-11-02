@@ -36,6 +36,7 @@ final class FloorMapViews implements AutoCloseable {
     private final ComboBox<String> serverRoom=new ComboBox<>();
     private final Spinner<Double> roomWidth=new Spinner<>(3.0,20.0,8.0,1.0),roomDepth=new Spinner<>(3.0,20.0,8.0,1.0),hallWidth=new Spinner<>(1.0,8.0,3.0,.5);
     private final TextField areaName=new TextField("Hành lang HUTECH E1"),ssid=new TextField("HUTECH E1");
+    private final TextField floorNumber=new TextField();
     private final Slider motion=new Slider(0,100,0);
     private final CheckBox smooth=new CheckBox("Chuyển động mượt");
     private final Label origin=text("","caption"),distance=text("","subtitle"),status=text("","muted"),detail=text("","muted");
@@ -75,7 +76,7 @@ final class FloorMapViews implements AutoCloseable {
         if(embedded||!app.floorRoomCode().isBlank())live.setSelected(true);else demo.setSelected(true);
         clients.setPromptText("Chọn Client");
         smooth.setSelected(!app.reducedMotion());smooth.setId("floor-smooth");smooth.setOnAction(e->render());
-        for(int i=0;i<12;i++)serverRoom.getItems().add(plan.roomName(i));serverRoom.getSelectionModel().select(1);serverRoom.setId("floor-server-room");
+        for(int i=0;i<plan.roomsPerSide()*2;i++)serverRoom.getItems().add(plan.roomName(i));serverRoom.getSelectionModel().select(1);serverRoom.setId("floor-server-room");
         serverRoom.valueProperty().addListener((o,b,a)->{if(a!=null&&!selecting){progress[0]=0;progress[1]=55;render();}});
         motion.setId("floor-motion");motion.setAccessibleText("Di chuyển Client mô phỏng");motion.setShowTickLabels(true);motion.setMajorTickUnit(25);
         motion.valueProperty().addListener((o,b,a)->{if(selecting||!demo.isSelected())return;progress[demoIndex()]=a.doubleValue();render();});
@@ -91,9 +92,15 @@ final class FloorMapViews implements AutoCloseable {
             try{var area=plan.survey(areaName.getText().strip(),ssid.getText(),serverRoom.getSelectionModel().getSelectedIndex());app.openSurvey(area);}
             catch(Exception error){status.setText(ArcadeApplication.message(error));}
         });template.setId("floor-template");
-        var apply=button("Áp dụng kích thước","quiet",()->{installPlan(new CorridorPlan(plan.roomsPerSide(),roomWidth.getValue(),roomDepth.getValue(),hallWidth.getValue()));render();});apply.setId("floor-apply-size");
-        var dimensions=new FlowPane(12,8,field("Ngang phòng (m)",roomWidth),field("Sâu phòng (m)",roomDepth),field("Rộng hành lang (m)",hallWidth),apply);
-        var setup=new TitledPane("Sơ đồ & mốc khảo sát",column(10,text("6 phòng mỗi bên, kích thước giả định. Dùng cùng tỷ lệ cho sơ đồ và mốc khảo sát.","caption"),dimensions,new FlowPane(12,8,field("Tên khu",areaName),field("Tên Wi-Fi",ssid)),template));setup.setExpanded(false);setup.setId("floor-setup");
+        floorNumber.setId("floor-number");floorNumber.setPromptText("Chưa chọn");floorNumber.setPrefColumnCount(6);
+        floorNumber.setTooltip(new Tooltip("Để trống khi chưa biết tầng; tên phòng sẽ dùng E1.X.01, E1.X.02…"));
+        var planError=text("","feedback","error");planError.setId("floor-plan-error");planError.managedProperty().bind(planError.textProperty().isNotEmpty());planError.visibleProperty().bind(planError.managedProperty());
+        var apply=button("Áp dụng sơ đồ","quiet",()->{
+            try{installPlan(new CorridorPlan(plan.roomsPerSide(),roomWidth.getValue(),roomDepth.getValue(),hallWidth.getValue(),floorNumber.getText()));planError.setText("");render();}
+            catch(IllegalArgumentException error){planError.setText(error.getMessage());}
+        });apply.setId("floor-apply-size");
+        var dimensions=new FlowPane(12,8,field("Tầng",floorNumber),field("Ngang phòng (m)",roomWidth),field("Sâu phòng (m)",roomDepth),field("Rộng hành lang (m)",hallWidth),apply);
+        var setup=new TitledPane("Sơ đồ & mốc khảo sát",column(10,text("Tên phòng E1.X.Y: X là tầng, Y là số phòng. Chưa chọn tầng thì giữ X.","caption"),dimensions,planError,text("6 phòng mỗi bên, kích thước giả định.","caption"),new FlowPane(12,8,field("Tên khu",areaName),field("Tên Wi-Fi",ssid)),template));setup.setExpanded(false);setup.setId("floor-setup");
         settingsPane=new TitledPane("Thiết lập bản đồ",column(12,liveControls,setup));settingsPane.setExpanded(false);settingsPane.setId("floor-settings");
         var body=column(12,origin,new FlowPane(12,8,demo,live,field("Client",clients),smooth),distance,positionStatus,apDistances,map,
             text("Client: chấm xanh   ·   Server: ô vuông   ·   Đường nối: khoảng cách thẳng","caption"),demoControls,status,signalPane,settingsPane);
@@ -167,6 +174,7 @@ final class FloorMapViews implements AutoCloseable {
         stopPlayback();int previous=serverRoom.getSelectionModel().getSelectedIndex();selecting=true;plan=value;serverRoom.getItems().clear();
         for(int i=0;i<plan.roomsPerSide()*2;i++)serverRoom.getItems().add(plan.roomName(i));serverRoom.getSelectionModel().select(Math.max(0,Math.min(previous,serverRoom.getItems().size()-1)));selecting=false;
         roomWidth.getValueFactory().setValue(plan.roomWidth());roomDepth.getValueFactory().setValue(plan.roomDepth());hallWidth.getValueFactory().setValue(plan.corridorWidth());
+        floorNumber.setText(plan.floor().equals("X")?"":plan.floor());
     }
     void disconnected(){snapshot=object();if(live.isSelected()){refreshClients();render();status.setText("Mất kết nối Server. Vị trí sẽ cập nhật lại sau khi nối lại.");}}
     void loadSurvey(java.nio.file.Path file){

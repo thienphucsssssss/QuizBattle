@@ -59,6 +59,8 @@ public final class LiveLanUiCheck {
         fx(()->{
             var scene=auxiliary("#floor-map");scene.getRoot().applyCss();scene.getRoot().layout();
             if(scene.getRoot().lookupAll(".corridor-room").size()!=12||scene.getRoot().lookupAll(".corridor-client").size()!=2)throw new AssertionError("Missing corridor rooms/clients");
+            var rooms=(javafx.scene.control.ComboBox<?>)scene.lookup("#floor-server-room");
+            if(!rooms.getItems().getFirst().equals("E1.X.02")||!rooms.getItems().get(6).equals("E1.X.01"))throw new AssertionError("Room labels assigned a floor before it was chosen");
             if(!((javafx.scene.control.Label)scene.lookup("#floor-origin")).getText().contains("MÔ PHỎNG"))throw new AssertionError("Unlabelled simulation");
             ((javafx.scene.control.CheckBox)scene.lookup("#floor-smooth")).setSelected(false);
             ((javafx.scene.control.Slider)scene.lookup("#floor-motion")).setValue(100);
@@ -66,6 +68,16 @@ public final class LiveLanUiCheck {
             scene.getRoot().applyCss();scene.getRoot().layout();saveImage(scene.snapshot(null),"floor-01-corridor");
             var map=scene.lookup("#floor-map");var bounds=map.localToScene(map.getBoundsInLocal());
             if(bounds.getMaxX()>scene.getWidth()||bounds.getMinX()<0)throw new AssertionError("Map clipped horizontally");
+            var floor=(TextField)scene.lookup("#floor-number");floor.setText("3");
+            ((javafx.scene.control.TitledPane)scene.lookup("#floor-settings")).setExpanded(true);((javafx.scene.control.TitledPane)scene.lookup("#floor-setup")).setExpanded(true);
+            ((javafx.scene.control.Button)scene.lookup("#floor-apply-size")).fire();
+            if(!rooms.getItems().getFirst().equals("E1.03.02")||!rooms.getValue().equals("E1.03.04"))throw new AssertionError("Floor change lost selected server room");
+            if(scene.getRoot().lookupAll(".corridor-label").stream().filter(javafx.scene.text.Text.class::isInstance).map(javafx.scene.text.Text.class::cast).noneMatch(t->t.getText().equals("E1.03.01")))throw new AssertionError("Map retained old room labels");
+            floor.setText("abc");((javafx.scene.control.Button)scene.lookup("#floor-apply-size")).fire();
+            if(!scene.lookup("#floor-plan-error").isVisible()||!rooms.getItems().getFirst().equals("E1.03.02"))throw new AssertionError("Invalid floor silently changed the plan");
+            floor.clear();((javafx.scene.control.Button)scene.lookup("#floor-apply-size")).fire();
+            if(!rooms.getItems().getFirst().equals("E1.X.02")||scene.lookup("#floor-plan-error").isVisible())throw new AssertionError("Clearing floor did not restore X");
+            ((javafx.scene.control.TitledPane)scene.lookup("#floor-setup")).setExpanded(false);((javafx.scene.control.TitledPane)scene.lookup("#floor-settings")).setExpanded(false);
             ((javafx.scene.control.ComboBox<?>)scene.lookup("#floor-server-room")).getSelectionModel().select(7);
             ((javafx.scene.control.Button)scene.lookup("#floor-play")).fire();
         });
