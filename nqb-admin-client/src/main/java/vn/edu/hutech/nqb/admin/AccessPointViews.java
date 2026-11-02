@@ -26,7 +26,7 @@ final class AccessPointViews {
             : "Chưa xác định hướng di chuyển";
     }
 
-    private static boolean fresh(JsonNode player, long extraAgeMs) {
+    static boolean fresh(JsonNode player, long extraAgeMs) {
         long age = player.path("measurement_age_ms").asLong(-1);
         return player.path("connected").asBoolean() && age >= 0 && age + extraAgeMs <= 15000;
     }
@@ -43,8 +43,7 @@ final class AccessPointViews {
         dialog.setTitle("Bản đồ AP trên hành lang");
         dialog.setHeaderText("Gán BSSID cho AP và thứ tự trên hành lang");
         dialog.getDialogPane().setId("ap-config-dialog");
-        var explanation = text("Mỗi dòng là một BSSID. Các băng tần của cùng AP dùng chung tên AP, hành lang và thứ tự. "
-            + "Ví dụ: HUTECH E1 · AP1 · Tầng 3 / hành lang A · 1. Nhập theo vị trí đã khảo sát tại trường.", "muted");
+        var explanation = text("Xếp AP theo vị trí thực tế. Các BSSID cùng AP dùng chung tên, hành lang và thứ tự.", "muted");
         var grid = new GridPane();
         grid.setHgap(8); grid.setVgap(8);
         String[] headings = {"Tên Wi-Fi (SSID)", "BSSID", "Tên AP", "Tầng / hành lang", "Thứ tự"};
@@ -103,8 +102,7 @@ final class AccessPointViews {
         HBox.setHgrow(observed, Priority.ALWAYS);
         var scroller = scroll(grid); scroller.setPrefViewportHeight(260);
         var content = column(12, explanation, row(8, addButton, observed, useObserved), scroller,
-            text("Thứ tự tăng: 1 → 2 → 3; thứ tự giảm: 3 → 2 → 1. Khác hành lang hoặc chưa gán AP: chưa xác định hướng. "
-                + "Lưu trên server; lưu bản đồ sẽ bắt đầu lại lịch sử theo dõi hiện tại.", "muted"), error);
+            text("Lưu cấu hình sẽ đặt lại lịch sử theo dõi AP hiện tại.", "muted"), error);
         dialog.getDialogPane().setContent(content); dialog.getDialogPane().setPrefWidth(940);
         var saveType = new ButtonType("Lưu bản đồ AP", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(saveType, new ButtonType("Hủy", ButtonBar.ButtonData.CANCEL_CLOSE));

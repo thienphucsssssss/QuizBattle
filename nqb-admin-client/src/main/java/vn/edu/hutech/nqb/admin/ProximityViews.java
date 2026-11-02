@@ -698,9 +698,11 @@ final class ProximityViews {
 
         LiveMonitorWindow(ArcadeApplication app) {
             this.app = app;
+            serverSummary.setTooltip(new Tooltip());
             topology=new LanTopologyView(false,this::selectPlayer);
+            topology.showServerDistance(false);
             this.stage = new Stage();
-            stage.setTitle("Quiz Battle · Giám sát khoảng cách Wi-Fi");
+            stage.setTitle("Quiz Battle · Giám sát Wi-Fi");
             stage.setMinWidth(820);
             stage.setMinHeight(520);
 
@@ -756,14 +758,15 @@ final class ProximityViews {
                 col("Người chơi", p -> p.path("nickname").asText(), 140),
                 col("AP đang kết nối", p -> AccessPointViews.apLabel(p, app.measurementSnapshotAgeMs()), 170),
                 col("Tầng / hành lang", p -> p.path("access_point").path("corridor").asText("—"), 160),
-                col("Hướng suy đoán", p -> AccessPointViews.directionLabel(p, app.measurementSnapshotAgeMs()), 280),
+                col("Hướng suy đoán", p -> AccessPointViews.directionLabel(p, app.measurementSnapshotAgeMs())
+                    .replace("Hướng suy đoán: ","").replace(" (tăng thứ tự)","").replace(" (giảm thứ tự)",""), 280),
                 col("BSSID", p -> p.path("access_point").path("bssid").asText("—"), 155));
             apTable.getSelectionModel().selectedItemProperty().addListener((o, before, selected) -> {
                 if (selected != null) { selectedPlayerId = selected.path("player_id").asText(); renderPlayerDetail(selected); }
             });
             var ageTimer = new javafx.animation.Timeline(new javafx.animation.KeyFrame(javafx.util.Duration.seconds(1), e -> {
                 apTable.refresh();table.refresh();
-                serverSummary.setText(ApDistanceViews.summary("Server",app.latestProximitySnapshot().path("server_ap_distance"),app.measurementSnapshotAgeMs()));
+                updateServerSummary(app.latestProximitySnapshot());
                 if (!selectedPlayerId.isBlank()) for (var p : apTable.getItems())
                     if (p.path("player_id").asText().equals(selectedPlayerId)) { renderPlayerDetail(p); break; }
             }));
@@ -802,7 +805,7 @@ final class ProximityViews {
             refreshBtn.setId("proximity-monitor-refresh");
             refreshBtn.setMinWidth(Region.USE_PREF_SIZE);
 
-            var titleBox = column(4, text("Giám sát khoảng cách Wi-Fi", "title"), anchorSummary, thresholdSummary,serverSummary);
+            var titleBox = column(4, text("Giám sát Wi-Fi", "title"),serverSummary,anchorSummary,thresholdSummary);
             HBox.setHgrow(titleBox, Priority.ALWAYS);
             var header = row(12, titleBox, recalibrateAllBtn, refreshBtn);
             apConfigBtn = button("Cấu hình AP", "quiet", () -> AccessPointViews.openConfiguration(app));
@@ -810,7 +813,7 @@ final class ProximityViews {
             var rootBox = new BorderPane();
             rootBox.setPadding(new Insets(20, 24, 20, 24));
             var diagram=new ToggleButton("Sơ đồ");diagram.setId("monitor-topology-mode");var list=new ToggleButton("Danh sách");list.setId("monitor-list-mode");var modes=new ToggleGroup();diagram.setToggleGroup(modes);list.setToggleGroup(modes);diagram.setSelected(true);
-            var apMode = new ToggleButton("AP & hướng di chuyển"); apMode.setId("monitor-ap-mode"); apMode.setToggleGroup(modes);
+            var apMode = new ToggleButton("AP & hướng"); apMode.setId("monitor-ap-mode"); apMode.setToggleGroup(modes);
             var graphScroll=scroll(topology);views.getChildren().addAll(graphScroll,table,apTable);table.setVisible(false);table.setManaged(false);apTable.setVisible(false);apTable.setManaged(false);
             modes.selectedToggleProperty().addListener((o,b,a)->{if(a==null){diagram.setSelected(true);return;}boolean graph=a==diagram;graphScroll.setVisible(graph);graphScroll.setManaged(graph);table.setVisible(a==list);table.setManaged(a==list);apTable.setVisible(a==apMode);apTable.setManaged(a==apMode);});
             rootBox.setTop(column(12, header,row(8,diagram,list,apMode,space(),apConfigBtn), warningBanner));
@@ -848,6 +851,11 @@ final class ProximityViews {
         void close() {
             stage.close();
         }
+        private void updateServerSummary(JsonNode snap){
+            var data=snap.path("server_ap_distance");long age=app.measurementSnapshotAgeMs();
+            serverSummary.setText(ApDistanceViews.compact("Server",data,age));
+            serverSummary.getTooltip().setText(ApDistanceViews.summary("Server",data,age)+"\nSố mét được ước lượng từ RSSI; tường và thiết bị có thể làm kết quả sai lệch.");
+        }
 
         void update(JsonNode snap) {
             if (snap == null || snap.isEmpty()) return;
@@ -859,10 +867,10 @@ final class ProximityViews {
             String band = snap.path("anchor_band").asText("");
             int threshold = snap.path("threshold_meters").asInt(10);
 
-            serverSummary.setText(ApDistanceViews.summary("Server",snap.path("server_ap_distance"),app.measurementSnapshotAgeMs()));
+            updateServerSummary(snap);
             if(snap.path("automatic_distance_supported").asBoolean()){
-                anchorSummary.setText("Tự động ước lượng tới AP đang kết nối · Không cần hiệu chuẩn");
-                thresholdSummary.setText(enabled?"Cảnh báo theo mốc đã hiệu chuẩn: "+threshold+" m"+(snap.path("calibration_required").asBoolean()?" · Bắt buộc hiệu chuẩn để sẵn sàng":" · Hiệu chuẩn tùy chọn") : "Tham số mặc định chỉ dùng để demo; số mét có thể dao động khi đứng yên.");
+                anchorSummary.setText(enabled?"Mốc: "+(ssid.isBlank()?bssid:ssid)+" · Cảnh báo trên "+threshold+" m":"");
+                thresholdSummary.setText(enabled&&snap.path("calibration_required").asBoolean()?"Cần hiệu chuẩn trước khi sẵn sàng":"");
             } else if (!enabled) {
                 anchorSummary.setText("Giám sát khoảng cách đang tắt cho phòng này.");
                 thresholdSummary.setText("Chủ phòng có thể bật trong Cấu hình phòng trước khi bắt đầu.");
@@ -874,8 +882,11 @@ final class ProximityViews {
                 anchorSummary.setText("Điểm phát làm mốc: " + ap);
                 thresholdSummary.setText("Ngưỡng cảnh báo: " + threshold + " m" + (locked ? " · Đang khóa cấu hình trong lúc thi" : ""));
             }
+            anchorSummary.setManaged(!anchorSummary.getText().isBlank());anchorSummary.setVisible(anchorSummary.isManaged());
+            thresholdSummary.setManaged(!thresholdSummary.getText().isBlank());thresholdSummary.setVisible(thresholdSummary.isManaged());
 
             recalibrateAllBtn.setDisable(!enabled || locked || bssid.isBlank());
+            recalibrateAllBtn.setVisible(enabled);recalibrateAllBtn.setManaged(enabled);
             apConfigBtn.setDisable(locked || !app.managedRoomSnapshot().path("is_owner").asBoolean()
                 || !snap.path("phase").asText().equals("WAITING") || !snap.path("ap_config").path("supported").asBoolean());
 
@@ -911,33 +922,35 @@ final class ProximityViews {
             boolean extrapolated = p.path("extrapolated").asBoolean(false);
             if(p.has("ap_distance")){
                 var value=p.path("ap_distance");statusLabel=ApDistanceViews.status(value,app.measurementSnapshotAgeMs());distLabel=ApDistanceViews.distance(value,app.measurementSnapshotAgeMs());
-                detail=ApDistanceViews.summary("Client",value,app.measurementSnapshotAgeMs());err="";
+                detail=value.has("median_rssi_dbm")?"RSSI: "+value.path("median_rssi_dbm").asText()+" dBm · "+value.path("band").asText():"";err="";
                 if(!value.path("calibrated").asBoolean()){
                     extrapolated=false;
-                    if(value.has("median_rssi_dbm"))detail+=" · RSSI trung vị: "+value.path("median_rssi_dbm").asText()+" dBm · RSSI 1 m giả định: "+value.path("reference_rssi_1m").asText()+" dBm · n = "+value.path("path_loss_n").asText();
+                    if(value.has("median_rssi_dbm"))detail+=" · Mốc 1 m giả định: "+value.path("reference_rssi_1m").asText()+" dBm · n = "+value.path("path_loss_n").asText();
                 }
             }
 
             List<Node> lines = new ArrayList<>();
-            lines.add(row(10,text("CHI TIẾT TÍN HIỆU · " + nick.toUpperCase(Locale.ROOT), "caption"),space(),button("Thu gọn","link-button",()->{selectedPlayerId="";table.getSelectionModel().clearSelection();detailBox.setVisible(false);detailBox.setManaged(false);})));
-            lines.add(text("Trạng thái: " + statusLabel + "   ·   Khoảng cách: " + distLabel, "subtitle"));
+            lines.add(row(10,text(nick, "subtitle"),space(),button("Thu gọn","link-button",()->{selectedPlayerId="";table.getSelectionModel().clearSelection();detailBox.setVisible(false);detailBox.setManaged(false);})));
+            lines.add(text("Đến AP: " + distLabel + " · " + (p.has("ap_distance")?ApDistanceViews.shortStatus(p.path("ap_distance"),app.measurementSnapshotAgeMs()):statusLabel), "subtitle"));
             var ap = p.path("access_point");
-            lines.add(text("AP: " + AccessPointViews.apLabel(p, app.measurementSnapshotAgeMs())
-                + " · " + AccessPointViews.directionLabel(p, app.measurementSnapshotAgeMs()), "subtitle"));
+            String apName=ap.path("ap_name").asText();
+            lines.add(text("AP: " + (!AccessPointViews.fresh(p,app.measurementSnapshotAgeMs())?"Chưa có dữ liệu mới":apName.isBlank()?"Chưa đặt tên":apName)
+                + " · " + AccessPointViews.directionLabel(p, app.measurementSnapshotAgeMs()), "muted"));
             if (!ap.path("ssid").asText().isBlank())
                 lines.add(text("Wi-Fi: " + ap.path("ssid").asText() + " · BSSID: " + ap.path("bssid").asText()
                     + " · " + ap.path("corridor").asText(), "muted"));
             var history = new ArrayList<String>();
             for (var event : ap.path("history")) history.add((event.path("continuous").asBoolean() ? "→ " : "| ")
                 + event.path("ap_name").asText() + " (" + formatTimestamp(event.path("at_utc").asText()) + ")");
-            lines.add(text(history.isEmpty() ? "Chưa có AP được xác nhận."
-                : "Lịch sử AP: " + String.join("  ", history), "muted"));
-            lines.add(text("Hướng chỉ được suy đoán từ chuyển AP đã xác nhận; chưa chuyển AP không có nghĩa là đứng yên. Dấu | bắt đầu đoạn theo dõi mới.", "muted"));
+            if(!history.isEmpty()){
+                var historyLabel=text("Lịch sử: " + String.join("  ", history), "muted");
+                historyLabel.setTooltip(new Tooltip("Hướng được suy đoán theo thứ tự AP. Dấu | bắt đầu đoạn theo dõi mới."));lines.add(historyLabel);
+            }
             if (!detail.isBlank()) {
                 lines.add(text(detail, "muted"));
             }
             if (extrapolated) {
-                lines.add(text("Lưu ý: Khoảng cách nằm ngoài đoạn hiệu chuẩn 1–5 m, kết quả được ngoại suy.", "muted"));
+                lines.add(text("Ngoài khoảng hiệu chuẩn 1–5 m.", "muted"));
             }
             if (!err.isBlank() && !detail.contains(err)) {
                 lines.add(text("Nguyên nhân lỗi: " + err, "feedback", "error"));

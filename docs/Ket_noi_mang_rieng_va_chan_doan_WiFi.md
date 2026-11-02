@@ -33,7 +33,7 @@ Có thể đặt `session.resumeGraceSeconds=60` (1–300) trong cấu hình ngu
 
 ## Kiểm tra quét Wi-Fi trước khảo sát
 
-Mở **Tùy chọn → Chẩn đoán quét Wi-Fi**, dùng được cả khi chưa vào phòng:
+Mở **Tùy chọn → Quét Wi-Fi**, dùng được cả khi chưa vào phòng:
 
 1. Chọn card Wi-Fi vật lý đang sử dụng, thường là Intel/Realtek. Danh sách lấy từ Windows Native Wi-Fi; Tailscale không phải nguồn RSSI.
 2. Nhập chính xác `HUTECH E1` để lọc. Để trống sẽ xem tất cả SSID quan sát được.

@@ -28,4 +28,11 @@ final class ApDistanceViews {
         return device+" → AP: "+distance(data,elapsed)+" · "+status(data,elapsed)
             +(data.path("bssid").asText().isBlank()?"":" · "+data.path("ssid").asText()+" · "+data.path("bssid").asText()+" · "+data.path("band").asText());
     }
+    static String shortStatus(JsonNode data,long elapsed){
+        if(!fresh(data,elapsed))return status(data,elapsed);
+        return data.path("calibrated").asBoolean(!data.has("mode"))?"đã hiệu chuẩn":"chưa hiệu chuẩn";
+    }
+    static String compact(String device,JsonNode data,long elapsed){
+        return device+" → AP: "+distance(data,elapsed)+" · "+shortStatus(data,elapsed);
+    }
 }

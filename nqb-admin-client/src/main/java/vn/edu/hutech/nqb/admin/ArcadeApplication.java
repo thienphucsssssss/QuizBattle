@@ -409,27 +409,28 @@ public final class ArcadeApplication extends Application {
         if (student && apTracking && !proximityReportingActive) startStudentProximityReporting(null);
         String proxSummaryText;
         if (!proxEnabled) {
-            proxSummaryText = prox.path("automatic_distance_supported").asBoolean()?"Khoảng cách tới AP: Tự động · Hiệu chuẩn tùy chọn":"Giám sát khoảng cách: Đang tắt";
+            proxSummaryText = prox.path("automatic_distance_supported").asBoolean()?"Đo Wi-Fi tự động":"Giám sát Wi-Fi đang tắt";
         } else {
             String bssid = prox.path("anchor_bssid").asText("");
             String ssid = prox.path("anchor_ssid").asText("");
             String band = prox.path("anchor_band").asText("");
             int threshold = prox.path("threshold_meters").asInt(10);
             String apText = bssid.isBlank() ? "Chưa chọn điểm phát làm mốc" : (ssid.isBlank() ? "Điểm phát đã chọn" : ssid) + " · " + band;
-            proxSummaryText = "Giám sát khoảng cách: Bật · Mốc " + apText + " · Ngưỡng " + threshold + " m (ước lượng)";
+            proxSummaryText = "Mốc: " + apText + " · Cảnh báo trên " + threshold + " m";
         }
         var proxSummaryLabel = text(proxSummaryText, "muted");
         proxSummaryLabel.setId("lobby-proximity-summary");
+        proxSummaryLabel.setVisible(!student||proxEnabled||!prox.path("automatic_distance_supported").asBoolean());proxSummaryLabel.setManaged(proxSummaryLabel.isVisible());
         var configSummary = column(12, text(room.path("question_count").asInt(3) + " câu   ·   " + room.path("duration_seconds").asInt(15) + " giây/câu", "subtitle"),text(room.path("question_source_name").asText("Toàn bộ ngân hàng"),"caption"),proxSummaryLabel);
         if (student) {
             JsonNode selfProx = prox.path("self");
             var selfLabel = text(studentMeasurementText(selfProx), "muted");
+            selfLabel.setTooltip(new Tooltip(ApDistanceViews.summary("Client",ApDistanceViews.value(selfProx),0)));
             selfLabel.setId("student-proximity-status");
             configSummary.getChildren().add(selfLabel);
             if (apTracking) {
                 var ap = selfProx.path("access_point");
-                var apLabel = text("AP đang kết nối: " + ap.path("ap_label").asText("Đang đọc Wi-Fi…")
-                    + " · " + ap.path("direction_label").asText("Chưa xác định hướng di chuyển"), "muted");
+                var apLabel = text(studentWifiText(ap), "muted");
                 apLabel.setId("student-access-point");
                 configSummary.getChildren().add(apLabel);
             }
@@ -643,16 +644,22 @@ public final class ArcadeApplication extends Application {
     private void updateStudentMeasurementText(){
         if(!role.equals("STUDENT")||!(scene.lookup("#student-proximity-status") instanceof Label label))return;
         var self=room.path("proximity").path("self");label.setText(studentMeasurementText(self));
+        label.getTooltip().setText(ApDistanceViews.summary("Client",ApDistanceViews.value(self),0));
         if (scene.lookup("#student-access-point") instanceof Label apLabel) {
             var ap = self.path("access_point");
-            apLabel.setText("AP đang kết nối: " + ap.path("ap_label").asText("Đang đọc Wi-Fi…")
-                + " · " + ap.path("direction_label").asText("Chưa xác định hướng di chuyển"));
+            apLabel.setText(studentWifiText(ap));
         }
     }
     private String studentMeasurementText(JsonNode self){
         String ping="— ms";for(var player:room.path("players"))if(player.path("player_id").asText().equals(user.path("player_id").asText())&&player.has("ping_ms"))ping=(player.path("ping_ms").asLong()==0?"<1":player.path("ping_ms").asText())+" ms";
-        return self.has("ap_distance")?"Ping Server: "+ping+" · "+ApDistanceViews.summary("Client",self.path("ap_distance"),0)
+        return self.has("ap_distance")?"Ping: "+ping+" · "+ApDistanceViews.compact("Client",self.path("ap_distance"),0)
             :"Máy bạn: "+ping+(self.has("estimated_meters")?" · "+self.path("distance_label").asText():"")+" · "+self.path("status_label").asText("Đang chuẩn bị");
+    }
+    private String studentWifiText(JsonNode ap){
+        if(!ap.path("fresh").asBoolean()||ap.path("ssid").asText().isBlank())return "Wi-Fi: đang chờ dữ liệu";
+        String name=ap.path("ap_name").asText();
+        String network="Wi-Fi: "+ap.path("ssid").asText()+" · "+(name.isBlank()?"AP chưa đặt tên":name);
+        return ap.path("direction").asText("UNKNOWN").equals("UNKNOWN")?network:network+" · "+ap.path("direction_label").asText().replace(" (tăng thứ tự)","").replace(" (giảm thứ tự)","");
     }
 
     JsonNode latestProximitySnapshot() {
@@ -738,13 +745,14 @@ public final class ArcadeApplication extends Application {
         rescanBtn.setId("room-anchor-rescan");
 
         CheckBox recalibrateAll = new CheckBox("Hiệu chuẩn lại cả phòng (chọn khi di chuyển điểm phát)");
-        var calibrationRequired=new CheckBox("Bắt buộc hiệu chuẩn trước khi sẵn sàng (nâng cao)");
+        var calibrationRequired=new CheckBox("Bắt buộc hiệu chuẩn trước khi sẵn sàng");
         calibrationRequired.setId("room-calibration-required");calibrationRequired.setSelected(prox.path("calibration_required").asBoolean(false));
         recalibrateAll.setId("room-recalibrate-all");
         recalibrateAll.setVisible(!creatingNew);
         recalibrateAll.setManaged(!creatingNew);
 
-        VBox proxSection = column(12, text("Khoảng cách tới AP hiện tại được ước lượng tự động. Hiệu chuẩn dưới đây là tùy chọn để đo theo mốc và cảnh báo.","caption"),field("Điểm phát làm mốc (BSSID · Băng tần)", anchorCombo), rescanBtn, field("Ngưỡng cảnh báo (mét ước lượng)", threshold), calibrationRequired,recalibrateAll);
+        proxEnabled.setTooltip(new Tooltip("Khoảng cách tới AP được ước lượng tự động. Bật mục này để dùng hồ sơ hiệu chuẩn và cảnh báo theo mốc."));
+        VBox proxSection = column(12,field("AP làm mốc", anchorCombo), rescanBtn, field("Ngưỡng cảnh báo (m ước lượng)", threshold), calibrationRequired,recalibrateAll);
         proxSection.disableProperty().bind(proxEnabled.selectedProperty().not());
 
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); dialog.setHeaderText("Cấu hình phòng thi"); styleDialog(dialog);
@@ -1039,15 +1047,17 @@ public final class ArcadeApplication extends Application {
         var audioStatus = text(sfx.status(), "muted");
         sound.setOnAction(e -> sfx.mute(!sound.isSelected())); volume.valueProperty().addListener((o, before, after) -> sfx.volume(after.doubleValue() / 100));
         var testSound = button("Nghe thử", "quiet", () -> { sfx.play(SfxSlots.Cue.UI_SELECT); audioStatus.setText(sfx.status()); }); testSound.disableProperty().bind(sound.selectedProperty().not());
-        var background = new CheckBox("Nhạc nền ván đấu và chung cuộc"); background.setId("music-enabled"); background.setDisable(!music.assetsAvailable()); background.setSelected(!music.muted());
+        var background = new CheckBox("Nhạc nền"); background.setId("music-enabled"); background.setDisable(!music.assetsAvailable()); background.setSelected(!music.muted());
         var musicVolume = new Slider(0, 100, music.volume() * 100); musicVolume.setId("music-volume"); musicVolume.setAccessibleText("Âm lượng nhạc nền"); musicVolume.setShowTickLabels(true); musicVolume.setMajorTickUnit(25); musicVolume.setBlockIncrement(5); musicVolume.disableProperty().bind(background.selectedProperty().not());
         var musicStatus = text(music.status(), "muted"); musicStatus.setId("music-status");
         background.setOnAction(e -> music.mute(!background.isSelected())); musicVolume.valueProperty().addListener((o, before, after) -> music.volume(after.doubleValue() / 100));
-        var scanWifi=button("Chẩn đoán quét Wi-Fi", "quiet",()->WifiScanViews.open(this,proximityClient));scanWifi.setId("wifi-scan-open");
+        var scanWifi=button("Quét Wi-Fi", "quiet",()->WifiScanViews.open(this,proximityClient));scanWifi.setId("wifi-scan-open");
         var surveyWifi=button("Khảo sát Wi-Fi", "quiet",this::openSurvey);surveyWifi.setId("survey-open");surveyWifi.setDisable(isRunning());
-        var evaluateWifi=button("Đánh giá định vị Wi-Fi", "quiet",()->openFingerprint(null,stage));evaluateWifi.setId("fingerprint-open");evaluateWifi.setDisable(isRunning());
+        var evaluateWifi=button("Đánh giá định vị", "quiet",()->openFingerprint(null,stage));evaluateWifi.setId("fingerprint-open");evaluateWifi.setDisable(isRunning());
         var floorButton=button("Bản đồ Client — Server","quiet",this::openFloorMap);floorButton.setId("floor-open");
-        var content = column(16, floorButton, surveyWifi, evaluateWifi, scanWifi, new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
+        var wifiTools=new FlowPane(10,10,floorButton,surveyWifi,evaluateWifi,scanWifi);
+        for(var control:List.of(floorButton,surveyWifi,evaluateWifi,scanWifi))control.setMinWidth(Region.USE_PREF_SIZE);
+        var content = column(16,wifiTools,new Separator(), reduced, new Separator(), sound, field("Âm lượng hiệu ứng", volume), row(12, testSound, audioStatus), new Separator(), background, field("Âm lượng nhạc nền", musicVolume), musicStatus);
         var scroller = scroll(content); scroller.setPrefViewportWidth(460); scroller.setPrefViewportHeight(Math.min(410, Math.max(240, stage.getHeight() - 240)));
         var dialog = new Dialog<ButtonType>(); dialog.initOwner(stage); styleDialog(dialog); dialog.setHeaderText("Tùy chọn"); dialog.setResizable(true);
         dialog.getDialogPane().setContent(scroller);

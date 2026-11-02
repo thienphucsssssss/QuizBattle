@@ -9,7 +9,7 @@ Server đứng cố định, client Windows di chuyển. Client đọc BSSID c�
 3. Chọn BSSID client đã báo về bằng **Thêm AP đã thấy**, hoặc nhập BSSID đã khảo sát. Nhập SSID chính xác, tên AP, tầng/hành lang và thứ tự vị trí thực tế.
 4. Ví dụ AP1, AP2, AP3 cùng `HUTECH E1`, cùng `Tầng 3 / hành lang A`, lần lượt thứ tự 1, 2, 3. Một AP có nhiều BSSID (các radio/băng tần) phải có nhiều dòng cùng tên, hành lang và thứ tự.
 5. Bấm **Lưu bản đồ AP**. Cấu hình lưu cạnh database server, tên `<database>.access-points.json`, được nạp lại khi khởi động. Mỗi lần lưu bắt đầu lại lịch sử theo dõi hiện tại.
-6. Chọn tab **AP & hướng di chuyển**, chọn client để xem BSSID, AP hiện tại và 8 lần xác nhận AP gần nhất. Lịch sử này ở RAM và không phải nhật ký phiên lưu trong SQLite.
+6. Chọn tab **AP & hướng**, chọn client để xem BSSID, AP hiện tại và 8 lần xác nhận AP gần nhất. Lịch sử này ở RAM và không phải nhật ký phiên lưu trong SQLite.
 
 Muốn demo di chuyển tự do, có thể tắt **giám sát khoảng cách** trong cấu hình phòng; theo dõi AP vẫn hoạt động. Nếu bật giám sát khoảng cách thì quy tắc hiệu chuẩn và mốc AP ban đầu vẫn áp dụng: đổi sang AP khác sẽ không dùng hồ sơ RSSI của AP cũ để tính khoảng cách.
 

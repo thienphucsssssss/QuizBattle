@@ -29,9 +29,13 @@ final class LanTopologyView extends VBox {
     LanTopologyView(boolean publicView,Consumer<String> select){
         super(12);this.publicView=publicView;this.select=publicView?null:select;setId(publicView?"projected-topology":"lan-topology");getStyleClass().add("topology-panel");
         serverDistance.setId("server-ap-distance");
-        getChildren().addAll(row(12,text("Kết nối lớp học","subtitle"),space(),summary),graph,text("Ping: với Server · Mét: đến AP đang kết nối của từng máy · Ước lượng RSSI","topology-legend"),serverDistance,refreshSummary);
+        if(!publicView)serverDistance.setTooltip(new Tooltip());
+        var legend=text("Ping → Server   ·   Khoảng cách → AP","topology-legend");
+        legend.setTooltip(new Tooltip("Sơ đồ kết nối, không phải vị trí thật. Khoảng cách tới AP được ước lượng từ tín hiệu Wi-Fi."));
+        getChildren().addAll(row(12,text("Kết nối lớp học","subtitle"),space(),summary),graph,legend,serverDistance,refreshSummary);
         ageTimer.setCycleCount(Timeline.INDEFINITE);runWhenShowing(this,ageTimer);
     }
+    void showServerDistance(boolean show){serverDistance.setVisible(show);serverDistance.setManaged(show);}
     void update(JsonNode room,JsonNode snapshot){
         receivedAt=System.nanoTime();
         serverReading=snapshot.path("server_ap_distance");
@@ -57,7 +61,8 @@ final class LanTopologyView extends VBox {
         refreshSummary.setManaged(!refreshSummary.getText().isEmpty());refreshSummary.setVisible(refreshSummary.isManaged());
     }
     private void updateAges(){long extra=receivedAt==0?0:(System.nanoTime()-receivedAt)/1_000_000;
-        serverDistance.setText(publicView?"Server → AP: "+ApDistanceViews.distance(serverReading,extra)+" · "+ApDistanceViews.status(serverReading,extra):ApDistanceViews.summary("Server",serverReading,extra));
+        serverDistance.setText(ApDistanceViews.compact("Server",serverReading,extra));
+        if(!publicView)serverDistance.getTooltip().setText(ApDistanceViews.summary("Server",serverReading,extra));
         for(var node:nodes.values()){
             var p=node.data;boolean live=p.path("connected").asBoolean();long age=p.path("measurement_age_ms").asLong(-1);boolean fresh=age>=0&&age+extra<15000;
             var apDistance=ApDistanceViews.value(p);if(p.has("ap_distance"))fresh=ApDistanceViews.fresh(apDistance,extra);

@@ -33,6 +33,9 @@ final class FloorMapViews implements AutoCloseable {
     private final CheckBox smooth=new CheckBox("Chuyển động mượt");
     private final Label origin=text("","caption"),distance=text("","subtitle"),status=text("","muted"),detail=text("","muted");
     private final Label apDistances=text("","muted");
+    private final Label signalDetails=text("","muted");
+    private final Label positionStatus=text("","muted");
+    private final TitledPane signalPane=new TitledPane();
     private final ToggleButton demo=new ToggleButton("Mô phỏng tại nhà"),live=new ToggleButton("Theo dõi Wi-Fi");
     private final Button play,activate,disable,load;
     private final Timeline playback;
@@ -51,6 +54,10 @@ final class FloorMapViews implements AutoCloseable {
         stage.setWidth(Math.min(1100,app.ownerStage().getWidth()));stage.setHeight(Math.min(760,app.ownerStage().getHeight()));
         ageTimer.setCycleCount(Animation.INDEFINITE);runWhenShowing(apDistances,ageTimer);
         map.setId("floor-map");origin.setId("floor-origin");distance.setId("floor-distance");status.setId("floor-status");detail.setId("floor-detail");
+        distance.setStyle("-fx-font-size: 24px;");
+        signalPane.setText("Chi tiết tín hiệu");signalPane.setContent(column(8,detail,signalDetails));signalPane.setExpanded(false);signalPane.setId("floor-signal-details");
+        status.managedProperty().bind(status.textProperty().isNotEmpty());status.visibleProperty().bind(status.managedProperty());
+        positionStatus.managedProperty().bind(positionStatus.textProperty().isNotEmpty());positionStatus.visibleProperty().bind(positionStatus.managedProperty());
         clients.setId("floor-client");clients.setPrefWidth(210);clients.setAccessibleText("Client đang xem");
         var group=new ToggleGroup();demo.setToggleGroup(group);live.setToggleGroup(group);demo.setSelected(true);demo.setId("floor-demo");live.setId("floor-live");
         smooth.setSelected(!app.reducedMotion());smooth.setId("floor-smooth");smooth.setOnAction(e->render());
@@ -60,20 +67,21 @@ final class FloorMapViews implements AutoCloseable {
         motion.valueProperty().addListener((o,b,a)->{if(selecting||!demo.isSelected())return;progress[demoIndex()]=a.doubleValue();render();});
         playback=new Timeline(new KeyFrame(Duration.millis(100),e->{int i=demoIndex();motion.setValue(Math.min(100,progress[i]+.35));if(progress[i]>=100)stopPlayback();}));playback.setCycleCount(Animation.INDEFINITE);
         play=button("Chạy mô phỏng","primary",this::togglePlayback);play.setId("floor-play");
-        demoControls=column(8,new FlowPane(10,8,field("Phòng đặt Server",serverRoom),play,button("Về vị trí đầu","quiet",()->{stopPlayback();motion.setValue(0);})),field("Lộ trình: từ phòng ra hành lang rồi đi dọc dãy phòng",motion));
-        load=button("Mở khảo sát JSON","quiet",()->{var chooser=new FileChooser();chooser.setTitle("Khảo sát Wi-Fi đã thu");chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Khảo sát JSON","*.json"));var file=chooser.showOpenDialog(stage);if(file!=null)loadSurvey(file.toPath());});load.setId("floor-load");
-        activate=button("Dùng khảo sát cho phòng thi","primary",this::activate);activate.setId("floor-activate");
-        disable=button("Dừng theo dõi phòng","quiet",()->request("FLOOR_DISABLE",object(),this::accept));disable.setId("floor-disable");
-        liveControls=column(8,new FlowPane(10,8,load,activate,disable),text("Client trong phòng tự gửi scan mới khi chủ phòng bật theo dõi. Chu kỳ gồm thời gian quét và 5 giây chờ. Mất mẫu: ẩn vị trí, giữ phiên thi.","caption"));
-        var template=button("Tạo mốc để khảo sát Wi-Fi","quiet",()->{
+        demoControls=column(8,new FlowPane(10,8,field("Phòng đặt Server",serverRoom),play,button("Về đầu","quiet",()->{stopPlayback();motion.setValue(0);})),field("Di chuyển Client",motion));
+        motion.setTooltip(new Tooltip("Từ phòng ra hành lang, rồi đi dọc dãy phòng."));
+        load=button("Mở khảo sát","quiet",()->{var chooser=new FileChooser();chooser.setTitle("Khảo sát Wi-Fi đã thu");chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Khảo sát JSON","*.json"));var file=chooser.showOpenDialog(stage);if(file!=null)loadSurvey(file.toPath());});load.setId("floor-load");
+        activate=button("Bật theo dõi","primary",this::activate);activate.setId("floor-activate");
+        disable=button("Dừng theo dõi","quiet",()->request("FLOOR_DISABLE",object(),this::accept));disable.setId("floor-disable");
+        liveControls=column(8,new FlowPane(10,8,load,activate,disable));
+        var template=button("Tạo mốc khảo sát","quiet",()->{
             try{var area=plan.survey(areaName.getText().strip(),ssid.getText(),serverRoom.getSelectionModel().getSelectedIndex());app.openSurvey(area);}
             catch(Exception error){status.setText(ArcadeApplication.message(error));}
         });template.setId("floor-template");
         var apply=button("Áp dụng kích thước","quiet",()->{installPlan(new CorridorPlan(plan.roomsPerSide(),roomWidth.getValue(),roomDepth.getValue(),hallWidth.getValue()));render();});apply.setId("floor-apply-size");
         var dimensions=new FlowPane(12,8,field("Ngang phòng (m)",roomWidth),field("Sâu phòng (m)",roomDepth),field("Rộng hành lang (m)",hallWidth),apply);
-        var setup=new TitledPane("Sơ đồ quy ước và mốc khảo sát",column(10,text("6 phòng mỗi bên. Kích thước giả định để demo; tên A/B là nhãn quy ước. Tọa độ khảo sát và sơ đồ cần dùng cùng quy ước.","caption"),dimensions,new FlowPane(12,8,field("Tên khu",areaName),field("SSID khảo sát",ssid)),template));setup.setExpanded(false);setup.setId("floor-setup");
-        var body=column(12,origin,new FlowPane(12,8,demo,live,field("Client đang xem",clients),smooth),distance,map,
-            text("Chấm xanh: Client · Ô vuông: Server · Nét đứt: khoảng cách đường thẳng xuyên tường","caption"),detail,apDistances,demoControls,liveControls,setup,status);
+        var setup=new TitledPane("Sơ đồ & mốc khảo sát",column(10,text("6 phòng mỗi bên, kích thước giả định. Dùng cùng tỷ lệ cho sơ đồ và mốc khảo sát.","caption"),dimensions,new FlowPane(12,8,field("Tên khu",areaName),field("Tên Wi-Fi",ssid)),template));setup.setExpanded(false);setup.setId("floor-setup");
+        var body=column(12,origin,new FlowPane(12,8,demo,live,field("Client",clients),smooth),distance,positionStatus,map,
+            text("Client: chấm xanh   ·   Server: ô vuông   ·   Đường nối: khoảng cách thẳng","caption"),apDistances,demoControls,liveControls,status,signalPane,setup);
         body.setPadding(new Insets(20));var scroller=scroll(body);scroller.setId("floor-scroll");var scene=new Scene(scroller);scene.getStylesheets().add(CSS);stage.setScene(scene);stage.setOnHidden(e->close());
         map.prefHeightProperty().bind(stage.heightProperty().multiply(.42));
         map.onSelect(id->{clients.getItems().stream().filter(c->c.id().equals(id)).findFirst().ifPresent(clients::setValue);});
@@ -94,10 +102,12 @@ final class FloorMapViews implements AutoCloseable {
     private void render(){
         if(closed)return;boolean simulated=demo.isSelected();demoControls.setVisible(simulated);demoControls.setManaged(simulated);liveControls.setVisible(!simulated);liveControls.setManaged(!simulated);
         apDistances.setManaged(!simulated);apDistances.setVisible(!simulated);
+        signalPane.setManaged(!simulated);signalPane.setVisible(!simulated);
         updateApReadings();
         var values=new ArrayList<CorridorMapView.Client>();CorridorPlan visiblePlan=plan;var server=plan.roomCenter(Math.max(0,serverRoom.getSelectionModel().getSelectedIndex()));
         if(simulated){
-            origin.setText("MÔ PHỎNG · kích thước và chuyển động giả lập · chưa phải số đo thực tế");
+            positionStatus.setText("");
+            origin.setText("MÔ PHỎNG · Sơ đồ giả định");
             for(int i=0;i<2;i++)values.add(new CorridorMapView.Client("demo-"+(i+1),"Client 0"+(i+1),plan.demoPosition(serverRoom.getSelectionModel().getSelectedIndex(),progress[i]/100),"DEMO"));
             selecting=true;motion.setValue(progress[demoIndex()]);selecting=false;detail.setText("Server cố định tại phòng "+serverRoom.getValue()+". Khoảng cách tính theo tỷ lệ sơ đồ quy ước.");
         }else{
@@ -105,15 +115,18 @@ final class FloorMapViews implements AutoCloseable {
             if(snapshot.path("enabled").asBoolean()){
                 visiblePlan=decode(snapshot.path("plan"),CorridorPlan.class);var area=snapshot.path("area");server=new CorridorPlan.Position(area.path("serverX").asDouble(),area.path("serverY").asDouble());
                 for(var p:snapshot.path("players"))values.add(new CorridorMapView.Client(p.path("player_id").asText(),p.path("nickname").asText(),p.path("located").asBoolean()?new CorridorPlan.Position(p.path("x").asDouble(),p.path("y").asDouble()):null,p.path("status").asText()));
-                var chosen=clients.getValue();var node=chosen==null?null:findPlayer(chosen.id());detail.setText(node==null?"Chưa có Client trong phòng.":statusName(node.path("status").asText())+" · BSSID: "+node.path("bssid").asText("—")+" · tuổi mẫu: "+node.path("age_ms").asLong()/1000+" giây");
-            }else detail.setText("Chủ phòng mở khảo sát đã thu và nhấn Dùng khảo sát cho phòng thi. Học sinh xem vị trí của mình.");
+                var chosen=clients.getValue();var node=chosen==null?null:findPlayer(chosen.id());
+                positionStatus.setText(node==null?"Chưa có Client trong phòng.":node.path("located").asBoolean()?"":statusName(node.path("status").asText()));
+                detail.setText(node==null?"":statusName(node.path("status").asText())+" · BSSID: "+node.path("bssid").asText("—")+" · tuổi mẫu: "+node.path("age_ms").asLong()/1000+" giây");
+            }else {positionStatus.setText("Chủ phòng mở khảo sát và bật theo dõi.");detail.setText("");}
         }
         map.update(visiblePlan,server,values,clients.getValue()==null?"":clients.getValue().id(),smooth.isSelected());
         activate.setDisable(busy||survey==null||!app.canConfigureFloor());disable.setDisable(busy||!app.canConfigureFloor()||!snapshot.path("enabled").asBoolean());load.setDisable(busy);
     }
     private JsonNode findPlayer(String id){for(var p:snapshot.path("players"))if(p.path("player_id").asText().equals(id))return p;return null;}
     private void updateApReadings(){if(closed||demo.isSelected())return;var chosen=clients.getValue();var player=chosen==null?null:findPlayer(chosen.id());long age=snapshotAt==0?0:(System.nanoTime()-snapshotAt)/1_000_000;
-        apDistances.setText((player==null?"":ApDistanceViews.summary(chosen.name(),player.path("ap_distance"),age)+"\n")+ApDistanceViews.summary("Server",snapshot.path("server_ap_distance"),age));}
+        apDistances.setText((player==null?"":ApDistanceViews.compact(chosen.name(),player.path("ap_distance"),age)+"\n")+ApDistanceViews.compact("Server",snapshot.path("server_ap_distance"),age));
+        signalDetails.setText((player==null?"":ApDistanceViews.summary(chosen.name(),player.path("ap_distance"),age)+"\n")+ApDistanceViews.summary("Server",snapshot.path("server_ap_distance"),age)+"\nKhoảng cách tới AP được ước lượng từ RSSI, có thể sai lệch do tường và thiết bị.");}
     static String statusName(String value){return switch(value){case "ESTIMATED"->"Vị trí ước lượng theo khảo sát";case "WAITING"->"Đang chờ scan từ Client";case "STALE"->"Mẫu đã cũ";case "DISCONNECTED"->"Client mất kết nối";default->{try{yield FingerprintViews.statusName(FingerprintModel.Status.valueOf(value));}catch(Exception e){yield "Chưa có vị trí";}}};}
     void accept(JsonNode value){if(closed)return;snapshot=value.deepCopy();snapshotAt=System.nanoTime();if(live.isSelected()){refreshClients();render();}}
     void roomChanged(JsonNode config){
@@ -130,12 +143,12 @@ final class FloorMapViews implements AutoCloseable {
     void loadSurvey(java.nio.file.Path file){
         if(busy||closed)return;busy=true;render();status.setText("Đang kiểm tra khảo sát…");
         CompletableFuture.supplyAsync(()->{try{var data=FingerprintEvaluationFiles.readSurvey(file);new FingerprintModel(data.areas().getFirst(),data.runs(),FingerprintModel.Parameters.baseline(2));CorridorPlan.fromSurvey(data.areas().getFirst());return data;}catch(Exception e){throw new CompletionException(e);}})
-            .whenComplete((data,error)->Platform.runLater(()->{if(closed)return;busy=false;if(error!=null){survey=null;status.setText(ArcadeApplication.message(error));}else{survey=data;CorridorPlan.fromSurvey(data.areas().getFirst()).ifPresent(this::installPlan);status.setText("Đã mở "+data.areas().getFirst().name()+" · Server và các mốc giữ tọa độ trong khảo sát. Chỉ kích hoạt sau khi đã tạo phòng thi.");}render();}));
+            .whenComplete((data,error)->Platform.runLater(()->{if(closed)return;busy=false;if(error!=null){survey=null;status.setText(ArcadeApplication.message(error));}else{survey=data;CorridorPlan.fromSurvey(data.areas().getFirst()).ifPresent(this::installPlan);status.setText("Đã mở khảo sát: "+data.areas().getFirst().name());}render();}));
     }
     private void activate(){
         var gateway=app.floorGateway();if(gateway==null||survey==null||busy||!app.canConfigureFloor())return;var data=survey;var chosenPlan=plan;String roomCode=app.floorRoomCode();busy=true;render();status.setText("Đang đồng bộ khảo sát lên Server…");
         SurveySync.upload(gateway,data,null).thenCompose(count->{if(closed)return CompletableFuture.<JsonNode>failedFuture(new CancellationException());var area=data.areas().getFirst();var p=object().put("area_id",area.id()).put("revision",area.revision()).put("room_code",roomCode);p.set("plan",JSON.valueToTree(chosenPlan));return gateway.request("FLOOR_CONFIGURE",p);})
-            .whenComplete((value,error)->Platform.runLater(()->{if(closed)return;busy=false;if(error==null){accept(value);status.setText("Đã bật định vị cho phòng. Khoảng cách phụ thuộc tọa độ và mẫu khảo sát.");}else status.setText(ArcadeApplication.message(error));render();}));
+            .whenComplete((value,error)->Platform.runLater(()->{if(closed)return;busy=false;if(error==null){accept(value);status.setText("Đang theo dõi vị trí.");}else status.setText(ArcadeApplication.message(error));render();}));
     }
     private void request(String type,com.fasterxml.jackson.databind.node.ObjectNode payload,Consumer<JsonNode> success){
         var gateway=app.floorGateway();if(gateway==null){status.setText("Kết nối và tham gia phòng thi để xem dữ liệu thật.");return;}
